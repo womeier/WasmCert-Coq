@@ -304,6 +304,30 @@ Definition run_one_step (call : run_stepE ~> itree (run_stepE +' eff))
       end
     else ret (s, f, crash_error)
 
+  | AI_basic (BI_return_call j) =>
+    (*    if sfunc s f.(f_inst) j is Some sfunc_i_j then*)
+    if List.nth_error f.(f_inst).(inst_funcs) j is Some a then
+      ret (s, f, RS_normal (vs_to_es ves ++ [::AI_return_invoke a]))
+    else ret (s, f, crash_error)
+
+  | AI_basic (BI_return_call_indirect j) =>
+    if ves is VAL_int32 c :: ves' then
+(*      match stab s f.(f_inst) (Wasm_int.nat_of_uint i32m c) with
+      | Some cl =>*)
+      match stab_addr s f (Wasm_int.nat_of_uint i32m c) with
+      | Some a =>
+        match List.nth_error s.(s_funcs) a with
+        | Some cl =>
+          if stypes s f.(f_inst) j == Some (cl_type cl)
+          then ret (s, f, RS_normal (vs_to_es ves' ++ [::AI_invoke a]))
+          else ret (s, f, RS_normal (vs_to_es ves' ++ [::AI_trap]))
+     (* Not Trap because this is not supposed to happen after validation *)
+        | None => ret (s, f, crash_error)
+        end
+      | None => ret (s, f, RS_normal (vs_to_es ves' ++ [::AI_trap]))
+      end
+    else ret (s, f, crash_error)
+
   | AI_basic BI_return => ret (s, f, RS_return ves)
 
   | AI_basic (BI_get_local j) =>
@@ -430,6 +454,41 @@ Definition run_one_step (call : run_stepE ~> itree (run_stepE +' eff))
     | AI_basic (BI_const _) => ret (s, f, crash_error)
 
     | AI_invoke i =>
+      match List.nth_error s.(s_funcs) i with
+        | Some cl =>
+            match cl with
+            | FC_func_native i (Tf t1s t2s) ts es =>
+                let: n := length t1s in
+                let: m := length t2s in
+                if length ves >= n
+                then
+                let: (ves', ves'') := split_n ves n in
+                let: zs := n_zeros ts in
+                ret (s, f, RS_normal (vs_to_es ves''
+                                ++ [::AI_local m (Build_frame (rev ves' ++ zs) i) [::AI_basic (BI_block (Tf [::] t2s) es)]]))
+                else ret (s, f, crash_error)
+            | FC_func_host (Tf t1s t2s) h =>
+                let: n := length t1s in
+                let: m := length t2s in
+                if length ves >= n
+                then
+                let: (ves', ves'') := split_n ves n in
+                r <- trigger (host_apply s (Tf t1s t2s) h (rev ves')) ;;
+                match r with
+                | Some (s', r) =>
+                    if result_types_agree t2s r
+                    then
+                    let: rves := result_to_stack r in
+                    ret (s', f, RS_normal (vs_to_es ves'' ++ rves))
+                    else ret (s (* FIXME: Why not [s']? *), f, crash_error)
+                | None => ret (s, f, RS_normal (vs_to_es ves'' ++ [::AI_trap]))
+                end
+                else ret (s, f, crash_error)
+            end
+        | None => ret (s, f, crash_error)
+      end
+
+   | AI_return_invoke i =>
       match List.nth_error s.(s_funcs) i with
         | Some cl =>
             match cl with

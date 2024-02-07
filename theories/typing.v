@@ -142,6 +142,21 @@ Inductive be_typing : t_context -> seq basic_instruction -> function_type -> Pro
   List.nth_error (tc_types_t C) i = Some (Tf t1s t2s) ->
   tc_table C <> nil -> 
   be_typing C [::BI_call_indirect i] (Tf (app t1s [::T_i32]) t2s)
+
+(* https://webassembly.github.io/tail-call/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-return-call-x *)
+| bet_return_call : forall C i t1s t2s t3s t4s,
+  i < length (tc_func_t C) ->
+  List.nth_error (tc_func_t C) i = Some (Tf t1s t2s) ->
+  tc_return C = Some t2s ->
+  be_typing C [::BI_return_call i] (Tf (app t3s t1s) t4s)
+(* https://webassembly.github.io/tail-call/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-return-call-indirect-x-y *)
+| bet_return_call_indirect : forall C i t1s t2s t3s t4s,
+  i < length (tc_types_t C) ->
+  List.nth_error (tc_types_t C) i = Some (Tf t1s t2s) ->
+  tc_table C <> nil -> 
+  tc_return C = Some t2s ->
+  be_typing C [::BI_return_call_indirect i] (Tf (app t3s (app t1s [::T_i32])) t4s)
+
 | bet_get_local : forall C i t,
   i < length (tc_local C) ->
   List.nth_error (tc_local C) i = Some t ->

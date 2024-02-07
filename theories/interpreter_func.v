@@ -2097,6 +2097,9 @@ Qed.
 Next Obligation.
   by split => //.
 Qed.
+Next Obligation.
+  by split => //.
+Qed.
 
 Definition run_step_measure (es: list administrative_instruction): nat :=
   match split_vals_e es with
@@ -2150,6 +2153,8 @@ Theorem run_one_step'' hs s f ves e: (forall hs s f es, (run_step_measure es < S
       (* BI_return *) |
       (* BI_call j *) j |
       (* BI_call_indirect j *) j |
+      (* BI_return_call j *) j |
+      (* BI_return_call_indirect j *) j |
       (* BI_get_local j *) j |
       (* BI_set_local j *) j |
       (* BI_tee_local j *) j |
@@ -2167,6 +2172,7 @@ Theorem run_one_step'' hs s f ves e: (forall hs s f es, (run_step_measure es < S
       (* BI_cvtop t2 [CVO_convert|CVO_reinterpret] t1 sx *) t2 [|] t1 sx ] |
       (* AI_trap *) |
       (* AI_invoke a *) a |
+      (* AI_return_invoke a *) a |
       (* AI_label ln les es *) ln les es |
       (* AI_local ln lf es *) ln lf es ].
 
@@ -2317,6 +2323,9 @@ Theorem run_one_step'' hs s f ves e: (forall hs s f es, (run_step_measure es < S
       + (* None *)
         apply <<hs, s, f, vs_to_es ves' ++ [:: AI_trap]>>'.
         by eapply reduce_call_indirect_failure_2.
+
+    * (* AI_basic (BI_return_call j) *) admit.
+    * (* AI_basic (BI_return_call_indirect j) *) admit.
 
     * (* AI_basic (BI_get_local j) *)
       destruct (j < length f.(f_locs)) eqn:?.
@@ -2649,6 +2658,8 @@ Theorem run_one_step'' hs s f ves e: (forall hs s f es, (run_step_measure es < S
       + (* None *)
         apply RS''_error. by apply invoke_host_error_ath.
 
+    * (* AI_return_invoke a *) admit.
+
     * (* AI_label ln les es *)
       destruct (es_is_trap es) eqn:?.
       + (* true *)
@@ -2732,7 +2743,7 @@ Theorem run_one_step'' hs s f ves e: (forall hs s f es, (run_step_measure es < S
            ** (* RS'_normal hs s f es hs' s' f' es' *)
               apply <<hs', s', f, vs_to_es ves ++ [:: AI_local ln f' es']>>'.
               by apply reduce_local_rec.
-Defined.
+Admitted.
 
 Definition run_step_aux hs s f (es: list administrative_instruction) (run_step_aux_rec: forall hs s f es0, (run_step_measure es0 < run_step_measure es)%coq_nat -> res_step' hs s f es0) : res_step' hs s f es.
 Proof.
