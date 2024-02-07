@@ -306,6 +306,24 @@ in
         type_update ts (to_ct_list (tn ++ [::T_i32])) (CT_type tm)
       end
     else CT_bot
+  | BI_return_call i =>
+    if i < length (tc_func_t C)
+    then
+      match List.nth_error (tc_func_t C) i with
+      | None => CT_bot 
+      | Some (Tf tn tm) =>
+        type_update ts (to_ct_list tn) (CT_top_type [::])
+      end
+    else CT_bot
+  | BI_return_call_indirect i =>
+    if (1 <= length C.(tc_table)) && (i < length C.(tc_types_t))
+    then
+      match List.nth_error (tc_types_t C) i with
+      | None => CT_bot 
+      | Some (Tf tn _) =>
+        type_update ts (to_ct_list (tn ++ [::T_i32])) (CT_top_type [::])
+      end
+    else CT_bot
   | BI_get_local i =>
     if i < length (tc_local C)
     then

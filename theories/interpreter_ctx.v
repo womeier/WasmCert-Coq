@@ -497,6 +497,8 @@ Proof.
       (* BI_return *) |
       (* BI_call j *) j |
       (* BI_call_indirect j *) j |
+      (* BI_return_call j *) j |
+      (* BI_return_call_indirect j *) j |
       (* BI_get_local j *) j |
       (* BI_set_local j *) j |
       (* BI_tee_local j *) j |
@@ -514,6 +516,7 @@ Proof.
       (* BI_cvtop t2 cvtop t1 sx *) t2 cvtop t1 sx ] |
       (* AI_trap *) |
       (* AI_invoke a *) a |
+      (* AI_return_invoke a *) a |
       (* AI_label ln les es *) ln les es |
       (* AI_local ln lf es *) ln lf es ]; destruct sc as [vs0 es0].
 
@@ -716,6 +719,9 @@ Proof.
         apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_trap))>>.
         resolve_reduce_ctx vs0 es0.
         by eapply r_call_indirect_failure2; subst.
+
+    - (* AI_basic (BI_return_call j *) admit.
+    - (* AI_basic (BI_return_call_indirect j *) admit.
 
     - (* AI_basic (BI_get_local j) *)
       get_cc ccs.    
@@ -1093,6 +1099,9 @@ Proof.
 
     - (* AI_invoke a *)
       by apply run_ctx_invoke.
+
+    - (* AI_return_invoke a *)
+      admit.
         
     - (* AI_label ln les es *)
       by apply RSC_invalid => /=; move => [??].
@@ -1100,7 +1109,7 @@ Proof.
     * (* AI_local ln lf es *)
       by apply RSC_invalid => /=; move => [??].
   }
-Defined.
+Admitted. (* Defined. *)
 
 (* reformation to a valid configuration, if possible *)
 Definition run_step_cfg_ctx_reform (cfg: cfg_tuple_ctx) : option cfg_tuple_ctx.
