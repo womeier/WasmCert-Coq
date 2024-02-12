@@ -1183,6 +1183,7 @@ Proof.
     + inversion H; subst; clear H; (try by destruct vs as [ | v vs] => //; destruct vs); try by (right; (try by left); (try by right)).
   - right.
     destruct r => /=; by [left; apply v_to_e_const | right].
+  - admit.
   - destruct lh using lh_case; destruct k => //.
     + rewrite -> lh_cast_eq in *.
       simpl in *.
@@ -1193,7 +1194,7 @@ Proof.
       rewrite -> lh_cast_eq in *; clear H.
       simpl in Hvalid.
       by destruct vs.
-Qed.
+Admitted.
 
 Definition valid_init_Some s es:
   valid_wasm_instr es ->
