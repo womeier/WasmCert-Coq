@@ -364,7 +364,11 @@ Proof.
     inversion Heval; subst; clear Heval.
     simpl in Hrmsc.
     inversion Hrmsc; subst.
-Admitted.
+(*     exact Hsglob.
+    
+  - move => ? Hcontra.
+    by inversion Hcontra.
+Qed. *) Admitted.
     
 Lemma interp_get_v_reduce: forall hs s c inst k bes,
     const_exprs c bes ->
@@ -383,7 +387,9 @@ Proof.
     by apply r_get_global.
   - unfold interp_get_v in Heval.
     simpl in Heval.
-Admitted.
+   (*  injection Heval as ->.
+    by constructor.
+Qed. *) Admitted.
 
 Lemma interp_instantiate_imp_instantiate :
   forall s m v_imps s_end inst v_exps start,
