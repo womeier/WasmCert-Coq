@@ -428,6 +428,8 @@ Proof.
       apply reduce_composition_left; first by apply v_to_e_const.
       by apply r_call_indirect_failure2.
 
+  - (* Return call *) admit.
+  - (* Return call indirect *) admit.
   - (* Get_local *)
     right. invert_typeof_vcs.
     simpl in H. simpl in H0.
@@ -595,7 +597,7 @@ Proof.
     exists s', f', (v_to_e_list (take (size ts) vcs) ++ es'), hs'.
     apply reduce_composition_left => //.
     by apply v_to_e_const.
-Qed. 
+Admitted.
 
 Definition br_reduce (es: seq administrative_instruction) :=
   exists n (lh: lholed n), lfill lh [::AI_basic (BI_br n)] = es.

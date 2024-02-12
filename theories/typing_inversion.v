@@ -423,6 +423,41 @@ Proof.
     by resolve_weaken.
 Qed.
 
+Lemma Return_call_typing: forall C t1s t2s i,
+    be_typing C [::BI_return_call i] (Tf t1s t2s) ->
+    exists t1s' t2s' ts,  i < length (tc_func_t C) /\
+                tc_return C = Some t2s' /\
+                t1s = ts ++ t1s' /\
+                List.nth_error (tc_func_t C) i = Some (Tf t1s' t2s').
+Proof.
+  intros ???? HType.
+  gen_ind_subst HType => //=.
+  - by do 3 eexists; eauto.
+  - by resolve_compose Econs HType1 IHHType2.
+  - edestruct IHHType as [t1s' [t2s' [ts' [?[?[??]]]]]]; subst => //=.
+    exists t1s', t2s', (ts ++ ts').
+    by resolve_weaken.
+Qed.
+
+Lemma Return_call_indirect_typing: forall C t1s t2s i,
+    be_typing C [::BI_return_call_indirect i] (Tf t1s t2s) ->
+    exists t1s' t2s' ts,
+                tc_return C = Some t2s' /\
+                tc_table C <> [::] /\
+                i < length (tc_types_t C) /\
+                t1s = ts ++ t1s' ++ [::T_i32] /\
+                List.nth_error (tc_types_t C) i = Some (Tf t1s' t2s').
+Proof.
+  intros ???? HType.
+  gen_ind_subst HType => //=.
+  - by do 3 eexists; eauto.
+  - by resolve_compose Econs HType1 IHHType2.
+  - edestruct IHHType as [t1s' [t2s' [ts' [?[?[?[??]]]]]]]; subst => //=.
+    exists t1s', t2s', (ts ++ ts').
+    by resolve_weaken.
+Qed.
+
+
 (** A helper tactic for proving [composition_typing_single]. **)
 Ltac auto_prove_bet:=
   repeat lazymatch goal with
@@ -701,6 +736,25 @@ Ltac invert_be_typing:=
     let H4 := fresh "H4_callindirect" in
     let H5 := fresh "H5_callindirect" in
     apply Call_indirect_typing in H; destruct H as [ts [ts1' [ts2' [H1 [H2 [H3 [H4 H5]]]]]]]; subst
+  | H: be_typing _ [::BI_return_call _] _ |- _ =>
+    let ts := fresh "ts_return_call" in
+    let ts1' := fresh "ts1'_return_call" in
+    let ts2' := fresh "ts2'_return_call" in
+    let H1 := fresh "H1_return_call" in
+    let H2 := fresh "H2_return_call" in
+    let H3 := fresh "H3_return_call" in
+    let H4 := fresh "H4_return_call" in
+    apply Return_call_typing in H; destruct H as [t1s' [t2s' [ts [H1 [H2 [H3 H4]]]]]]; subst
+  | H: be_typing _ [::BI_return_call_indirect _] _ |- _ =>
+    let ts := fresh "ts_return_call_indirect" in
+    let ts1' := fresh "ts1'_return_call_indirect" in
+    let ts2' := fresh "ts2'_return_call_indirect" in
+    let H1 := fresh "H1_return_call_indirect" in
+    let H2 := fresh "H2_return_call_indirect" in
+    let H3 := fresh "H3_return_call_indirect" in
+    let H4 := fresh "H4_return_call_indirect" in
+    let H5 := fresh "H5_return_call_indirect" in
+    apply Return_call_indirect_typing in H; destruct H as [t1s' [t2s' [ts [H1 [H2 [H3 [H4 H5]]]]]]]; subst
   | H: be_typing _ (_ ++ _) _ |- _ =>
     let ts3 := fresh "ts3_comp" in
     let H1 := fresh "H1_comp" in

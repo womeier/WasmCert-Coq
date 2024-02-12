@@ -1787,7 +1787,10 @@ Proof.
     assert ((Tf ts_callindirect ts1'_callindirect) = cl_type cl) as HFType; first by eapply tc_func_reference2; eauto.
     rewrite HFType.
     by eapply store_typed_cl_typed; eauto.
-  - (* Return call *) admit.
+  - (* Return call *)
+    convert_et_to_bet.
+    invert_be_typing.
+    Check ety_weakening. admit.
   - (* Return call indirect *) admit.
   - (* Invoke native *)
     invert_e_typing'.
