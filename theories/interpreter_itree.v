@@ -319,7 +319,7 @@ Definition run_one_step (call : run_stepE ~> itree (run_stepE +' eff))
         match List.nth_error s.(s_funcs) a with
         | Some cl =>
           if stypes s f.(f_inst) j == Some (cl_type cl)
-          then ret (s, f, RS_normal (vs_to_es ves' ++ [::AI_invoke a]))
+          then ret (s, f, RS_normal (vs_to_es ves' ++ [::AI_return_invoke a]))
           else ret (s, f, RS_normal (vs_to_es ves' ++ [::AI_trap]))
      (* Not Trap because this is not supposed to happen after validation *)
         | None => ret (s, f, crash_error)
