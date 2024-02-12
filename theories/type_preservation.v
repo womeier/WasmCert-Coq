@@ -1787,6 +1787,8 @@ Proof.
     assert ((Tf ts_callindirect ts1'_callindirect) = cl_type cl) as HFType; first by eapply tc_func_reference2; eauto.
     rewrite HFType.
     by eapply store_typed_cl_typed; eauto.
+  - (* Return call *) admit.
+  - (* Return call indirect *) admit.
   - (* Invoke native *)
     invert_e_typing'.
     eapply Invoke_func_native_typing in H2_comp as [ts2 [C2 [H9 [H10 [H11 H12]]]]]; eauto; subst.
@@ -1828,6 +1830,7 @@ Proof.
     }
     apply et_weakening_empty_1.
     by apply result_e_type.
+  - (* Return invoke *) admit.
   - (* Get_local *)
     convert_et_to_bet.
     invert_be_typing.
@@ -1995,7 +1998,7 @@ Proof.
       eapply IHHReduce; eauto.
       eapply inst_typing_extension; eauto.
       eapply store_extension_reduce; eauto.
-Qed.
+Admitted.
   
 Theorem t_preservation: forall s f es s' f' es' ts hs hs',
     reduce hs s f es hs' s' f' es' ->
