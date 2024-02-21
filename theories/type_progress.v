@@ -427,9 +427,41 @@ Proof.
       exists (v_to_e_list (take (size t1s) vcs) ++ [::AI_trap]), hs.
       apply reduce_composition_left; first by apply v_to_e_const.
       by apply r_call_indirect_failure2.
+  - (* Return call *)
+    right. subst.
+    simpl in *. clear H1 H2 H3.
+    eapply func_context_store in H; eauto. destruct H as [a H].
+    exists s, f, (v_to_e_list vcs ++ [:: (AI_return_invoke a)]), hs.
+    apply reduce_composition_left; first by apply v_to_e_const.
+    apply r_return_call. by apply r_call.
+  - (* Return call indirect *)
+    right. subst.
+    simpl in *.
+    rewrite List.app_assoc in HConstType.
+    apply typeof_append in HConstType. destruct HConstType as [v [Ha [Hb Hc]]].
+    destruct v => //=.
+    rewrite Ha. rewrite -v_to_e_cat. rewrite -catA. subst.
+    exists s, f.
+    destruct (stab_addr s f (Wasm_int.nat_of_uint i32m s0)) as [a|] eqn:Hstabaddr.
+    + (* Some a *)
+      remember Hstabaddr as Hstabaddr2. clear HeqHstabaddr2.
+      eapply store_typing_stabaddr in Hstabaddr; eauto.
+      destruct Hstabaddr as [cl Hstabaddr].
+      destruct (stypes s f.(f_inst) i == Some (cl_type cl)) eqn:Hclt; move/eqP in Hclt.
+      * exists (v_to_e_list (take (size (t3s ++ t1s)) vcs) ++ [::AI_return_invoke a]), hs.
+        apply reduce_composition_left; first by apply v_to_e_const.
+        simpl. apply r_return_call_indirect_success.
+        by eapply r_call_indirect_success; eauto.
+      * exists (v_to_e_list (take (size (t3s ++ t1s)) vcs) ++ [::AI_trap]), hs.
+        apply reduce_composition_left; first by apply v_to_e_const.
+        apply r_return_call_indirect_failure.
+        by eapply r_call_indirect_failure1; eauto.
+    + (* None *)
+      exists (v_to_e_list (take (size (t3s ++ t1s)) vcs) ++ [::AI_trap]), hs.
+      apply reduce_composition_left; first by apply v_to_e_const.
+      apply r_return_call_indirect_failure.
+      by apply r_call_indirect_failure2.
 
-  - (* Return call *) admit.
-  - (* Return call indirect *) admit.
   - (* Get_local *)
     right. invert_typeof_vcs.
     simpl in H. simpl in H0.
@@ -597,7 +629,7 @@ Proof.
     exists s', f', (v_to_e_list (take (size ts) vcs) ++ es'), hs'.
     apply reduce_composition_left => //.
     by apply v_to_e_const.
-Admitted.
+Qed.
 
 Definition br_reduce (es: seq administrative_instruction) :=
   exists n (lh: lholed n), lfill lh [::AI_basic (BI_br n)] = es.
