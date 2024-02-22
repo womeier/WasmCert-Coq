@@ -817,6 +817,10 @@ Proof.
     exists t1s. repeat split => //=.
     + apply ety_a' => //. apply bet_weakening_empty_both. by apply bet_empty.
     + by eapply ety_invoke; eauto.
+  - (* Return invoke *)
+     exists (ts ++ t1s). split.
+     + apply ety_a' => //. apply bet_weakening_empty_both. by apply bet_empty.
+     + by eapply ety_return_invoke; eauto.
   - (* Label *)
     exists nil. repeat split => //=.
     + by apply ety_a' => //; apply bet_empty.

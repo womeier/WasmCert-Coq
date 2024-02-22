@@ -357,6 +357,11 @@ Inductive e_typing : store_record -> t_context -> seq administrative_instruction
   List.nth_error s.(s_funcs) a = Some cl ->
   cl_typing s cl tf ->
   e_typing s C [::AI_invoke a] tf
+| ety_return_invoke : forall s a C cl ts ts' t1s t2s,
+  List.nth_error s.(s_funcs) a = Some cl ->
+  cl_typing s cl (Tf t1s t2s) ->
+  tc_return C = Some t2s ->
+  e_typing s C [::AI_return_invoke a] (Tf (ts ++ t1s) ts')  (* ts, ts' any *)
 | ety_label : forall s C e0s es ts t2s n,
   e_typing s C e0s (Tf ts t2s) ->
   e_typing s (upd_label C ([::ts] ++ tc_label C)) es (Tf [::] t2s) ->
