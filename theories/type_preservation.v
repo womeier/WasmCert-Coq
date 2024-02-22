@@ -1003,6 +1003,9 @@ Proof.
   - move=> s a C cl tf HNth HCLType s' HST1 HST2 Hext.
     eapply ety_invoke; eauto => //; first by eapply store_extension_lookup_func; eauto.
     by eapply store_extension_cl_typing; eauto.
+  - move=> s a C cl ts ts' t1s t2s HNth HCLType HRetType s' HST1 HST2 Hext.
+    eapply ety_return_invoke; eauto => //; first by eapply store_extension_lookup_func; eauto.
+    by eapply store_extension_cl_typing; eauto.
   - move=> s C es es' t1s t2s n HType1 IHHType1 HType2 IHHType2 E s' HST1 HST2 Hext.
     eapply ety_label => //; eauto.
     + by apply IHHType1.
@@ -1753,6 +1756,49 @@ Proof.
     remove_bools_options; by eauto.
 Qed.
 
+
+Lemma call_reduce_invert : forall hs s f i a,
+reduce hs s f [:: AI_basic (BI_call i)] hs s f
+            [:: AI_invoke a] ->
+List.nth_error (inst_funcs (f_inst f)) i = Some a.
+Proof.
+  intros ????? Hred.
+  remember ([:: AI_basic (BI_call i)]) as call.
+  remember ([:: AI_invoke a]) as invoke. generalize dependent a. generalize dependent i.
+  induction Hred; intros; subst => //=.
+  - inversion H.
+  - congruence.
+  - destruct vcs. inversion Heqcall. cbn in Heqcall. inversion Heqcall.
+  - destruct lh; cbn in Heqinvoke, Heqcall. 2:{ destruct l; inversion Heqcall. }
+    destruct l; inversion Heqcall. simpl in *.
+    destruct l0. 2:{ destruct es; inversion H0. subst. destruct es'. inversion Heqinvoke.
+    simpl in *. inversion Heqinvoke. subst. now destruct es'. now destruct es. }
+    rewrite -> cats0 in *. subst. eauto.
+Qed.
+
+Lemma call_indirect_reduce_invert : forall hs s f c i a,
+reduce hs s f [::AI_basic (BI_const (VAL_int32 c)); AI_basic (BI_call_indirect i)] hs s f [::AI_invoke a] -> exists cl,
+List.nth_error s.(s_funcs) a = Some cl /\
+stypes s f.(f_inst) i = Some (cl_type cl).
+Proof.
+  intros ?????? Hred.
+  remember ([:: AI_basic (BI_const (VAL_int32 c)); AI_basic (BI_call_indirect i)]) as call.
+  remember ([:: AI_invoke a]) as invoke. generalize dependent a. generalize dependent i.
+  revert c.
+  induction Hred; intros; subst => //=.
+  - inversion H.
+  - inversion Heqcall. inversion Heqinvoke. subst. by eauto.
+  - destruct vcs. inversion Heqcall. cbn in Heqcall. destruct v; inversion Heqcall.
+    inversion Heqcall. destruct vcs. inversion Heqcall. subst.
+    inversion H2.
+  - destruct lh; cbn in Heqinvoke, Heqcall. 2:{ destruct l; inversion Heqinvoke. }
+    destruct l; inversion Heqinvoke. simpl in *.
+    destruct l0. 2:{ destruct es'; inversion Heqinvoke. subst. 
+                     destruct es; inversion Heqcall. subst. inversion Heqcall.
+                     destruct es; inversion H1. now destruct es. now destruct es'. }
+    rewrite -> cats0 in *. subst. eauto.
+Qed.
+
 Lemma t_preservation_e: forall s f es s' f' es' C t1s t2s lab ret hs hs',
     reduce hs s f es hs' s' f' es' ->
     store_typing s ->
@@ -1770,7 +1816,7 @@ Proof.
   - (* Call *)
     convert_et_to_bet.
     invert_be_typing.
-    apply ety_weakening.
+    apply ety_weakening. simpl in *.
     eapply inst_typing_func in HIT1; eauto. destruct HIT1 as [cl HNthFunc].
     eapply ety_invoke; eauto.
     assert ((Tf ts1'_call ts2'_call) = cl_type cl) as HFType; first by eapply tc_func_reference1; eauto.
@@ -1789,9 +1835,27 @@ Proof.
     by eapply store_typed_cl_typed; eauto.
   - (* Return call *)
     convert_et_to_bet.
-    invert_be_typing.
-    Check ety_weakening. admit.
-  - (* Return call indirect *) admit.
+    invert_be_typing. simpl in *.
+    assert (e_typing s
+              (upd_label (upd_local_return C ([seq typeof i | i <- f_locs f] ++ tc_local C) ret) lab)
+              [:: AI_invoke a] (Tf t1s' t2s')) as HTypeInvoke. {
+      eapply IHHReduce; eauto. apply ety_a'; auto_basic. by apply bet_call.
+    }
+    apply call_reduce_invert in HReduce.
+    apply Invoke_func_typing in HTypeInvoke. destruct HTypeInvoke as [cl HnthFunc].
+    eapply ety_return_invoke; eauto.
+    assert ((Tf t1s' t2s') = cl_type cl) as HFType. { eapply tc_func_reference1; eauto. }
+    rewrite HFType.
+    by eapply store_typed_cl_typed; eauto.
+  - (* Return call indirect *)
+    convert_et_to_bet.
+    rewrite -cat1s in HType.
+    invert_be_typing. simpl in *.
+    apply call_indirect_reduce_invert in HReduce. destruct HReduce as [cl [HnthFunc HFnType]].
+    eapply ety_return_invoke; eauto.
+    assert ((Tf t1s' t2s') = cl_type cl) as HFType; first by eapply tc_func_reference2; eauto.
+    rewrite HFType.
+    by eapply store_typed_cl_typed; eauto.
   - (* Invoke native *)
     invert_e_typing'.
     eapply Invoke_func_native_typing in H2_comp as [ts2 [C2 [H9 [H10 [H11 H12]]]]]; eauto; subst.
@@ -1833,7 +1897,8 @@ Proof.
     }
     apply et_weakening_empty_1.
     by apply result_e_type.
-  - (* Return invoke *) admit.
+  - (* Return invoke *)
+    admit.
   - (* Get_local *)
     convert_et_to_bet.
     invert_be_typing.
