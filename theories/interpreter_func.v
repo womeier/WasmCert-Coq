@@ -764,6 +764,7 @@ Proof.
   by apply r_call_indirect_failure2.
 Qed.
 
+
 Lemma call_indirect_error_0 : forall s f ves j,
   ves = [::] ->
   ~ fragment_typeable s f ves [:: AI_basic (BI_call_indirect j)].
@@ -796,6 +797,113 @@ Proof.
   simpl in Hbtype; invert_be_typing.
   eapply store_typing_stabaddr with (a := a) (c := Wasm_int.nat_of_uint i32m c) in Hitype as [? Hath'] => //.
   by rewrite Hath in Hath'.
+Qed.
+
+(* TODO dedup with above/below *)
+Lemma reduce_return_call : forall (hs : host_state) s f ves j a,
+  List.nth_error (inst_funcs f.(f_inst)) j = Some a ->
+  reduce
+    hs s f (vs_to_es ves ++ [:: AI_basic (BI_return_call j)])
+    hs s f (vs_to_es ves ++ [:: AI_return_invoke a]).
+Proof.
+  intros hs s f ves j a ?.
+  eapply r_label with (k := 0) (lh := (LH_base (rev ves) [::]));
+    try by solve_lfilled.
+  apply r_return_call.
+  apply r_call with (a := a) (i := j) => //.
+Qed.
+
+Lemma return_call_error : forall (hs : host_state) s f ves j,
+  List.nth_error (inst_funcs f.(f_inst)) j = None ->
+  ~ fragment_typeable s f ves [:: AI_basic (BI_return_call j)].
+Proof.
+  intros s f v ves j Hjth [C [C' [ret [lab [t1s [t2s [t1s' [? [Ht1s [Hitype [? Hetype]]]]]]]]]]].
+  apply et_to_bet in Hetype as Hbtype; last by auto_basic.
+  simpl in Hbtype; invert_be_typing. invert_be_typing.
+  eapply func_context_store in Hitype as [? Hjth']; eauto.
+  by rewrite Hjth' in Hjth.
+Qed.
+
+Lemma reduce_return_call_indirect_success : forall (hs : host_state) s f c ves ves' j a cl,
+  ves = VAL_int32 c :: ves' ->
+  stab_addr s f (Wasm_int.nat_of_uint i32m c) = Some a ->
+  List.nth_error s.(s_funcs) a = Some cl ->
+  stypes s f.(f_inst) j == Some (cl_type cl) ->
+  reduce
+    hs s f (vs_to_es ves ++ [:: AI_basic (BI_return_call_indirect j)])
+    hs s f (vs_to_es ves' ++ [:: AI_return_invoke a]).
+Proof.
+  intros hs s f c ves ves' j a cl ????. subst ves.
+  eapply r_label with (k := 0) (lh := (LH_base (rev ves') [::]));
+    try by solve_lfilled.
+  apply r_return_call_indirect_success.
+  apply r_call_indirect_success with (cl := cl) => //.
+  by apply/eqP.
+Qed.
+
+Lemma reduce_return_call_indirect_failure_1 : forall (hs : host_state) s f c ves ves' j a cl,
+  ves = VAL_int32 c :: ves' ->
+  stab_addr s f (Wasm_int.nat_of_uint i32m c) = Some a ->
+  List.nth_error s.(s_funcs) a = Some cl ->
+  (stypes s f.(f_inst) j == Some (cl_type cl)) = false ->
+  reduce
+    hs s f (vs_to_es ves ++ [:: AI_basic (BI_return_call_indirect j)])
+    hs s f (vs_to_es ves' ++ [:: AI_trap]).
+Proof.
+  intros hs s f c ves ves' j a cl ????. subst ves.
+  eapply r_label with (k := 0) (lh := (LH_base (rev ves') [::]));
+    try by solve_lfilled.
+  apply r_return_call_indirect_failure.
+  eapply r_call_indirect_failure1 with (cl := cl) (a := a) => //.
+  by apply/eqP; lias.
+Qed.
+
+Lemma reduce_return_call_indirect_failure_2 : forall (hs : host_state) s f c ves ves' j,
+  ves = VAL_int32 c :: ves' ->
+  stab_addr s f (Wasm_int.nat_of_uint i32m c) = None ->
+  reduce
+    hs s f (vs_to_es ves ++ [:: AI_basic (BI_return_call_indirect j)])
+    hs s f (vs_to_es ves' ++ [:: AI_trap]).
+Proof.
+  intros hs s f c ves ves' j ??. subst ves.
+  eapply r_label with (k := 0) (lh := (LH_base (rev ves') [::]));
+    try by solve_lfilled.
+  apply r_return_call_indirect_failure.
+  by apply r_call_indirect_failure2.
+Qed.
+
+Lemma return_call_indirect_error_0 : forall s f ves j,
+  ves = [::] ->
+  ~ fragment_typeable s f ves [:: AI_basic (BI_return_call_indirect j)].
+Proof.
+  intros s f ves j ? [C [C' [ret [lab [t1s [t2s [t1s' [? [Ht1s [? [? Hetype]]]]]]]]]]]. subst ves.
+  apply et_to_bet in Hetype as Hbtype; last by auto_basic.
+  simpl in Hbtype; invert_be_typing.
+  by size_unequal Ht1s.
+Qed.
+
+Lemma return_call_indirect_error_ath : forall s f c ves ves' j a,
+  ves = VAL_int32 c :: ves' ->
+  stab_addr s f (Wasm_int.nat_of_uint i32m c) = Some a ->
+  List.nth_error s.(s_funcs) a = None ->
+  ~ fragment_typeable s f ves [:: AI_basic (BI_return_call_indirect j)].
+Proof.
+  intros s f c ves ves' j a ?? Hath [C [C' [ret [lab [t1s [t2s [t1s' [? [Ht1s [Hitype [? Hetype]]]]]]]]]]]. subst ves.
+  apply et_to_bet in Hetype as Hbtype; last by auto_basic.
+  simpl in Hbtype; invert_be_typing.
+  eapply store_typing_stabaddr with (a := a) (c := Wasm_int.nat_of_uint i32m c) in Hitype as [? Hath'] => //.
+  by rewrite Hath in Hath'.
+Qed.
+
+Lemma return_call_indirect_error_typeof : forall s f v ves ves' j,
+  typeof v <> T_i32 ->
+  ves = v :: ves' ->
+  ~ fragment_typeable s f ves [:: AI_basic (BI_return_call_indirect j)].
+Proof.
+  intros s f v ves ves' j Hv ? [C [C' [ret [lab [t1s [t2s [t1s' [? [Ht1s [? [? Hetype]]]]]]]]]]]. subst ves.
+  apply et_to_bet in Hetype as Hbtype; last by auto_basic.
+  simpl in Hbtype; invert_be_typing.
+  by cats1_last_eq Ht1s.
 Qed.
 
 Lemma reduce_get_local : forall (hs : host_state) s f ves j vs_at_j,
@@ -2324,8 +2432,39 @@ Theorem run_one_step'' hs s f ves e: (forall hs s f es, (run_step_measure es < S
         apply <<hs, s, f, vs_to_es ves' ++ [:: AI_trap]>>'.
         by eapply reduce_call_indirect_failure_2.
 
-    * (* AI_basic (BI_return_call j) *) admit.
-    * (* AI_basic (BI_return_call_indirect j) *) admit.
+    * (* AI_basic (BI_return_call j) *)
+      destruct (List.nth_error f.(f_inst).(inst_funcs) j) as [a|] eqn:?.
+      + (* Some a *)
+        apply <<hs, s, f, vs_to_es ves ++ [:: AI_return_invoke a]>>'.
+        by apply reduce_return_call.
+      + (* None *)
+        apply RS''_error.
+        by apply return_call_error.
+
+    * (* AI_basic (BI_return_call_indirect j) *)
+      destruct ves as [|v ves'] eqn:?;
+        try by (apply RS''_error; apply return_call_indirect_error_0).
+      (* v :: ves' *)
+      destruct v as [c| | |] eqn:?;
+        try by (apply RS''_error; eapply return_call_indirect_error_typeof => //).
+      (* VAL_int32 c *)
+      destruct (stab_addr s f (Wasm_int.nat_of_uint i32m c)) as [a|] eqn:?.
+      + (* Some a *)
+        destruct (List.nth_error s.(s_funcs) a) as [cl|] eqn:?.
+        -- (* Some cl *)
+           destruct (stypes s f.(f_inst) j == Some (cl_type cl)) eqn:?.
+           ** (* true *)
+              apply <<hs, s, f, vs_to_es ves' ++ [:: AI_return_invoke a]>>'.
+              by eapply reduce_return_call_indirect_success with (cl := cl).
+           ** (* false *)
+              apply <<hs, s, f, vs_to_es ves' ++ [:: AI_trap]>>'.
+              by eapply reduce_return_call_indirect_failure_1 with (cl := cl) (a := a).
+        -- (* None *)
+           apply RS''_error.
+           by eapply return_call_indirect_error_ath with (a := a).
+      + (* None *)
+        apply <<hs, s, f, vs_to_es ves' ++ [:: AI_trap]>>'.
+        by eapply reduce_return_call_indirect_failure_2.
 
     * (* AI_basic (BI_get_local j) *)
       destruct (j < length f.(f_locs)) eqn:?.

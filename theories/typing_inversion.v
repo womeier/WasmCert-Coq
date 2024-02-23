@@ -744,7 +744,7 @@ Ltac invert_be_typing:=
     let H2 := fresh "H2_return_call" in
     let H3 := fresh "H3_return_call" in
     let H4 := fresh "H4_return_call" in
-    apply Return_call_typing in H; destruct H as [t1s' [t2s' [ts [H1 [H2 [H3 H4]]]]]]; subst
+    apply Return_call_typing in H; destruct H as [ts1' [ts2' [ts [H1 [H2 [H3 H4]]]]]]; subst
   | H: be_typing _ [::BI_return_call_indirect _] _ |- _ =>
     let ts := fresh "ts_return_call_indirect" in
     let ts1' := fresh "ts1'_return_call_indirect" in
@@ -754,7 +754,7 @@ Ltac invert_be_typing:=
     let H3 := fresh "H3_return_call_indirect" in
     let H4 := fresh "H4_return_call_indirect" in
     let H5 := fresh "H5_return_call_indirect" in
-    apply Return_call_indirect_typing in H; destruct H as [t1s' [t2s' [ts [H1 [H2 [H3 [H4 H5]]]]]]]; subst
+    apply Return_call_indirect_typing in H; destruct H as [ts1' [ts2' [ts [H1 [H2 [H3 [H4 H5]]]]]]]; subst
   | H: be_typing _ (_ ++ _) _ |- _ =>
     let ts3 := fresh "ts3_comp" in
     let H1 := fresh "H1_comp" in

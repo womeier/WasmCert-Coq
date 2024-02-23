@@ -1762,6 +1762,7 @@ reduce hs s f [:: AI_basic (BI_call i)] hs s f
             [:: AI_invoke a] ->
 List.nth_error (inst_funcs (f_inst f)) i = Some a.
 Proof.
+   (* TODO cleanup proof *)
   intros ????? Hred.
   remember ([:: AI_basic (BI_call i)]) as call.
   remember ([:: AI_invoke a]) as invoke. generalize dependent a. generalize dependent i.
@@ -1781,6 +1782,7 @@ reduce hs s f [::AI_basic (BI_const (VAL_int32 c)); AI_basic (BI_call_indirect i
 List.nth_error s.(s_funcs) a = Some cl /\
 stypes s f.(f_inst) i = Some (cl_type cl).
 Proof.
+  (* TODO: cleanup proof*)
   intros ?????? Hred.
   remember ([:: AI_basic (BI_const (VAL_int32 c)); AI_basic (BI_call_indirect i)]) as call.
   remember ([:: AI_invoke a]) as invoke. generalize dependent a. generalize dependent i.
@@ -1838,13 +1840,14 @@ Proof.
     invert_be_typing. simpl in *.
     assert (e_typing s
               (upd_label (upd_local_return C ([seq typeof i | i <- f_locs f] ++ tc_local C) ret) lab)
-              [:: AI_invoke a] (Tf t1s' t2s')) as HTypeInvoke. {
+              [:: AI_invoke a] (Tf ts1'_return_call ts2'_return_call)) as HTypeInvoke. {
       eapply IHHReduce; eauto. apply ety_a'; auto_basic. by apply bet_call.
     }
     apply call_reduce_invert in HReduce.
     apply Invoke_func_typing in HTypeInvoke. destruct HTypeInvoke as [cl HnthFunc].
     eapply ety_return_invoke; eauto.
-    assert ((Tf t1s' t2s') = cl_type cl) as HFType. { eapply tc_func_reference1; eauto. }
+    assert ((Tf ts1'_return_call ts2'_return_call) = cl_type cl) as HFType. {
+      eapply tc_func_reference1; eauto. }
     rewrite HFType.
     by eapply store_typed_cl_typed; eauto.
   - (* Return call indirect *)
@@ -1853,7 +1856,7 @@ Proof.
     invert_be_typing. simpl in *.
     apply call_indirect_reduce_invert in HReduce. destruct HReduce as [cl [HnthFunc HFnType]].
     eapply ety_return_invoke; eauto.
-    assert ((Tf t1s' t2s') = cl_type cl) as HFType; first by eapply tc_func_reference2; eauto.
+    assert ((Tf ts1'_return_call_indirect ts2'_return_call_indirect) = cl_type cl) as HFType; first by eapply tc_func_reference2; eauto.
     rewrite HFType.
     by eapply store_typed_cl_typed; eauto.
   - (* Invoke native *)
