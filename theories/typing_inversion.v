@@ -915,6 +915,34 @@ Proof.
     by exists ts2.
 Qed.
 
+
+Lemma Return_invoke_typing: forall s C t1s t2s a,
+    e_typing s C [::AI_return_invoke a] (Tf t1s t2s) ->
+    exists t1s' t2s' ts cl,
+                List.nth_error s.(s_funcs) a = Some cl /\
+                cl_typing s cl (Tf t1s' t2s') /\
+                tc_return C = Some t2s' /\
+                t1s = ts ++ t1s'.
+Proof.
+  intros ????? HType.
+  gen_ind_subst HType => //=.
+  - (* ety_a *)
+   assert (es_is_basic (operations.to_e_list bes)) as Hb; first by apply to_e_list_basic.
+   rewrite Econs in Hb. by basic_inversion.
+ - (* ety_composition *)
+   apply extract_list1 in Econs. destruct Econs. subst.
+   apply et_to_bet in HType1 => //.
+   simpl in HType1. apply empty_typing in HType1. subst.
+   by eapply IHHType2 => //.
+ - (* ety_weakening *)
+   edestruct IHHType as [t1s' [t2s' [ts' [cl [?[?[??]]]]]]]; eauto. subst. 
+   exists t1s', t2s', (ts ++ ts'), cl.
+   repeat split => //=.
+   by rewrite catA.
+ - (* ety_local *)
+   by exists t1s, t2s, ts, cl.
+Qed.
+
 End Typing_inversion_e.
 
 Ltac invert_e_typing :=
@@ -941,6 +969,17 @@ Ltac invert_e_typing :=
     let H3 := fresh "H3_local" in
     eapply Local_typing in H; eauto;
     destruct H as [ts [H1 [H2 H3]]]; subst
+  | H: @e_typing _ _ _ [::AI_return_invoke _] _ |- _ =>
+    let t1s := fresh "t1s_return_invoke" in
+    let t2s := fresh "t2s_return_invoke" in
+    let ts := fresh "ts_return_invoke" in
+    let cl := fresh "cl_return_invoke" in
+    let H1 := fresh "H1_return_invoke" in
+    let H2 := fresh "H2_return_invoke" in
+    let H3 := fresh "H3_return_invoke" in
+    let H4 := fresh "H4_return_invoke" in
+    eapply Return_invoke_typing in H; eauto;
+    destruct H as [t1s [t2s [ts [cl [H1 [H2 [H3 H4]]]]]]]; subst
   end.
 
 Section Typing_inversion_e.

@@ -248,6 +248,7 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
         length t2s = m ->
         const_list vs ->
         length vs = n ->
+        (* TODO f.(f_inst) = inst *)
         lfill lh (vs ++ [::AI_return_invoke a]) = es ->
         reduce hs s f [::AI_local m f' es] hs s f (vs ++ [::AI_invoke a])
   (** get, set, load, and store operations **)
