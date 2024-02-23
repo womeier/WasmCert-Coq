@@ -986,6 +986,19 @@ Proof.
   - by exists cl.
 Qed.
 
+Lemma Return_invoke_func_typing: forall s C a t1s t2s,
+    e_typing s C [::AI_return_invoke a] (Tf t1s t2s) ->
+    exists cl, List.nth_error s.(s_funcs) a = Some cl.
+Proof.
+  move => s C a t1s t2s HType.
+  gen_ind_subst HType => //.
+  - by destruct bes => //=.
+  - apply extract_list1 in Econs. destruct Econs. subst.
+    by eapply IHHType2 => //=.
+  - by eapply IHHType => //=.
+  - by exists cl.
+Qed.
+
 Lemma Invoke_func_native_typing: forall s i C a cl tn tm ts es t1s t2s,
     e_typing s C [::AI_invoke a] (Tf t1s t2s) ->
     List.nth_error s.(s_funcs) a = Some cl ->
