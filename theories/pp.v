@@ -434,6 +434,9 @@ Definition pp_res_tuple_except_store (res_cfg : store_record host_function * fra
   | RS_return vs_res =>
     "return " ++ pp_values_hint_empty vs_res ++ newline ++
     "with values " ++ pp_values_hint_empty f.(f_locs) ++ newline
+  | RS_return_invoke vs_res a =>
+      "return_invoke " ++ string_of_nat a ++ "  " ++ pp_values_hint_empty vs_res ++ newline ++
+    "with values " ++ pp_values_hint_empty f.(f_locs) ++ newline
   | RS_normal es =>
     "normal" ++ newline ++
     String.concat "" (List.map (pp_administrative_instruction 1) es) ++

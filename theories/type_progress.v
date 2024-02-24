@@ -759,13 +759,12 @@ Proof.
   - move => vs es a es' s C ts <- /=Hetype.
     rewrite -cat1s in Hetype.
     invert_e_typing'.
-    admit. (* needs inversion lemma for return_invoke *)
-    (* by rewrite H2_return. *)
+    by rewrite H3_return_invoke.
   - move => k vs n0 es lh IH es' a es'' s C ts <- /=Hetype.
     rewrite -cat1s in Hetype.
     invert_e_typing'.
     by assert (tc_return (upd_label C ([::ts_label] ++ tc_label C)) <> None); first by eapply IH; eauto.
-Admitted.
+Qed.
 
 Lemma br_reduce_extract_vs: forall n k (lh: lholed n) es s C ts ts2,
     lfill lh [::AI_basic (BI_br (n + k))] = es ->
