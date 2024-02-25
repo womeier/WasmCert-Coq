@@ -1375,12 +1375,11 @@ Lemma Lfilled_return_invoke_typing {k}: forall (lh: lholed k) vs a cl LI s C0 C 
     cl_type cl = Tf t1s t2s ->
     length vs = length t1s ->
     lfill lh (vs ++ [::AI_return_invoke a]) = LI ->
-    Some t2s = tc_return C ->
-    e_typing s C (vs ++ [::AI_invoke a]) (Tf [::] t2s).
+    e_typing s C (vs ++ [::AI_return_invoke a]) (Tf [::] t2s).
 Proof.
-  induction lh; move => vs a cl LI s C0 C t1s t2s t3s /=HType Heqret HConst HnthClos HclosType HLength HLF  HReturn; subst => //=.
+  induction lh; move => vs a cl LI s C0 C t1s t2s t3s /=HType Heqret HConst HnthClos HclosType HLength HLF  ; subst => //=.
   - invert_e_typing'.
-    destruct cl as [i ft t1s' t2s' | ft hf]; simpl in HclosType; subst ft.
+    destruct cl as [i ft ts body | ft hf]; simpl in HclosType; subst ft.
     + (* FC_func_native *)
       rewrite HnthClos in H1_return_invoke. injection H1_return_invoke as <-.
       have H' := cl_typing_unique H2_return_invoke. injection H' as ->->.
@@ -1392,7 +1391,7 @@ Proof.
       apply concat_cancel_last_n in H1_comp1; remove_bools_options; subst.
       eapply ety_composition. apply ety_a'; first by apply const_list_is_basic; apply v_to_e_const.
       by apply Const_list_typing_empty.
-      eapply ety_invoke; eauto.
+      eapply ety_return_invoke with (ts:=[::]); eauto. congruence.
 
       repeat rewrite length_is_size in HLength.
       rewrite size_map in HLength.
@@ -1408,7 +1407,7 @@ Proof.
       apply concat_cancel_last_n in H1_comp1; remove_bools_options; subst.
       eapply ety_composition. apply ety_a'; first by apply const_list_is_basic; apply v_to_e_const.
       by apply Const_list_typing_empty.
-      eapply ety_invoke; eauto.
+      eapply ety_return_invoke with (ts:=[::]); eauto. congruence.
 
       repeat rewrite length_is_size in HLength.
       rewrite size_map in HLength.
@@ -1416,7 +1415,9 @@ Proof.
   - rewrite - cat1s in HType.
     invert_e_typing'.
     simpl in *.
-    by eapply IHlh; eauto.
+    apply et_to_bet in H1_comp; last by apply const_list_is_basic, v_to_e_const.
+    invert_be_typing; simpl in *; subst.
+    eapply IHlh; eauto.
 Qed.
 
 Lemma Local_return_typing {k}: forall s C vs f LI tf (lh: lholed k),
@@ -1438,8 +1439,9 @@ Proof.
   by apply Const_list_typing_empty.
 Qed.
 
-Lemma Local_return_invoke_typing {k}: forall s C vs t1s t2s f LI tf (lh: lholed k) a cl,
-    e_typing s C [:: AI_local (length t2s) f LI] tf ->
+Lemma Local_return_invoke_typing {k}: forall s C C0 vs t1s t2s f LI tf (lh: lholed k) a cl,
+    e_typing s C0 [:: AI_local (length t2s) f LI] tf ->
+    tc_return C0 = tc_return C ->
     List.nth_error (s_funcs s) a = Some cl ->
     cl_type cl = Tf t1s t2s ->
     length vs = length t1s ->
@@ -1447,28 +1449,37 @@ Lemma Local_return_invoke_typing {k}: forall s C vs t1s t2s f LI tf (lh: lholed 
     lfill lh (vs ++ [::AI_return_invoke a]) = LI ->
     e_typing s C (vs ++ [::AI_invoke a]) tf.
 Proof.
-  move => s C vs t1s t2s f LI tf lh a cl HType HnthClos HclType Hleneq HConst Hlf.
+  move => s C C0 vs t1s t2s f LI tf lh a cl HType Hret HnthClos HclType Hleneq HConst Hlf.
   destruct tf as [t1s' t2s'].
-  invert_e_typing'.
+  invert_e_typing'. apply et_weakening_empty_1.
   inversion H2_local as [s' f' es' ovs rs C1 C2 Hftype -> Hetype [ _ | ]]; subst => //.
-  apply et_weakening_empty_1.
   apply const_es_exists in HConst as [? ->].
-  assert (ts_local = t2s) by admit. subst.
-  eapply Lfilled_return_invoke_typing in Hetype. 2:reflexivity. all: eauto; try by apply v_to_e_const.
-  (* invert_e_typing'. inversion H2_comp; subst.
-  - destruct bes as [| []]; inversion H.
-  - destruct es as [| []]; inversion H. 2: by destruct es. admit.
-  
-    subst. clear H.
-    eapply ety_composition. apply eassumption.
-  admit.
-  *) (* eapply ety_composition. apply ety_a'.
+  have H' := Hetype. eapply Lfilled_return_invoke_typing in H'. 2: instantiate (1:= (upd_return C (Some ts_local))). all: eauto; try by apply v_to_e_const.
+  invert_e_typing'. simpl in *.
+  assert (ts_local = t2s_return_invoke) by congruence. subst. clear H3_return_invoke.
+  assert (cl_return_invoke = cl) by congruence. subst.
+  assert (t1s_return_invoke = t1s /\ t2s_return_invoke = t2s) as Heq. {
+    inversion H2_return_invoke. subst. cbn in HclType. by inversion HclType.
+    subst. by inversion HclType. }
+  destruct Heq as [? ?]; subst.
 
-  apply const_list_is_basic, v_to_e_const. apply Const_list_typing_empty.
+  apply et_to_bet in H1_comp; last by apply const_list_is_basic, v_to_e_const.
+  invert_be_typing. simpl in *.
+  assert (ts_return_invoke = [::]). {
+  (* TODO cleanup proof*)
+    assert (size (ts_return_invoke ++ t1s) = size [seq typeof i | i <- x]) by by f_equal.
+    rewrite size_cat in H.
+    destruct ts_return_invoke => //.
+    rewrite v_to_e_length in Hleneq. repeat rewrite length_is_size in Hleneq.
+    rewrite size_map in H. rewrite Hleneq in H.
+    assert (size (v :: ts_return_invoke) > 0) by lias. lias.
+  }
+  subst. simpl in H1_comp. subst.
+
+  eapply ety_composition. apply ety_a'. apply const_list_is_basic; apply v_to_e_const.
+  rewrite to_b_v_to_e_is_bi_const.
+  apply bet_const'.
   eapply ety_invoke; eauto.
-  Check store_typed_cl_typed.
-  
-  inversion Hftype. subst. *) admit.
-Admitted.
+Qed.
 
 End Typing_inversion_e.
