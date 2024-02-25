@@ -1901,7 +1901,7 @@ Proof.
     apply et_weakening_empty_1.
     by apply result_e_type.
   - (* Return invoke *)
-    admit.
+    eapply Local_return_invoke_typing in HType; eauto.
   - (* Get_local *)
     convert_et_to_bet.
     invert_be_typing.
@@ -2069,8 +2069,8 @@ Proof.
       eapply IHHReduce; eauto.
       eapply inst_typing_extension; eauto.
       eapply store_extension_reduce; eauto.
-Admitted.
-  
+Qed.
+
 Theorem t_preservation: forall s f es s' f' es' ts hs hs',
     reduce hs s f es hs' s' f' es' ->
     config_typing s f es ts ->

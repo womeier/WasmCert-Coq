@@ -241,14 +241,14 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
 
   (* https://webassembly.github.io/tail-call/core/exec/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-return-call-indirect-x-y *)
   | r_return_invoke :
-      forall a cl inst t1s t2s ts body n m vs es i (lh: lholed i) f f' hs s,
+      forall a cl t1s t2s n m vs es i (lh: lholed i) f f' hs s,
         List.nth_error s.(s_funcs) a = Some cl ->
-        cl = FC_func_native inst (Tf t1s t2s) ts body ->
+        cl_type cl = Tf t1s t2s ->
         length t1s = n ->
         length t2s = m ->
         const_list vs ->
         length vs = n ->
-        (* TODO f.(f_inst) = inst *)
+        (* f.(f_inst) = f'.(f_inst) -> *)
         lfill lh (vs ++ [::AI_return_invoke a]) = es ->
         reduce hs s f [::AI_local m f' es] hs s f (vs ++ [::AI_invoke a])
   (** get, set, load, and store operations **)
