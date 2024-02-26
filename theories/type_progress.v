@@ -668,8 +668,8 @@ Definition br_reduce (es: seq administrative_instruction) :=
 Definition return_reduce (es: seq administrative_instruction) :=
   exists n (lh: lholed n), lfill lh [::AI_basic BI_return] = es.
 
-Definition return_invoke_reduce (es: seq administrative_instruction) :=
-  exists a n (lh: lholed n), lfill lh [::AI_return_invoke a] = es.
+Definition return_invoke_reduce (es: seq administrative_instruction) a :=
+  exists n (lh: lholed n), lfill lh [::AI_return_invoke a] = es.
 
 (** [br_reduce] is decidable. **)
 Lemma br_reduce_decidable : forall es, decidable (br_reduce es).
@@ -697,17 +697,17 @@ Proof.
 Qed.
 
 (** [return_invoke_reduce] is decidable. **)
-Lemma return_invoke_reduce_decidable : forall es, decidable (return_invoke_reduce es).
+Lemma return_invoke_reduce_decidable : forall es a, decidable (return_invoke_reduce es a).
 Proof.
-  (* move => es a.
+  move => es a.
   destruct (lfill_factorise (fun _ => AI_return_invoke a) es) as [[n [lh Heq]] | He].
   - subst es.
     left.
     by repeat eexists.
   - right.
-    move => [a' [n [lh Heq]]].
-    by apply (He n lh). *)
-Admitted.  (* may have to adjust lfill_factorise *)
+    intros [n [lh Heq]].
+    by apply (He n lh).
+Qed.
 
 Lemma br_reduce_label_length: forall n k (lh: lholed n) es s C ts2,
     lfill lh [::AI_basic (BI_br (n + k))] = es ->
@@ -855,8 +855,52 @@ Proof.
     by rewrite Hlf.
 Qed.
 
+Lemma return_invoke_reduce_extract_vs: forall n (lh: lholed n) a cl es s C t1s t2s t3s,
+    lfill lh [::AI_return_invoke a] = es ->
+    List.nth_error s.(s_funcs) a = Some cl ->
+    @cl_typing host_function s cl (Tf t1s t2s) ->
+    e_typing s C es (Tf [::] t3s) ->
+    tc_return C = Some t2s ->
+    exists vs (lh': lholed n), const_list vs /\
+      lfill lh' (vs ++ [::AI_return_invoke a]) = es /\
+      length vs = length t1s.
+Proof.
+  move => n.
+  elim.
+  - move => vs es a cl es' s C t1s t2s t3s <- HnthClos HclosType /=Hetype Hret.
+    invert_e_typing'.
+    apply et_to_bet in H1_comp; last by apply const_list_is_basic, v_to_e_const. simpl in *.
+    invert_be_typing; simpl in *; subst.
+    rewrite -cat1s in H2_comp. invert_e_typing.
+    assert (cl_return_invoke = cl) by congruence. subst. clear H1_return_invoke.
+    assert (t1s_return_invoke = t1s /\ t2s_return_invoke = t2s) as Heq. {
+      have H' := cl_typing_unique H2_return_invoke.
+      have H'' := cl_typing_unique HclosType. rewrite -H' in H''. by inversion H''.
+    } destruct Heq; subst.
+
+    replace vs with (take (size ts_return_invoke) vs ++ drop (size ts_return_invoke) vs); last by apply cat_take_drop.
+    exists (v_to_e_list (drop (size ts_return_invoke) vs)), (LH_base (take (size ts_return_invoke) vs) es).
+    repeat split => /=.
+    + by apply v_to_e_const.
+    + rewrite -v_to_e_cat -(cat1s _ es).
+      by repeat rewrite catA.
+    + repeat rewrite length_is_size.
+      rewrite v_to_e_size size_drop.
+      apply f_equal with (f := size) in H4_return_invoke.
+      rewrite size_map size_cat in H4_return_invoke.
+      rewrite H4_return_invoke. by lias.
+  - move => k vs n0 es lh IH es' a cl es'' s C t1s t2s t3s <- HnthClos HclosType /=Hetype Hret.
+    rewrite - cat1s in Hetype.
+    invert_e_typing'.
+    eapply IH in H3_label as [es2 [lh' [Hconst [Hlf HLength]]]]; eauto.
+    apply const_es_exists in Hconst as [vs' ->].
+    repeat eexists; eauto; first by apply v_to_e_const.
+    instantiate (1 := (LH_rec vs (length ts_label) es lh' es')) => /=.
+    by rewrite Hlf.
+Qed.
+
 (*
-  These two guarantees that the extra conditions we put in progress_e are true -- the second
+  These guarantees that the extra conditions we put in progress_e are true -- the second
     being true only if the function doesn't return anything (so we are not in the middle of some
     Local functions).
 *)
@@ -1077,18 +1121,19 @@ Proof.
       eapply rs_return; eauto.
       by [].
     }
-    destruct (return_invoke_reduce_decidable es) as [HEMT' | HEMF']. (* not sure what HEMT stands for *)
+(*
+    destruct (return_invoke_reduce_decidable es a) as [HEMT' | HEMF']. (* not sure what HEMT stands for *)
     { inversion HType; subst.
       unfold return_invoke_reduce in HEMT'.
-      destruct HEMT' as [a [n [lh HLF]]].
-      (* eapply return_invoke_reduce_extract_vs in HLF; eauto.
-      instantiate (1 := ts2) in HLF.
+      destruct HEMT' as [n [lh HLF]].
+      eapply return_invoke_reduce_extract_vs in HLF; eauto => //.
+      instantiate (1 := t1s) in HLF.
       destruct HLF as [cs [lh' [HConst [HLF2 HLength]]]].
+      Check func_context_store.
       repeat eexists.
-      apply r_simple.
-      eapply rs_return; eauto.
-      by []. *) admit.
-    }
+      eapply r_return_invoke; eauto.
+     (* by []. *) admit. admit. admit.
+    } *)
     edestruct IHHType as [ | [ | ]]; eauto.
     {
       move => n lh k HLF.
@@ -1100,7 +1145,7 @@ Proof.
     }
     { unfold return_invoke_reduce in HEMF'.
       move => n lh a HContra.
-      by apply HEMF'; eauto.
+      apply HEMF'; eauto.
     }
     + (* Const *)
       destruct H.
@@ -1118,7 +1163,7 @@ Proof.
       by apply r_local; apply HReduce.
   - (* Invoke *)
     move => s a C cl tf HNth HType.
-    move => f C' vcs ts1 ts2 lab ret hs HTF HContext HInst HConstType HST HBI_brDepth HNRet.
+    move => f C' vcs ts1 ts2 lab ret hs HTF HContext HInst HConstType HST HBI_brDepth HNRet HNRetInv.
     inversion HType; subst.
     inversion H5; subst; clear H5.
     + (* Native *)
@@ -1140,11 +1185,11 @@ Proof.
         repeat eexists.
         eapply r_invoke_host_diverge; eauto.
         repeat rewrite length_is_size. by apply size_map.
-  - (* Return invoke *) {
+  - (* Return invoke *)
     move => s a C cl ts ts' t1s t2s HNth HType Hret.
     move => f C' vcs ts1 ts2 lab ret hs HTF HContext HInst HConstType HST HBI_brDepth HNRet HNRetInv.
     unfold not_lf_return_invoke in HNRetInv.
-    specialize HNRetInv with 0 (LH_base [::] [::]) a => //=HNRetInv. }
+    specialize HNRetInv with 0 (LH_base [::] [::]) a => //=HNRetInv.
 
   - (* AI_label *)
     move => s C e0s es ts t2s n HType1 IHHType1 HType2 IHHType2 Hlen.

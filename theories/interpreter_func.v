@@ -2134,12 +2134,11 @@ Proof.
   by rewrite length_is_size v_to_e_size size_rev rev_take v_to_e_drop.
 Qed.
 
-Lemma reduce_local_return_invoke_rec : forall (hs : host_state) s f inst lf rvs a cl ts t1s t2s e ves m n es,
+Lemma reduce_local_return_invoke_rec : forall (hs : host_state) s f lf rvs a cl t1s t2s ves m n es,
   List.nth_error s.(s_funcs) a = Some cl ->
-  cl = FC_func_native inst (Tf t1s t2s) ts e ->
+  cl_type cl = Tf t1s t2s ->
   length t1s = n ->
   length t2s = m ->
-  
   n <= length rvs ->
   (exists i (lh: lholed i),
     lfill lh (vs_to_es rvs ++ [:: AI_return_invoke a]) = es /\
@@ -2148,7 +2147,7 @@ Lemma reduce_local_return_invoke_rec : forall (hs : host_state) s f inst lf rvs 
     hs s f (vs_to_es ves ++ [:: AI_local m lf es])
     hs s f ((vs_to_es (take n rvs ++ ves)) ++ [::AI_invoke a]).
 Proof.
-  intros hs s f inst lf rvs a cl ts t1s t2s e ves m n es Hclos -> Hlen1 Hlen2 Hlen [i [lh [HLF _]]].
+  intros hs s f lf rvs a cl t1s t2s ves m n es Hclos HclType Hlen1 Hlen2 Hlen [i [lh [HLF _]]].
 
   eapply r_label with (k := 0) (lh := LH_base (rev ves) [::]);
     try by solve_lfilled.

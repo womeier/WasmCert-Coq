@@ -439,12 +439,12 @@ Proof.
   rewrite - (revK l1). rewrite H3. split => //. by apply revK.
 Qed.
 
-Lemma concat_cancel_last_n: forall (l1 l2 l3 l4: seq value_type),
+Lemma concat_cancel_last_n: forall {X: eqType} (l1 l2 l3 l4: seq X),
     l1 ++ l2 = l3 ++ l4 ->
     size l2 = size l4 ->
     (l1 == l3) && (l2 == l4).
 Proof.
-  move => l1 l2 l3 l4 HCat HSize.
+  move => X l1 l2 l3 l4 HCat HSize.
   rewrite -eqseq_cat; first by apply/eqP.
   assert (size (l1 ++ l2) = size (l3 ++ l4)); first by rewrite HCat.
   repeat rewrite size_cat in H.
