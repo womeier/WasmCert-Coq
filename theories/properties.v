@@ -175,6 +175,15 @@ Proof.
   - destruct e as [b | | | | |]; first destruct b => //; simpl in Hsplit; by injection Hsplit as <- <-.
 Qed.
 
+Lemma split_vals_const: forall vs vs' es es',
+  split_vals_e es = (vs', es') ->
+  split_vals_e ((v_to_e_list vs) ++ es) = (vs ++ vs', es').
+Proof.
+  elim; first by (move => ??? /=?; subst).
+  move => a l IH vs es es' Hsplit=>//=.
+  by erewrite IH.
+Qed.
+
 Lemma value_split_0 : forall es ves,
   split_vals_e es = (ves, [::]) ->
   const_list es \/ es_is_trap es.
