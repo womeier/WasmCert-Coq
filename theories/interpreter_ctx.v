@@ -409,7 +409,7 @@ Proof.
 Defined.
 
 (** Return_invoke exits from the innermost frame and all label contexts,
-    continuation: vals + invoke **)
+    continuation: vals + invoke a **)
 Definition run_ctx_return_invoke: forall hs s ccs sc a,
   run_step_ctx_result hs (s, ccs, sc, Some (AI_return_invoke a)).
 Proof.  
@@ -417,34 +417,48 @@ Proof.
   get_cc ccs.
   destruct fc as [lvs lk lf les].
   destruct (List.nth_error s.(s_funcs) a) as [cl|] eqn:?.
-  - (* Some cl *) {
-    destruct (lk <= length vs) eqn:Hvslen.
-    - apply <<hs, (s, ccs', (take lk vs ++ lvs, [::AI_invoke a] ++ les), None)>> => /=.
-      rewrite - (cat_take_drop lk vs) take_size_cat; last by rewrite size_takel => //.
-      rewrite /vs_to_es rev_cat -v_to_e_cat rev_cat -v_to_e_cat -cat1s -catA.
-      resolve_reduce_ctx lvs les; last rewrite catA; eauto => //=.
-      eapply r_return_invoke; eauto.
-      admit. admit.
-      { by apply v_to_e_const. }
-      { rewrite v_to_e_length length_is_size size_rev size_takel; auto. admit. }
-      { apply lh_ctx_fill_aux with (acc := (LH_base (rev (drop lk vs)) es)) (lcs := lcs) => /=.
+  - (* Some cl *)
+    remember (cl_type cl) as tf. destruct tf as [t1s t2s].
+    remember (length t1s) as n eqn:?.
+    remember (length t2s) as m eqn:?.
+    destruct (length t1s <= length vs) eqn:?.
+    + (* length t1s <= length lvs *)
+      destruct (lk == length t2s) eqn:?.
+      * (* lk == length t2s *)
+        apply <<hs, (s, ccs', (take (length t1s) vs ++ lvs, [::AI_invoke a] ++ les), None)>> => /=.
+        rewrite - (cat_take_drop (length t1s) vs) take_size_cat; last by rewrite size_takel => //.
+        rewrite /vs_to_es rev_cat -v_to_e_cat rev_cat -v_to_e_cat -cat1s -catA.
+        resolve_reduce_ctx lvs les; last rewrite catA; eauto => //=. cbn.
+        eapply r_return_invoke; eauto. move/eqP in Heqb0 =>//.
+        by apply v_to_e_const.
+        by rewrite v_to_e_length length_is_size size_rev size_takel.
+        apply lh_ctx_fill_aux with (acc := (LH_base (rev (drop (length t1s) vs)) es)) (lcs := lcs) => /=.
         by repeat rewrite - catA => /=.
-      }
-    - (* Not enough values *)
-      resolve_invalid_typing; simpl in Htype. (* invert_be_typing. *)
-      (* simpl in *; subst.
-      apply (f_equal size) in H1_return_invoke.
-      rewrite size_map size_cat size_rev in H1_return.
-      repeat rewrite length_is_size in Hvslen.
-      injection H2_return as ->.
-      by lias. *)
-      admit. }
+      * (* lk != length t2s *)
+        resolve_invalid_typing.
+        invert_e_typing. simpl in *.
+        assert (cl_return_invoke = cl) by congruence.
+        have H' := cl_typing_unique H2_return_invoke.
+        assert (t1s_return_invoke = t1s) by congruence.
+        assert (t2s_return_invoke = t2s) by congruence. subst.
+        injection H3_return_invoke as ->. clear H'.
+        by move/eqP in Heqb0.
+    + (* Not enough values *)
+      resolve_invalid_typing; simpl in Htype.
+      invert_e_typing.
+      have H' := cl_typing_unique H2_return_invoke.
+      assert (t1s_return_invoke = t1s) by congruence.
+      assert (t2s_return_invoke = t2s) by congruence. subst.
+      injection H3_return_invoke as ->. clear H'.
+      apply (f_equal size) in H4_return_invoke.
+      rewrite size_map size_cat size_rev in H4_return_invoke.
+      repeat rewrite length_is_size in Heqb.
+      move/eqP in Heqb. by lias.
   - (* None *)
     resolve_invalid_typing.
     eapply Return_invoke_func_typing in Htype as [cl Hnth]; eauto.
     by rewrite Hnth in Heqo.
-Admitted.
-(* Defined. *)
+Defined.
 
 
 (* One step of execution; does not perform the context update in the end to shift to the new instruction. *)
@@ -1188,15 +1202,15 @@ Proof.
       by apply run_ctx_invoke.
 
     - (* AI_return_invoke a *)
-      admit.
-        
+      by apply run_ctx_return_invoke.
+
     - (* AI_label ln les es *)
       by apply RSC_invalid => /=; move => [??].
 
     * (* AI_local ln lf es *)
       by apply RSC_invalid => /=; move => [??].
   }
-Admitted. (* Defined. *)
+Defined.
 
 (* reformation to a valid configuration, if possible *)
 Definition run_step_cfg_ctx_reform (cfg: cfg_tuple_ctx) : option cfg_tuple_ctx.
