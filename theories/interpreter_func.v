@@ -2292,7 +2292,7 @@ Lemma lfilled_return_invoke_empty_vs_base : forall i (lh: lholed i) s C ln lf es
   empty_vs_base lh ->
   lfill lh (vs_to_es rvs ++ [:: AI_return_invoke a]) = es ->
   List.nth_error s.(s_funcs) a = Some cl ->
-  cl_typing s cl (Tf t1s' t2s') ->
+  cl_type cl = Tf t1s' t2s' ->
   length rvs >= length t1s'.
 Proof.
   move => i lh s C ln lf es t1s t2s t1s' t2s' rvs a cl Hetype Hbase Hlf HnthClos HclosType.
@@ -2305,8 +2305,7 @@ Proof.
   assert (cl_return_invoke = cl) by congruence. subst.
   assert (t1s_return_invoke = t1s' /\ ts' = t2s') as Heq. {
     have H' := cl_typing_unique H2_return_invoke.
-    have H'' := cl_typing_unique HclosType.
-    rewrite -H' in H''. by injection H''.
+    rewrite -H' in HclosType. by injection HclosType.
   }
   destruct Heq; subst.
   apply et_to_bet in H1_comp;
@@ -2319,12 +2318,12 @@ Proof.
 Qed.
 
 (* return_invoke has not returned enough values *)
-Lemma local_return_invoke_error : forall s f ln lf a cl es t1s t2s rvs ves,
+Lemma local_return_invoke_error_args : forall s f ln lf a cl es t1s t2s rvs ves,
   (exists i (lh: lholed i),
     lfill lh (vs_to_es rvs ++ [:: AI_return_invoke a]) = es /\
     empty_vs_base lh) ->
   List.nth_error s.(s_funcs) a = Some cl ->
-  cl_typing s cl (Tf t1s t2s) -> 
+  cl_type cl = Tf t1s t2s ->
   (length t1s <= length rvs) = false ->
   ~ fragment_typeable s f ves [:: AI_local ln lf es].
 Proof.
@@ -2332,6 +2331,53 @@ Proof.
     [C [C' [ret [lab [t1s' [t2s' [ts [? [? [Hitype [? Hetype]]]]]]]]]]].
   eapply lfilled_return_invoke_empty_vs_base
     with (i := i) (lh := lh) (rvs := rvs) in Hetype; eauto.
+Qed.
+
+(* frame's arity doesn't match functions return type *)
+Lemma local_return_invoke_error_arity : forall s f ln lf a cl es t1s t2s rvs ves,
+  (exists i (lh: lholed i),
+    lfill lh (vs_to_es rvs ++ [:: AI_return_invoke a]) = es /\
+    empty_vs_base lh) ->
+  List.nth_error s.(s_funcs) a = Some cl ->
+  cl_type cl = Tf t1s t2s ->
+  (length t2s == ln) = false ->
+  ~ fragment_typeable s f ves [:: AI_local ln lf es].
+Proof.
+  intros s f ln lf a cl es t1s t2s rvs ves [i [lh [Hlf Hbase]]] HnthClos HclosType Hlen
+    [C [C' [ret [lab [t1s' [t2s' [ts [? [? [Hitype [? Hetype]]]]]]]]]]].
+  apply Local_typing in Hetype as [ts' [-> [Hstype Hlen']]].
+  inversion Hstype as [s0 lf0 es' ret'0 ts'0 C'' C''' Hftype HeqC'' Hetype _].
+  subst s0 ret'0 lf0 ts'0 es' C''.
+  eapply lfilled_hole_typed_return_invoke in Hetype as [ts0 [C0 [Heqret Hetype]]]; eauto.
+  invert_e_typing'. simpl in *. subst.
+  assert (ts' = t2s_return_invoke) by congruence. subst.
+  assert (cl_return_invoke = cl) by congruence. subst.
+  have H' := cl_typing_unique H2_return_invoke.
+  assert (t2s_return_invoke = t2s) by congruence. subst.
+  by rewrite eq_refl in Hlen.
+Qed.
+
+(* fn closure doesn't exist *)
+Lemma local_return_invoke_error_args_ath : forall s f ln lf a es rvs ves,
+  (exists i (lh: lholed i),
+    lfill lh (vs_to_es rvs ++ [:: AI_return_invoke a]) = es /\
+    empty_vs_base lh) ->
+  List.nth_error (s_funcs s) a = None ->
+  ~ fragment_typeable s f ves [:: AI_local ln lf es].
+Proof.
+  intros    s f ln lf a es rvs ves [i [lh [Hlf Hbase]]] HnthClos.
+  revert lh s f ln lf a es rvs ves Hlf Hbase HnthClos. elim.
+  - (* LH_base *)
+    intros l l0 s f ln lf a es rvs ves Hlf Hbase HnthClos
+     [C [C' [ret [lab [t1s' [t2s' [ts [? [? [Hitype [? Hetype]]]]]]]]]]].
+    subst es. simpl in *. invert_e_typing'. inversion H2_local. subst.
+    invert_e_typing. congruence.
+  - (* LH_rec *)
+    intros k' l n l0 lh IH  l2 s f ln lf a es rvs ves Hlf Hbase HnthClos
+      [C [C' [ret [lab [t1s' [t2s' [ts [? [? [Hitype [? Hetype]]]]]]]]]]].
+    subst. invert_e_typing'. inversion H2_local. subst.
+    eapply lfilled_hole_typed_return_invoke in H3 as [ts0 [C0' [Heqret Hetype]]]; eauto=>//.
+    invert_e_typing'. congruence.
 Qed.
 
 
@@ -3040,49 +3086,30 @@ Theorem run_one_step'' hs s f ves e: (forall hs s f es, (run_step_measure es < S
                  by apply reduce_local_return_rec.
               ++ (* false *)
                  apply RS''_error.
-                 apply local_return_error with (rvs := rvs) => //.
-           ** (* RS'_return_invoke hs s f es rvs H *) {
+                 by apply local_return_error with (rvs := rvs).
+           ** (* RS'_return_invoke hs s f es rvs H *)
               destruct (List.nth_error s.(s_funcs) a) as [cl|] eqn:?.
               + (* Some cl *)
-                destruct cl as [i [t1s t2s] ts es' | [t1s t2s] cl'].
-                -- (* FC_func_native i (Tf t1s t2s) ts es *)
-                   destruct (length t2s == ln) eqn:?.
-                   ++ (* true *) (*
-                      destruct (length t1s <= length rvs) eqn:?.
-                      *** (* true *)
-                          apply <<hs, s, f, (vs_to_es (take (length t1s) rvs ++ ves) ++ [::AI_invoke a])>>'.
-                          eapply reduce_local_return_invoke_rec; eauto 2. by apply/eqP.
-                      *** (* false *)
-                          apply RS''_error.
-                          eapply local_return_invoke_error with (t1s:=t1s) (t2s:=t2s); eauto.
-                          eapply cl_typing_native; eauto. 2:{ cbn. admit. } (*
-                   ++ 
-                -- FC_func_host (Tf t1s t2s) cl' *)
-                
-                
-              
-                admit.
-                
-                 reflexivity.
-                admit. admit.
-                
-               (*     
-              + (* None *)
-                apply RS''_error. by apply invoke_host_error_ath.
-  -- *)
-
-              ++ (* true *)
-                 apply <<hs, s, f, (vs_to_es (take ln rvs ++ ves) ++ [::AI_invoke a])>>'.
-                 eapply reduce_local_return_invoke_rec. admit. admit. admit. admit. admit.
-              ++ (* false *)
-                 apply RS''_error.
-                 apply local_return_error with (rvs := rvs) => //. *)
-               admit.  admit. admit.  admit. }
-
+                remember (cl_type cl) as tf. destruct tf as [t1s t2s].
+                destruct (length t2s == ln) eqn:?.
+                ++ (* length t2s == ln *)
+                   destruct (length t1s <= length rvs) eqn:?.
+                   --- (* true *)
+                       apply <<hs, s, f, (vs_to_es (take (length t1s) rvs ++ ves) ++ [::AI_invoke a])>>'.
+                       by eapply reduce_local_return_invoke_rec; eauto; apply/eqP.
+                   --- (* false *)
+                       apply RS''_error.
+                       by eapply local_return_invoke_error_args with (t1s:=t1s) (t2s:=t2s) (a:=a) (cl:=cl) (rvs:=rvs).
+                ++ (* length t2s != ln *)
+                   apply RS''_error.
+                   by eapply local_return_invoke_error_arity with (t1s:=t1s) (t2s:=t2s) (a:=a) (cl:=cl) (rvs:=rvs).
+             + (* None *)
+               apply RS''_error.
+               by apply local_return_invoke_error_args_ath with (a:=a) (rvs:=rvs).
            ** (* RS'_normal hs s f es hs' s' f' es' *)
               apply <<hs', s', f, vs_to_es ves ++ [:: AI_local ln f' es']>>'.
               by apply reduce_local_rec.
-Admitted.
+Qed.
 
 Definition run_step_aux hs s f (es: list administrative_instruction) (run_step_aux_rec: forall hs s f es0, (run_step_measure es0 < run_step_measure es)%coq_nat -> res_step' hs s f es0) : res_step' hs s f es.
 Proof.
