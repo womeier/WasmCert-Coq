@@ -1261,42 +1261,15 @@ Section Interp_ctx_progress.
     the runtime configuration tuple (S; F; es) always has a frame F, which can be used to form the frame context
     [AI_local n F es] (with the right choice of n).
 
-    At the start of a module invocation, the Wasm spec uses an empty frame, the same is allowed during a tail-invokation.
-    Here, the invoke part comes to the rescue. (leading values required to represent the function args of a tail-invokation)
+    The only exception is at the start of a module invocation (in fact not an exception, since the Wasm spec uses
+    an empty frame at the start), where the Invoke part comes to the rescue; but in principle it is not even needed.
  **)
 Definition valid_wasm_instr (es: list administrative_instruction) : bool :=
-  match split_vals_e es with
-  | (_, [::AI_invoke _]) => true
-  | (_, [::AI_local _ _ _]) => true
+  match es with
+  | [::AI_invoke _]
+  | [::AI_local _ _ _] => true
   | _ => false
   end.
-
-Lemma valid_wasm_instr_last_invoke_or_local es :
-  valid_wasm_instr es ->
-      (exists vs a, es = (v_to_e_list vs) ++ [::AI_invoke a])
-   \/ (exists vs n F es'', es = (v_to_e_list vs) ++ [::AI_local n F es'']).
-Proof.
-  intro Hvalid.
-  unfold valid_wasm_instr in Hvalid.
-  destruct (split_vals_e es) eqn:?.
-  destruct l0=>//. destruct a=>//; destruct l0=>//; clear Hvalid.
-  - apply split_vals_inv in Heqp. subst. by eauto.
-  - apply split_vals_inv in Heqp. subst. by eauto 6.
-Qed.
-
-Lemma valid_wasm_instr_cancel : forall vs es,
-  valid_wasm_instr (v_to_e_list vs ++ es) ->
-  valid_wasm_instr es.
-Proof.
-  move=> vs es. move: es vs.
-  elim=>[vs Hvalid|e es IH vs Hvalid].
-  - rewrite cats0 in Hvalid.
-    have Hcontra := v_to_e_const vs.
-    destruct (valid_wasm_instr_last_invoke_or_local Hvalid) as [[vs' [a' Heq]] | [vs' [n [F [es' Heq]]]]];
-      by rewrite Heq const_list_cat Bool.andb_false_r in Hcontra.
-  - simpl in Hvalid.
-    destruct (valid_wasm_instr_last_invoke_or_local Hvalid) as [[vs' [a' Heq]] | [vs' [n [F [es' Heq]]]]].
-Admitted.
 
 Lemma valid_instr_preserve (hs: host_state) s f es hs' s' f' es':
   reduce hs s f es hs' s' f' es' ->
@@ -1305,55 +1278,23 @@ Lemma valid_instr_preserve (hs: host_state) s f es hs' s' f' es':
 Proof.
   move => Hred.
   induction Hred => //; subst; move => Hvalid; (try by left); (try by (right; (try by left); (try by right))).
-  - destruct e as [ | e es] => //; destruct e, es => //=.
-    + (* reduce simple *)
-      inversion H; subst; clear H; try by destruct vs as [ | v vs] => //=.
-      by right; right. by right; right.
-      { destruct vs. inversion H0. now subst. inversion H0. by destruct vs. }
-      { destruct vs. inversion H0. now subst. inversion H0. by destruct vs. }
-      { by right; right. }
+  - destruct e as [ | e es] => //; destruct e, es => //.
+    + inversion H; subst; clear H; try by destruct vs as [ | v vs] => //; destruct vs.
+      by right; right.
     + inversion H; subst; clear H; (try by destruct vs as [ | v vs] => //; destruct vs); try by (right; (try by left); (try by right)).
-      { apply valid_wasm_instr_last_invoke_or_local in Hvalid.
-        destruct Hvalid as [[es' [a' Heq]] | [es' [n [F [es'' Heq]]]]].
-        * rewrite Heq in H0. now apply concat_cancel_last in H0.
-        * rewrite Heq in H0. now apply concat_cancel_last in H0. }
-      { apply valid_wasm_instr_last_invoke_or_local in Hvalid.
-        destruct Hvalid as [[es' [a' Heq]] | [es' [n [F [es'' Heq]]]]].
-        all: rewrite Heq in H0; now apply concat_cancel_last in H0. }
-      { apply valid_wasm_instr_last_invoke_or_local in Hvalid.
-        destruct Hvalid as [[es' [a' Heq]] | [es' [n [F [es'' Heq]]]]].
-        * rewrite -cat1s in Heq. apply concat_cancel_last_n in Heq=>//.
-          by rewrite Bool.andb_false_r in Heq.
-        * rewrite -cat1s in Heq. apply concat_cancel_last_n in Heq=>//. by rewrite Bool.andb_false_r in Heq. }
-      { inversion H; subst; cbn. apply concat_cancel_last with (l2:=[::]) in H0.
-        now destruct H0. apply concat_cancel_last with (l2:=[::]) in H0.
-        now destruct H0. right. by right. }
-      { inversion H; subst; extract_listn =>//; try (by right; left); try (by right; right). }
   - right.
     destruct r => /=; by [left; apply v_to_e_const | right].
-  - left. unfold valid_wasm_instr.
-    destruct (const_es_exists H3) as [vs' ?]. subst vs.
-    by erewrite split_vals_const => //=.
+  - admit. (* vs ++ [AI_return_invoke a] *)
   - destruct lh using lh_case; destruct k => //.
-    + rewrite -> lh_cast_eq in *. clear H. simpl in *. {
-      destruct es0.
-      * rewrite -> cats0 in *. eauto.
-        apply valid_wasm_instr_cancel in Hvalid. apply IHHred in Hvalid.
-        unfold terminal_form.
-      apply valid_wasm_instr_last_invoke_or_local in Hvalid.
-      destruct Hvalid as [[vs' [a' Heq]] | [vs' [n [F [es''' Heq]]]]].
-      
-        * apply concat_cancel_last_n in Heq=>//.
-          by rewrite Bool.andb_false_r in Heq.
-        * rewrite -cat1s in Heq. apply concat_cancel_last_n in Heq=>//. by rewrite Bool.andb_false_r in Heq. }
+    + rewrite -> lh_cast_eq in *.
+      simpl in *.
       destruct vs => //.
       destruct es as [ | e es]; first by apply reduce_not_nil in Hred.
-      destruct e, es, es0 => //; by apply IHHred in Hvalid; rewrite cats0. *) }
+      destruct e, es, es0 => //; by apply IHHred in Hvalid; rewrite cats0.
     + inversion H; subst.
       rewrite -> lh_cast_eq in *; clear H.
       simpl in Hvalid.
-      unfold valid_wasm_instr in Hvalid.
-      by erewrite split_vals_const in Hvalid=>//.
+      by destruct vs.
 Admitted.
 
 Definition valid_init_Some s es:
