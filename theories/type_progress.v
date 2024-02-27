@@ -668,8 +668,8 @@ Definition br_reduce (es: seq administrative_instruction) :=
 Definition return_reduce (es: seq administrative_instruction) :=
   exists n (lh: lholed n), lfill lh [::AI_basic BI_return] = es.
 
-Definition return_invoke_reduce (es: seq administrative_instruction) a :=
-  exists n (lh: lholed n), lfill lh [::AI_return_invoke a] = es.
+Definition return_invoke_reduce (es: seq administrative_instruction) :=
+  exists n (lh: lholed n) a, lfill lh [::AI_return_invoke a] = es.
 
 (** [br_reduce] is decidable. **)
 Lemma br_reduce_decidable : forall es, decidable (br_reduce es).
@@ -698,16 +698,17 @@ Proof.
 Qed.
 
 (** [return_invoke_reduce] is decidable. **)
-Lemma return_invoke_reduce_decidable : forall es, decidable (exists a, return_invoke_reduce es a).
+Lemma return_invoke_reduce_decidable : forall es, decidable (return_invoke_reduce es).
 Proof.
   move => es. unfold decidable.
-  (* destruct (lfill_factorise (fun _ => AI_return_invoke a) es) as [[n [lh Heq]] | He].
+  (*  destruct (lfill_factorise (fun _  a => AI_return_invoke a) es) as [[n [lh Heq]] | He].
   - subst es.
     left.
     by repeat eexists.
   - right.
     intros [n [lh Heq]].
     by apply (He n lh). *)
+    admit.
 Admitted.
 
 Lemma br_reduce_label_length: forall n k (lh: lholed n) es s C ts2,
