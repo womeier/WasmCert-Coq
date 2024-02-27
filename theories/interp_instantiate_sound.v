@@ -364,12 +364,11 @@ Proof.
     inversion Heval; subst; clear Heval.
     simpl in Hrmsc.
     inversion Hrmsc; subst.
-(*     exact Hsglob.
-    
+    exact Hsglob.
   - move => ? Hcontra.
     by inversion Hcontra.
-Qed. *) Admitted.
-    
+Qed.
+
 Lemma interp_get_v_reduce: forall hs s c inst k bes,
     const_exprs c bes ->
     be_typing c bes (Tf [::] [::T_i32]) ->
@@ -387,9 +386,9 @@ Proof.
     by apply r_get_global.
   - unfold interp_get_v in Heval.
     simpl in Heval.
-   (*  injection Heval as ->.
+    injection Heval as ->.
     by constructor.
-Qed. *) Admitted.
+Qed.
 
 Lemma interp_instantiate_imp_instantiate :
   forall s m v_imps s_end inst v_exps start,
@@ -492,10 +491,10 @@ Proof.
       by rewrite Hoption.
     }
     { (* const *)
-      (* simpl in Hglobinit.
+      simpl in Hglobinit.
       injection Hglobinit as <-.
       simpl in *.
-      by constructor. *) admit.
+      by constructor.
     }
   - clear - instantiate Hmodcheck Helem.
     unfold instantiate_elem.
@@ -540,6 +539,6 @@ Proof.
     destruct v => //; injection Hdata as ->.
     by eapply interp_get_v_reduce; eauto.
   - by unfold check_start.
-Admitted.
+Qed.
 
 End Interp_instantiate.
