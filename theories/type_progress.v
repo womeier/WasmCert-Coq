@@ -236,7 +236,7 @@ Lemma nlfbr_left: forall es n cs vcs,
     not_lf_br es n.
 Proof.
   unfold not_lf_br.
-  move => es n vcs cs -> IH k lh ?.
+  move => es n cs vcs -> IH k lh ?.
   subst es.
   erewrite <- lfill_push_front_vs in IH; eauto.
   by eapply IH.
@@ -248,7 +248,7 @@ Lemma nlfret_left: forall es n cs vcs,
     not_lf_return es n.
 Proof.
   unfold not_lf_return.
-  move => es n vcs cs -> IH lh ?.
+  move => es n cs vcs -> IH lh ?.
   subst es.
   erewrite <- lfill_push_front_vs in IH; eauto.
   by eapply IH.
@@ -260,7 +260,7 @@ Lemma nlfretinv_left: forall es n cs vcs,
     not_lf_return_invoke es n.
 Proof.
   unfold not_lf_return.
-  move => es n vcs cs -> IH lh a ?.
+  move => es n cs vcs -> IH lh a ?.
   subst es.
   erewrite <- lfill_push_front_vs in IH; eauto.
   by eapply IH.
@@ -673,6 +673,7 @@ Definition return_invoke_reduce (es: seq administrative_instruction) a :=
 
 (** [br_reduce] is decidable. **)
 Lemma br_reduce_decidable : forall es, decidable (br_reduce es).
+Proof.
   move => es.
   destruct (lfill_factorise (fun n => AI_basic (BI_br n)) es) as [[n [lh Heq]] | He].
   - subst es.
@@ -697,17 +698,17 @@ Proof.
 Qed.
 
 (** [return_invoke_reduce] is decidable. **)
-Lemma return_invoke_reduce_decidable : forall es a, decidable (return_invoke_reduce es a).
+Lemma return_invoke_reduce_decidable : forall es, decidable (exists a, return_invoke_reduce es a).
 Proof.
-  move => es a.
-  destruct (lfill_factorise (fun _ => AI_return_invoke a) es) as [[n [lh Heq]] | He].
+  move => es. unfold decidable.
+  (* destruct (lfill_factorise (fun _ => AI_return_invoke a) es) as [[n [lh Heq]] | He].
   - subst es.
     left.
     by repeat eexists.
   - right.
     intros [n [lh Heq]].
-    by apply (He n lh).
-Qed.
+    by apply (He n lh). *)
+Admitted.
 
 Lemma br_reduce_label_length: forall n k (lh: lholed n) es s C ts2,
     lfill lh [::AI_basic (BI_br (n + k))] = es ->
@@ -936,7 +937,7 @@ Proof.
   unfold not_lf_return_invoke.
   move => s f es ts HType n lh a HContra.
   inversion HType; subst.
-  by eapply return_invoke_reduce_return_some in H1; eauto.
+  eapply return_invoke_reduce_return_some in H1; eauto.
 Qed.
 
 Axiom host_application_exists: forall hs s tf hf vcs,
@@ -1121,19 +1122,21 @@ Proof.
       eapply rs_return; eauto.
       by [].
     }
-(*
-    destruct (return_invoke_reduce_decidable es a) as [HEMT' | HEMF']. (* not sure what HEMT stands for *)
+    (* not sure what HEMT stands for, just call it HEMT' for now *)
+    destruct (return_invoke_reduce_decidable es) as [[a HEMT'] | HEMF'].
     { inversion HType; subst.
       unfold return_invoke_reduce in HEMT'.
-      destruct HEMT' as [n [lh HLF]].
-      eapply return_invoke_reduce_extract_vs in HLF; eauto => //.
-      instantiate (1 := t1s) in HLF.
+      destruct HEMT' as [n [lh HLF]]. have HLF' := HLF.
+      eapply lfilled_es_type_exists in HLF'; eauto. destruct HLF' as [lab' [t1s [t2s Hlab]]].
+      have Hlab' := Hlab.
+      apply Return_invoke_typing in Hlab'. destruct Hlab' as [t1s' [t2s' [ts [cl [HnthClos [HclType [Hret ->]]]]]]].
+      injection Hret as ->.
+      eapply return_invoke_reduce_extract_vs in HLF; eauto => //=.
       destruct HLF as [cs [lh' [HConst [HLF2 HLength]]]].
-      Check func_context_store.
+      have H' := cl_typing_unique HclType.
       repeat eexists.
       eapply r_return_invoke; eauto.
-     (* by []. *) admit. admit. admit.
-    } *)
+    }
     edestruct IHHType as [ | [ | ]]; eauto.
     {
       move => n lh k HLF.
@@ -1162,7 +1165,7 @@ Proof.
       exists s', f, [::AI_local (length ts2) f0' es'], hs'.
       by apply r_local; apply HReduce.
   - (* Invoke *)
-    move => s a C cl tf HNth HType.
+    move => s a' C cl tf HNth HType.
     move => f C' vcs ts1 ts2 lab ret hs HTF HContext HInst HConstType HST HBI_brDepth HNRet HNRetInv.
     inversion HType; subst.
     inversion H5; subst; clear H5.
@@ -1189,7 +1192,7 @@ Proof.
     move => s a C cl ts ts' t1s t2s HNth HType Hret.
     move => f C' vcs ts1 ts2 lab ret hs HTF HContext HInst HConstType HST HBI_brDepth HNRet HNRetInv.
     unfold not_lf_return_invoke in HNRetInv.
-    specialize HNRetInv with 0 (LH_base [::] [::]) a => //=HNRetInv.
+    specialize HNRetInv with 0 (LH_base [::] [::]) a. by [].
 
   - (* AI_label *)
     move => s C e0s es ts t2s n HType1 IHHType1 HType2 IHHType2 Hlen.
@@ -1285,7 +1288,7 @@ Proof.
         right. by left.
     + (* reduce *)
       simpl in H0. right. right. by eauto.
-Admitted.
+Qed.
 
 Theorem t_progress: forall s f es ts hs,
     config_typing s f es ts ->
