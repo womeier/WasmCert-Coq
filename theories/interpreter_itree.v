@@ -488,40 +488,8 @@ Definition run_one_step (call : run_stepE ~> itree (run_stepE +' eff))
         | None => ret (s, f, crash_error)
       end
 
-   | AI_return_invoke i =>
-      match List.nth_error s.(s_funcs) i with
-        | Some cl =>
-            match cl with
-            | FC_func_native i (Tf t1s t2s) ts es =>
-                let: n := length t1s in
-                let: m := length t2s in
-                if length ves >= n
-                then
-                let: (ves', ves'') := split_n ves n in
-                let: zs := n_zeros ts in
-                ret (s, f, RS_normal (vs_to_es ves''
-                                ++ [::AI_local m (Build_frame (rev ves' ++ zs) i) [::AI_basic (BI_block (Tf [::] t2s) es)]]))
-                else ret (s, f, crash_error)
-            | FC_func_host (Tf t1s t2s) h =>
-                let: n := length t1s in
-                let: m := length t2s in
-                if length ves >= n
-                then
-                let: (ves', ves'') := split_n ves n in
-                r <- trigger (host_apply s (Tf t1s t2s) h (rev ves')) ;;
-                match r with
-                | Some (s', r) =>
-                    if result_types_agree t2s r
-                    then
-                    let: rves := result_to_stack r in
-                    ret (s', f, RS_normal (vs_to_es ves'' ++ rves))
-                    else ret (s (* FIXME: Why not [s']? *), f, crash_error)
-                | None => ret (s, f, RS_normal (vs_to_es ves'' ++ [::AI_trap]))
-                end
-                else ret (s, f, crash_error)
-            end
-        | None => ret (s, f, crash_error)
-      end
+  (* FIXME: reduce to standard invoke for now *)
+  | AI_return_invoke i => ret (s, f, RS_normal [::AI_invoke i])
 
   | AI_label ln les es =>
     if es_is_trap es
