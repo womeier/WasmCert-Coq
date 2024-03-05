@@ -1782,23 +1782,20 @@ reduce hs s f [::AI_basic (BI_const (VAL_int32 c)); AI_basic (BI_call_indirect i
 List.nth_error s.(s_funcs) a = Some cl /\
 stypes s f.(f_inst) i = Some (cl_type cl).
 Proof.
-  (* TODO: cleanup proof*)
   intros ?????? Hred.
   remember ([:: AI_basic (BI_const (VAL_int32 c)); AI_basic (BI_call_indirect i)]) as call.
   remember ([:: AI_invoke a]) as invoke. generalize dependent a. generalize dependent i.
   revert c.
   induction Hred; intros; subst => //=.
   - inversion H.
-  - inversion Heqcall. inversion Heqinvoke. subst. by eauto.
-  - destruct vcs. inversion Heqcall. cbn in Heqcall. destruct v; inversion Heqcall.
-    inversion Heqcall. destruct vcs. inversion Heqcall. subst.
-    inversion H2.
-  - destruct lh; cbn in Heqinvoke, Heqcall. 2:{ destruct l; inversion Heqinvoke. }
-    destruct l; inversion Heqinvoke. simpl in *.
-    destruct l0. 2:{ destruct es'; inversion Heqinvoke. subst. 
-                     destruct es; inversion Heqcall. subst. inversion Heqcall.
-                     destruct es; inversion H1. now destruct es. now destruct es'. }
-    rewrite -> cats0 in *. subst. eauto.
+  - injection Heqcall as ->->. injection Heqinvoke as ->. by exists cl.
+  - destruct vcs =>//. destruct v=>//. simpl in Heqcall. injection Heqcall; intros Hinv ?; subst.
+    by destruct vcs =>//.
+  - destruct lh, l =>//. simpl in *.
+    destruct l0; first by rewrite -> cats0 in *; eauto.
+    destruct es' as [|e es']; last by destruct es'.
+    injection Heqinvoke as ->->. destruct es =>//. injection Heqcall as ->. destruct es=>//.
+    by destruct es.
 Qed.
 
 Lemma t_preservation_e: forall s f es s' f' es' C t1s t2s lab ret hs hs',
