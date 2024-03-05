@@ -2333,7 +2333,7 @@ Proof.
     with (i := i) (lh := lh) (rvs := rvs) in Hetype; eauto.
 Qed.
 
-(* frame's arity doesn't match functions return type *)
+(* frame's arity doesn't match function's return type *)
 Lemma local_return_invoke_error_arity : forall s f ln lf a cl es t1s t2s rvs ves,
   (exists i (lh: lholed i),
     lfill lh (vs_to_es rvs ++ [:: AI_return_invoke a]) = es /\
