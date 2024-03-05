@@ -701,15 +701,14 @@ Qed.
 Lemma return_invoke_reduce_decidable : forall es, decidable (return_invoke_reduce es).
 Proof.
   move => es. unfold decidable.
-  (*  destruct (lfill_factorise (fun _  a => AI_return_invoke a) es) as [[n [lh Heq]] | He].
+  destruct (lfill_return_invoke_factorise es) as [[a [n [lh Heq]]] | He].
   - subst es.
     left.
     by repeat eexists.
   - right.
-    intros [n [lh Heq]].
-    by apply (He n lh). *)
-    admit.
-Admitted.
+    intros [n [lh [a Heq]]].
+    by apply (He a n lh).
+Qed.
 
 Lemma br_reduce_label_length: forall n k (lh: lholed n) es s C ts2,
     lfill lh [::AI_basic (BI_br (n + k))] = es ->
