@@ -12,6 +12,8 @@ Set Implicit Arguments.
 Unset Strict Implicit.
 Unset Printing Implicit Defensive.
 
+Import instantiation_properties_notations.
+
 Section Host.
 
 Context `{ho: host}.
