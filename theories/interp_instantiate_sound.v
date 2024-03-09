@@ -7,6 +7,7 @@ From Wasm Require Import interpreter_ctx instantiation_func instantiation_proper
 From Coq Require Import Program.
 
 Section Host.
+Import instantiation_properties_notations.
 
 Context `{ho: host}.
   
