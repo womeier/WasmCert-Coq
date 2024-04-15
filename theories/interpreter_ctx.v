@@ -577,11 +577,14 @@ Proof.
       (* BI_br_table js j *) js j |
       (* BI_return *) |
       (* BI_call j *) x |
-      (* BI_call_indirect j *) x y ] |
+      (* BI_call_indirect j *) x y |
+      (* BI_return_call j *) x |
+      (* BI_return_call_indirect j *) x y ] |
       (* AI_trap *) |
       (* AI_ref a *) a |
       (* AI_ref_extern a *) a |
       (* AI_invoke a *) a |
+      (* AI_return_invoke a *) a |
       (* AI_label ln les es *) ln les es |
       (* AI_frame ln lf es *) ln lf es ].
 
@@ -1664,7 +1667,10 @@ the condition that all values should live in the operand stack. *)
         resolve_reduce_ctx vs0 es0.
         by eapply r_call_indirect_failure_bound; subst.
 
-    (* AI_trap *)
+    - (* BI_return_call *) admit.
+    - (* BI_return_call_indirect *) admit.
+
+    - (* AI_trap *)
     - destruct ((vs0 == nil) && (es0 == nil)) eqn:Hscnil; move/andP in Hscnil.
       + destruct Hscnil as [Heq1 Heq2]; move/eqP in Heq1; move/eqP in Heq2; subst.
         (* Checking if this is the last label ctx *)
@@ -1708,14 +1714,17 @@ the condition that all values should live in the operand stack. *)
        
     (* AI_invoke a *)
     - by apply run_ctx_invoke.
-        
+
+    (* AI_return_invoke a *)
+    - admit.
+
     (* AI_label ln les es *)
     - by apply RSC_invalid => /=; move => [??].
 
     (* AI_frame ln lf es *)
     - by apply RSC_invalid => /=; move => [??].
   }
-Defined.
+Admitted. (* Defined *)
 
 (* reformation to a valid configuration. *)
 Definition run_step_cfg_ctx_reform (cfg: cfg_tuple_ctx) : option cfg_tuple_ctx :=

@@ -166,6 +166,8 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
         lookup_N (tc_tables C) x = Some tabt /\
         tabt.(tt_elem_type) = T_funcref /\
         lookup_N (tc_types C) y = Some (Tf ts1 ts2)
+  | BI_return_call n => True
+  | BI_return_call_indirect x y => True
   | BI_local_get x =>
       exists t,
       tf = (Tf nil [::t]) /\
@@ -519,6 +521,9 @@ Definition e_principal_typing (s: store_record) (C: t_context) (e: administrativ
   | AI_invoke a =>
       exists tf0, tf = tf0 /\
         ext_func_typing s a = Some tf0
+  | AI_return_invoke a => (* TODO not sure if right yet *)
+      exists tf0, tf = tf0 /\
+        ext_func_typing s a = Some tf0
   | AI_label n es0 es =>
       exists ts1 ts2,
       tf = (Tf nil ts2) /\
@@ -581,7 +586,9 @@ Proof.
   - extract_premise.
     exists extr; split => //.
     by resolve_subtyping.
-Qed.
+  - (* Return_invoke *)
+    admit. (* TODO fix principle typing *)
+Admitted.
   
 (** A helper tactic for proving [composition_typing_single]. **)
 Ltac auto_prove_et:=

@@ -518,6 +518,7 @@ Proof.
     | faddr
     | eaddr
     | addr
+    | addr
     | n ces es
     | n f es
     ]; simpl in *; try by (injection Hdecomp as <- <- <-; unfold valid_ccs).
@@ -547,6 +548,7 @@ Proof.
     |
     | faddr
     | eaddr
+    | addr
     | addr
     | n ces es
     | n f es
@@ -698,6 +700,7 @@ Proof.
       |
       | faddr
       | eaddr
+      | addr
       | addr
       | n ces es
       | n f es
