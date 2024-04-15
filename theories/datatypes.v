@@ -516,6 +516,8 @@ Instructions in this group affect the flow of control.
   | BI_return
   | BI_call : funcidx -> basic_instruction
   | BI_call_indirect : tableidx -> typeidx -> basic_instruction
+  | BI_return_call : funcidx -> basic_instruction
+  | BI_return_call_indirect : tableidx -> typeidx -> basic_instruction
   .
 
 

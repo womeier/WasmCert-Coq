@@ -690,7 +690,9 @@ Proof.
       (* BI_br_table js j *) js j |
       (* BI_return *) |
       (* BI_call j *) x |
-      (* BI_call_indirect j *) x y ] |
+      (* BI_call_indirect j *) x y |
+      (* BI_return_call j *) x |
+      (* BI_return_call_indirect j *) x y ] |
       (* AI_trap *) |
       (* AI_ref a *) a |
       (* AI_ref_extern a *) a |
@@ -1677,6 +1679,9 @@ the condition that all values should live in the operand stack. *)
         resolve_reduce_ctx vs0 es0.
         by eapply r_call_indirect_failure_bound; subst.
 
+    - (* BI_return_call *) admit.
+    - (* BI_return_call_indirect *) admit.
+
     - (* AI_trap *)
       get_cc ccs.
       destruct ((vs0 == nil) && (es0 == nil)) eqn:Hscnil; move/andP in Hscnil.
@@ -1720,7 +1725,7 @@ the condition that all values should live in the operand stack. *)
     - (* AI_frame ln lf es *)
       by apply RSC_invalid => /=; move => [??].
   }
-Defined.
+Admitted.
 
 (* reformation to a valid configuration, if possible.
    If the cfg is already a value, report that.

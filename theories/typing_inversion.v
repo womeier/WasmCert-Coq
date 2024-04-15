@@ -148,6 +148,8 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
         lookup_N (tc_tables C) x = Some tabt /\
         tabt.(tt_elem_type) = T_funcref /\
         lookup_N (tc_types C) y = Some (Tf ts1 ts2)
+  | BI_return_call n => True
+  | BI_return_call_indirect x y => True
   | BI_local_get x =>
       exists t,
       tf = (Tf nil [::t]) /\

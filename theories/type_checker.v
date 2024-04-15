@@ -274,6 +274,8 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
               else None
           | None => None
           end
+      | BI_return_call x => None
+      | BI_return_call_indirect x y => None
       | BI_local_get i =>
           match lookup_N (tc_locals C) i with
           | None => None 
