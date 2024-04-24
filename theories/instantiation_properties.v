@@ -477,7 +477,8 @@ Lemma value_no_reduce (hs hs': host_state) s f v s' f' e':
   False.
 Proof.
   move => Hred.
-  dependent induction Hred; subst; (try by repeat destruct vs => //; destruct v as [v | v | v]; destruct v => //); (try by repeat destruct vcs => //; destruct v as [v | v | v]; destruct v => //).
+  (* not sure why, but this change makes it not hang *)
+  dependent induction Hred; subst; (try by repeat destruct vcs => //; destruct v as [v | v | v]; destruct v => //); (try by repeat destruct vs => //; destruct v as [v | v | v]; destruct v => //).
   { inversion H; subst; clear H; try by destruct v as [v | v | v]; destruct v => //.
     by destruct lh as [vs ? | ? vs]; simpl in H1; destruct v as [v | v | v]; destruct v; do 2 destruct vs => //.
   }

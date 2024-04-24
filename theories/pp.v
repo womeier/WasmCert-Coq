@@ -461,6 +461,8 @@ Fixpoint pp_administrative_instruction (n : indentation) (e : administrative_ins
     indent n (with_fg ae_style "ref_extern " ++ pp_addr a ++ newline)
   | AI_invoke a =>
     indent n (with_fg ae_style "invoke " ++ pp_addr a ++ newline)
+  | AI_return_invoke a =>
+    indent n (with_fg ae_style "return_invoke " ++ pp_addr a ++ newline)
            
   | AI_label k es1 es2 =>
     indent n (with_fg ae_style "label " ++ string_of_nat k ++ newline) ++

@@ -491,6 +491,9 @@ Definition e_principal_typing (s: store_record) (C: t_context) (e: administrativ
   | AI_invoke a =>
       exists tf0, tf = tf0 /\
         ext_func_typing s a = Some tf0
+  | AI_return_invoke a => (* TODO not sure if right yet *)
+      exists tf0, tf = tf0 /\
+        ext_func_typing s a = Some tf0
   | AI_label n es0 es =>
       exists ts1 ts2,
       tf = (Tf nil ts2) /\
@@ -553,7 +556,9 @@ Proof.
   - extract_premise.
     exists extr; split => //.
     by resolve_subtyping.
-Qed.
+  - (* Return_invoke *)
+    admit. (* TODO fix principle typing *)
+Admitted.
   
 (** A helper tactic for proving [composition_typing_single]. **)
 Ltac auto_prove_et:=

@@ -980,6 +980,7 @@ Inductive administrative_instruction : Type := (* e *)
 | AI_ref : funcaddr -> administrative_instruction
 | AI_ref_extern: externaddr -> administrative_instruction
 | AI_invoke : funcaddr -> administrative_instruction
+| AI_return_invoke : funcaddr -> administrative_instruction
 | AI_label : nat -> list administrative_instruction -> list administrative_instruction -> administrative_instruction
 | AI_frame : nat -> frame -> list administrative_instruction -> administrative_instruction
 .

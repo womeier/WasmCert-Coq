@@ -545,6 +545,11 @@ Proof.
     + by rewrite - Htableagree.
     + by rewrite_context_agree.
   - rewrite_context_agree.
+    econstructor; eauto.
+    + by rewrite - Htableagree.
+    + by rewrite_context_agree.
+    + by rewrite_context_agree.
+  - rewrite_context_agree.
     eapply context_agree_table_type in H as [tabt [Hnth Hagree]]; eauto; unfold table_agree in *; move/eqP in Hagree.
     econstructor.
     + by apply Hnth.
@@ -568,6 +573,9 @@ Proof.
   - (* be *)
     apply ety_a.
     by eapply context_agree_be_typing; eauto.
+  - (* Return_invoke *)
+    eapply ety_return_invoke; eauto.
+    by rewrite_context_agree.
   - (* Label *)
     eapply ety_label; eauto.
     eapply IHHetype2.
@@ -628,6 +636,10 @@ Proof.
   (* invoke *)
   - move=> s a C tf Hextfunc s' HST1 HST2 Hext.
     eapply ety_invoke; eauto => //.
+    by eapply ext_func_typing_extension; eauto.
+  (* return_invoke *)
+  - move=> s a C ts ts' t1s t2s Hextfunc Hreturn s' HST1 HST2 Hext.
+    eapply ety_return_invoke; eauto=>//.
     by eapply ext_func_typing_extension; eauto.
   (* Label *)
   - move=> s C es es' t1s t2s n HType1 IHHType1 HType2 IHHType2 E s' HST1 HST2 Hext.
@@ -1638,6 +1650,52 @@ Proof.
   by eapply store_extension_reduce; eauto.
 Qed.
 
+Lemma call_reduce_invert : forall hs s f i a,
+    reduce hs s f [:: AI_basic (BI_call i)] hs s f [:: AI_invoke a] ->
+    lookup_N (inst_funcs (f_inst f)) i = Some a.
+Proof.
+  (* TODO cleanup proof *)
+  intros ????? Hred.
+  dependent induction Hred; subst.
+  - by inversion H.
+  - by inversion H.
+  - destruct vcs =>//. cbn in x0.
+    destruct (administrative_instruction_eq_dec ($V v) (AI_basic (BI_call i))) as [He|He];
+      injection x0=>//.
+    rewrite He in x0. by destruct vcs.
+  - destruct lh; cbn in x, H. 2:{ destruct l=>//. injection x=>//. by destruct l. }
+    destruct l, l0; try rewrite -> cats0 in *; cbn in *; subst; eauto.
+    +  destruct es' as [|e [|e' es']]=>//.
+       destruct es as [|e [|e' es']]=>//. congruence.
+    + destruct (administrative_instruction_eq_dec ($V v) (AI_invoke a)) as [He|He];
+      first rewrite He in H; injection H=>//; intros.
+      rewrite H1 in x. injection x=>//. destruct l, es'=>//.
+Qed.
+
+Lemma call_indirect_reduce_invert : forall hs s f c x y a,
+    reduce hs s f [::AI_basic (BI_const_num (VAL_int32 c)); AI_basic (BI_call_indirect x y)]
+           hs s f [::AI_invoke a] ->
+    exists cl,
+    stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m c) = Some (VAL_ref_func a) /\
+    lookup_N s.(s_funcs) a = Some cl /\
+    lookup_N f.(f_inst).(inst_types) y = Some (cl_type cl).
+Proof.
+  (* TODO cleanup proof *)
+  intros ??????? Hred.
+  dependent induction Hred; intros; subst; eauto.
+  - by inversion H.
+  - destruct r=>//; destruct l=>//. cbn in x. destruct v=>//. by destruct v=>//.
+  - destruct lh; cbn in x, H. 2:{ destruct l=>//. injection x=>//. by destruct l. }
+    destruct l, l0; try rewrite -> cats0 in *; cbn in *; subst; eauto.
+    + destruct es' as [|e [|e' es']]=>//.
+      destruct l0; injection x; intros; subst=>//.
+      destruct es as [|e [|e' es']]=>//.
+      injection H; intros; subst. by destruct es'.
+    + destruct (administrative_instruction_eq_dec ($V v) (AI_invoke a)) as [He|He];
+      first rewrite He in H; injection H=>//; intros.
+      rewrite H1 in x. injection x=>//. destruct l, es'=>//.
+Qed.
+
 Lemma t_preservation_e: forall s f es s' f' es' tlocs C C' t1s t2s lab ret hs hs',
     reduce hs s f es hs' s' f' es' ->
     store_typing s ->
@@ -1711,6 +1769,14 @@ Proof.
       by rewrite H0 -Hinj => //=.
     }
     
+  - (* Return_call *)
+    (* apply call_reduce_invert in HReduce.
+    eapply inst_typing_func_lookup in HReduce as [[ts1 ts2] [Hft Hnth]]; eauto.
+    eapply ety_subtyping; first eapply ety_return_invoke; eauto.
+    cbn. *) admit.
+  - (* Return_call_indirect *)
+    admit.
+    
   - (* Invoke native *)
     destruct extr as [ts1' ts2'].
     destruct Hft as [<- [Hvalid Hftype]].
@@ -1750,7 +1816,10 @@ Proof.
     clear H1_values Htisub.
     eapply values_typing_trans in H2_values; eauto.
     by eapply ety_subtyping; first apply result_e_type; first eapply host_application_respect; eauto.
-    
+
+  - (* Return_invoke *)
+    admit.
+
   - (* Local_get *)
     unfold lookup_N in *.
     eapply all2_nth_impl in Hloctype; eauto.
@@ -1935,7 +2004,7 @@ Proof.
       eapply IHHReduce; eauto.
       by erewrite -> inst_t_context_label_empty in *; eauto.
     }
-Qed.
+Admitted.
 
 Theorem t_preservation: forall s f es s' f' es' ts hs hs',
     reduce hs s f es hs' s' f' es' ->

@@ -1511,6 +1511,10 @@ Proof.
     (* Call *)
     + destruct tf as [t1 t2] => /=.
       by unfold c_types_agree, type_update; simplify_tc_goal.
+    (* Return_call *)
+    + admit.
+    (* Return_call_indirect *)
+    + admit.
     (* Composition *)
     + rewrite List.fold_left_app => //=.
       rewrite Hoption0.
@@ -1549,6 +1553,6 @@ Proof.
           rewrite values_subtyping_cat; last by apply values_subtyping_size in IHHbet; apply values_subtyping_size in Hconjr0; lias.
           by resolve_subtyping.
       }
-Qed.
+Admitted.
       
 End Host.

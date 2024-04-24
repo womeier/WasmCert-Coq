@@ -697,6 +697,7 @@ Proof.
       (* AI_ref a *) a |
       (* AI_ref_extern a *) a |
       (* AI_invoke a *) a |
+      (* AI_return_invoke a *) a |
       (* AI_label ln les es *) ln les es |
       (* AI_frame ln lf es *) ln lf es ]; destruct sc as [vs0 es0].
 
@@ -1719,6 +1720,8 @@ the condition that all values should live in the operand stack. *)
     - (* AI_invoke a *)
       by apply run_ctx_invoke.
         
+    - (* AI_return_invoke a *)
+      admit.
     - (* AI_label ln les es *)
       by apply RSC_invalid => /=; move => [??].
 
@@ -1854,6 +1857,8 @@ Proof.
   - right.
     destruct r => //=.
     unfold terminal_form_ctx; by rewrite v_to_e_const.
+  (* Return invoke *)
+  - admit.
   (* Frame *)
   - destruct lh using lh_case; destruct k => //.
     + rewrite -> lh_cast_eq in *.
@@ -1865,7 +1870,7 @@ Proof.
       rewrite -> lh_cast_eq in *; clear H.
       simpl in Hvalid.
       destruct vs as [| v vs] => //; destruct v as [v|v|v] => //=; by destruct v.
-Qed.
+Admitted.
 
 (* The induced progress for this version looks slightly weaker, as it only applies to valid instructions directly.
    However, every function call starts with a valid instruction and continues to be one until the call is exited 
