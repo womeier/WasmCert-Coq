@@ -375,10 +375,30 @@ Definition with_length (bs : list byte) : list byte :=
 
 Definition binary_of_functype (ft : function_type) : list byte :=
   let 'Tf rt1 rt2 := ft in
-  x60 :: binary_of_result_type rt1 ++ binary_of_result_type rt2.
+  binary_of_result_type rt1 ++ binary_of_result_type rt2.
 
-Definition binary_of_typesec (ts : list function_type) : list byte :=
-  x01 :: with_length (binary_of_vec binary_of_functype ts).
+Definition binary_of_mutability (m : mutability) : list byte :=
+  match m with
+  | MUT_const => cons x00 nil
+  | MUT_var => cons x01 nil
+  end.
+
+Definition binary_of_fieldtype (ft : field_type) :=
+  cons (binary_of_value_type ft.(tf_t)) nil ++
+  binary_of_mutability ft.(tf_mut).
+
+Definition binary_of_structtype (st : struct_type) : list byte :=
+  let 'Ts ts := st in
+  binary_of_vec binary_of_fieldtype ts.
+
+Definition binary_of_comptype (ct : comp_type) : list byte :=
+  match ct with
+  | CT_func ft => x60 :: binary_of_functype ft
+  | CT_struct st => x5f :: binary_of_structtype st
+  end.
+
+Definition binary_of_typesec (ts : list comp_type) : list byte :=
+  x01 :: with_length (binary_of_vec binary_of_comptype ts).
 
 Definition binary_of_name (n : name) : list byte :=
   binary_of_vec (fun n => cons n nil) n.
@@ -395,12 +415,6 @@ Definition binary_of_limits (l : limits) : list byte :=
 Definition binary_of_table_type (t_ty : table_type) : list byte :=
   binary_of_reference_type t_ty.(tt_elem_type) ::
   binary_of_limits t_ty.(tt_limits).
-
-Definition binary_of_mutability (m : mutability) : list byte :=
-  match m with
-  | MUT_const => cons x00 nil
-  | MUT_var => cons x01 nil
-  end.
 
 Definition binary_of_global_type (g_ty : global_type) : list byte :=
   cons (binary_of_value_type g_ty.(tg_t)) nil ++

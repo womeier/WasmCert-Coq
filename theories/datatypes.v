@@ -280,6 +280,23 @@ Inductive block_type : Set :=
 | BT_valtype: option value_type -> block_type
 .
 
+(* WITH UPDATE TO GC: module.(types) = list composite_type instead of list function_type *)
+Record field_type : Set := (* tf *) {
+  tf_mut : mutability;
+  tf_t : value_type
+}.
+
+Inductive struct_type := (* ts *)
+| Ts : list field_type -> struct_type
+.
+
+(* didn't implement packed types
+   https://webassembly.github.io/gc/core/syntax/types.html#composite-types *)
+Inductive comp_type :=
+| CT_func : function_type -> comp_type
+| CT_struct : struct_type -> comp_type
+.
+
 (** std-doc: 
 Most types are universally valid. However, restrictions apply to limits, which must be checked during validation. Moreover, block types are converted to plain function types for ease of processing.
 **)
@@ -682,7 +699,7 @@ WebAssembly programs are organized into modules, which are the unit of deploymen
 [https://webassembly.github.io/spec/core/syntax/modules.html]
 *)
 Record module : Type := {
-  mod_types : list function_type;
+  mod_types : list comp_type;
   mod_funcs : list module_func;
   mod_tables : list module_table;
   mod_mems : list module_mem;

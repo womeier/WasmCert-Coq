@@ -118,7 +118,9 @@ Definition parse_vector_type {n} : byte_parser vector_type n :=
 
 Definition parse_reference_type {n} : byte_parser reference_type n :=
   (exact_byte x70 $> T_funcref) <|>
-  (exact_byte x6f $> T_externref).
+  (exact_byte x6f $> T_externref) <|>
+  (exact_byte x6d $> T_eqref) <|>
+  (exact_byte x6c $> T_i31ref).
 
 Definition parse_value_type {n} : byte_parser value_type n :=
   T_num <$> parse_number_type <|>
@@ -627,21 +629,31 @@ Definition parse_expr {n} : byte_parser (list basic_instruction) n :=
   parse_bes_end_with_x0b n.
 
 Definition parse_function_type {n} : byte_parser function_type n :=
-  exact_byte x60 &> (uncurry Tf <$> parse_vec parse_value_type <&> parse_vec parse_value_type).
+  uncurry Tf <$> parse_vec parse_value_type <&> parse_vec parse_value_type.
 
 Definition parse_limits {n} : byte_parser limits n :=
   exact_byte x00 &> ((fun min => {| lim_min := min; lim_max := None |}) <$> parse_u32_as_N) <|>
   exact_byte x01 &> ((fun min max => {| lim_min := min; lim_max := Some max |}) <$> parse_u32_as_N) <*> parse_u32_as_N.
+
+Definition parse_mut {n} : byte_parser mutability n :=
+  exact_byte x00 $> MUT_const <|>
+  exact_byte x01 $> MUT_var.
+
+Definition parse_field_type {n} : byte_parser field_type n :=
+  ((fun x y => Build_field_type y x) <$> parse_value_type) <*> parse_mut.
+
+Definition parse_struct_type {n} : byte_parser struct_type n :=
+  Ts <$> parse_vec parse_field_type.
+
+Definition parse_comp_type {n} : byte_parser comp_type n :=
+  exact_byte x60 &> (CT_func <$> parse_function_type) <|>
+  exact_byte x5f &> (CT_struct <$> parse_struct_type).
 
 Definition parse_table_type {n} : byte_parser table_type n :=
   ((fun ety lims => {| tt_limits := lims; tt_elem_type := ety |}) <$> parse_reference_type) <*> parse_limits.
 
 Definition parse_memory_type {n} : byte_parser memory_type n :=
   (fun lim => lim) <$> parse_limits.
-
-Definition parse_mut {n} : byte_parser mutability n :=
-  exact_byte x00 $> MUT_const <|>
-  exact_byte x01 $> MUT_var.
 
 Definition parse_global_type {n} : byte_parser global_type n :=
   ((fun x y => Build_global_type y x) <$> parse_value_type) <*> parse_mut.
@@ -754,8 +766,8 @@ Definition parse_module_data {n}: byte_parser module_data n :=
 Definition parse_customsec {n} : byte_parser (list byte) n :=
   exact_byte x00 &> parse_vec anyTok.
 
-Definition parse_typesec {n} : byte_parser (list function_type) n :=
-  exact_byte x01 &> parse_u32_as_int32 &> parse_vec parse_function_type.
+Definition parse_typesec {n} : byte_parser (list comp_type) n :=
+  exact_byte x01 &> parse_u32_as_int32 &> parse_vec parse_comp_type.
 
 Definition parse_importsec {n} : byte_parser (list module_import) n :=
   exact_byte x02 &> parse_u32_as_int32 &> parse_vec parse_module_import.
@@ -806,7 +818,7 @@ Definition parse_with_customsec_star_after {A : Type} {n} f :=
 
 
 Record parsing_module : Type := {
-  pmod_types : list function_type;
+  pmod_types : list comp_type;
   pmod_funcs : list typeidx;
   pmod_tables : list module_table;
   pmod_mems : list module_mem;

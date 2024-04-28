@@ -96,7 +96,7 @@ Lemma empty_module_round_trip : run_parse_module (binary_of_module empty_module)
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_type := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (CT_func (Tf nil (cons (T_num T_i32) nil))) nil;
   mod_funcs := nil;
   mod_tables := nil;
   mod_mems := nil;
@@ -113,7 +113,7 @@ Lemma module_type_round_trip :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_type_fun := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (CT_func (Tf nil (cons (T_num T_i32) nil))) nil;
   mod_funcs :=
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := nil |} nil;
   mod_tables := nil;
@@ -131,7 +131,7 @@ Lemma module_type_fun_round_trip :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_42 := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (CT_func (Tf nil (cons (T_num T_i32) nil))) nil;
   mod_funcs :=
     let e := BI_const_num (VAL_int32 (Wasm_int.Int32.repr (BinInt.Z.of_nat 42))) in
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := cons e nil |} nil;
@@ -150,7 +150,7 @@ Lemma module_42_round_trip :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_42_exported := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (CT_func (Tf nil (cons (T_num T_i32) nil))) nil;
   mod_funcs :=
     let e := BI_const_num (VAL_int32 (Wasm_int.Int32.repr (BinInt.Z.of_nat 42))) in
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := cons e nil |} nil;
@@ -169,7 +169,7 @@ Lemma module_42_exported_round_trip :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_tableops := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (CT_func (Tf nil (cons (T_num T_i32) nil))) nil;
   mod_funcs :=
     let e := BI_const_num (VAL_int32 (Wasm_int.Int32.repr (BinInt.Z.of_nat 1))) in
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := cons e nil |} nil;
@@ -185,4 +185,22 @@ Definition module_tableops := {|
 
 Lemma module_tableops_exported_round_trip :
   run_parse_module (binary_of_module module_tableops) = Some module_tableops.
+Proof. vm_compute. reflexivity. Qed.
+
+Definition module_struct_types := {|
+  mod_types := cons (CT_struct (Ts (cons {| tf_mut := MUT_var; tf_t := T_num T_i32 |}
+                                   (cons {| tf_mut := MUT_const; tf_t := T_ref T_eqref |} nil)))) nil;
+  mod_funcs := nil;
+  mod_tables := nil;
+  mod_mems := nil;
+  mod_globals := nil;
+  mod_elems := nil;
+  mod_datas := nil;
+  mod_start := None;
+  mod_imports := nil;
+  mod_exports := nil;
+|}.
+
+Lemma module_struct_types_round_trip :
+  run_parse_module (binary_of_module module_struct_types) = Some module_struct_types.
 Proof. vm_compute. reflexivity. Qed.
