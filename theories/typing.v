@@ -88,11 +88,11 @@ Definition result_types_agree (s: store_record) (ts : result_type) r : bool :=
 (** std-doc:
 https://www.w3.org/TR/wasm-core-2/exec/runtime.html#exec-expand
 **)
-Definition expand_t (C: t_context) (tb: block_type) : option instr_type :=
+Definition expand_t (C: t_context) (tb: block_type) : option comp_type :=
   match tb with
   | BT_id n => lookup_N C.(tc_types) n
-  | BT_valtype (Some t) => Some (Tf [::] [::t])
-  | BT_valtype None => Some (Tf [::] [::])
+  | BT_valtype (Some t) => Some (CT_func (Tf [::] [::t]))
+  | BT_valtype None => Some (CT_func (Tf [::] [::]))
   end.
 
 Definition convert_helper (sxo : option sx) t1 t2 : bool :=
@@ -235,15 +235,15 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 | bet_select_Some : forall C t, be_typing C [::BI_select (Some [::t])] (Tf [:: t; t; T_num T_i32] [::t])
 | bet_select_None : forall C t, is_numeric_type t -> be_typing C [::BI_select None] (Tf [:: t; t; T_num T_i32] [::t])
 | bet_block : forall C tb tn tm es,
-  expand_t C tb = Some (Tf tn tm) ->
+  expand_t C tb = Some (CT_func (Tf tn tm)) ->
   be_typing (upd_label C ([::tm] ++ (tc_labels C))) es (Tf tn tm) ->
   be_typing C [::BI_block tb es] (Tf tn tm)
 | bet_loop : forall C tb tn tm es,
-  expand_t C tb = Some (Tf tn tm) ->
+  expand_t C tb = Some (CT_func (Tf tn tm)) ->
   be_typing (upd_label C ([::tn] ++ (tc_labels C))) es (Tf tn tm) ->
   be_typing C [::BI_loop tb es] (Tf tn tm)
 | bet_if_wasm : forall C tb tn tm es1 es2,
-  expand_t C tb = Some (Tf tn tm) ->
+  expand_t C tb = Some (CT_func (Tf tn tm)) ->
   be_typing (upd_label C ([::tm] ++ (tc_labels C))) es1 (Tf tn tm) ->
   be_typing (upd_label C ([::tm] ++ (tc_labels C))) es2 (Tf tn tm) ->
   be_typing C [::BI_if tb es1 es2] (Tf (tn ++ [::T_num T_i32]) tm)
@@ -265,7 +265,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 | bet_call_indirect : forall C x y tabtype t1s t2s,
   lookup_N (tc_tables C) x = Some tabtype ->
   tabtype.(tt_elem_type) = T_funcref ->
-  lookup_N (tc_types C) y = Some (Tf t1s t2s) ->
+  lookup_N (tc_types C) y = Some (CT_func (Tf t1s t2s)) ->
   be_typing C [::BI_call_indirect x y] (Tf (t1s ++ [::T_num T_i32]) t2s)
 (* https://webassembly.github.io/tail-call/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-return-call-x *)
 | bet_return_call : forall C i t1s t2s t3s t4s,
@@ -277,7 +277,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   lookup_N (tc_tables C) x = Some tabtype ->
   tabtype.(tt_elem_type) = T_funcref ->
   tc_return C = Some t2s ->
-  lookup_N (tc_types C) y = Some (Tf t1s t2s) ->
+  lookup_N (tc_types C) y = Some (CT_func (Tf t1s t2s)) ->
   be_typing C [::BI_return_call_indirect x y] (Tf (t3s ++ (t1s ++ [::T_num T_i32])) t4s)
 | bet_local_get : forall C x t,
   lookup_N (tc_locals C) x = Some t ->
@@ -375,12 +375,13 @@ Definition expr_typing (C: t_context) (bes: list basic_instruction) (ts: result_
 Definition func_typing (C: t_context) (code: module_func) (tf: function_type) : Prop :=
   let: {| modfunc_type := x; modfunc_locals := ts; modfunc_body := bes |} := code in
   match lookup_N C.(tc_types) x with
-  | Some (Tf ts1 ts2) =>
+  | Some (CT_func (Tf ts1 ts2)) =>
       tf = (Tf ts1 ts2) /\
       let C' := upd_local_label_return C (ts1 ++ ts) [:: ts2] (Some ts2) in
       expr_typing C' bes ts2 /\
       (* This is an artificial restriction added due to the implementation of subtyping from the future GC proposal, but without the implementing non-defaultable locals *)
       default_vals ts <> None
+  | Some (CT_struct _) => False
   | None => False
   end.
     
@@ -446,7 +447,7 @@ This definition is currently computable -- hopefully it remains so in the future
  **)
 Definition inst_typing (s : store_record) (inst : moduleinst) : option t_context :=
   let '{| inst_types := ts; inst_funcs := fs; inst_tables := tbs; inst_mems := ms; inst_globals := gs; inst_elems := es; inst_datas := ds; inst_exports := exps |} := inst in
-  if (all functype_valid ts) then
+  if (all comptype_valid ts) then
     match those (map (ext_func_typing s) fs) with
     | Some tfs =>
         match those (map (ext_table_typing s) tbs) with

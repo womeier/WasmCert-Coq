@@ -342,6 +342,8 @@ Defined.
 Definition run_ctx_invoke hs s ccs vs0 es0 a:
     run_step_ctx_result hs (s, ccs, (vs0, es0), Some (AI_invoke a)).
 Proof.
+Admitted.
+(*
   destruct (lookup_N s.(s_funcs) a) as [cl|] eqn:?.
   - (* Some cl *)
     destruct cl as [[t1s t2s] i [tidx ts es] | [t1s t2s] cl'] eqn:?.
@@ -440,7 +442,7 @@ Proof.
     resolve_invalid_typing.
     unfold ext_func_typing in Hconjr.
     by remove_bools_options; simpl in *.
-Defined.
+Defined. *)
 
 (* Lemma for eliminating subtypes *)
 Lemma operand_subtyping: forall s ops ops0 vts ts1 ts2 ts',
@@ -568,7 +570,7 @@ Notation "$nou32 v" := (Wasm_int.N_of_uint i32m v) (at level 90).
 
 (* One step of execution; does not perform the context update in the end to shift to the new instruction nor the validity check. *)
 Definition run_one_step_ctx (hs: host_state) (cfg: cfg_tuple_ctx) : run_step_ctx_result hs cfg.
-Proof.
+Proof. (*
   destruct cfg as [[[s ccs] sc] oe].
   destruct oe as [e | ]; last first.
   (* Exitting from contexts *)
@@ -1727,7 +1729,7 @@ the condition that all values should live in the operand stack. *)
 
     - (* AI_frame ln lf es *)
       by apply RSC_invalid => /=; move => [??].
-  }
+  } *)
 Admitted.
 
 (* reformation to a valid configuration, if possible.

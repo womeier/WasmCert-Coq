@@ -301,6 +301,9 @@ Inductive comp_type :=
 Most types are universally valid. However, restrictions apply to limits, which must be checked during validation. Moreover, block types are converted to plain function types for ease of processing.
 **)
 
+Definition comptype_valid (ct: comp_type) : bool :=
+  true.
+
 Definition functype_valid (ft: function_type) : bool :=
   true.
 
@@ -754,7 +757,7 @@ as validation of an instruction sequence proceeds.
 Definition ok: Set := unit.
 
 Record t_context : Set := {
-  tc_types : list function_type;
+  tc_types : list comp_type;
   tc_funcs : list function_type;
   tc_tables : list table_type;
   tc_mems : list memory_type;
@@ -900,7 +903,7 @@ instance have different names.
 [https://www.w3.org/TR/wasm-core-2/exec/runtime.html#module-instances]
 *)
 Record moduleinst : Type := (* inst *) {
-  inst_types : list function_type;
+  inst_types : list comp_type;
   inst_funcs : list funcaddr;
   inst_tables : list tableaddr;
   inst_mems : list memaddr;

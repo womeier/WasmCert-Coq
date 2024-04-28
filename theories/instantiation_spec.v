@@ -47,8 +47,9 @@ Definition add_func (s : store_record) funcinst := {|
 
 Definition gen_func_instance mf inst : funcinst :=
   match lookup_N inst.(inst_types) mf.(modfunc_type) with
-  | Some ft =>
+  | Some (CT_func ft) =>
       FC_func_native ft inst mf
+  | Some (CT_struct _)
   | None =>
       (* Will not happen for well-typed modules *)
       FC_func_native (Tf nil nil) inst mf
@@ -278,7 +279,7 @@ Definition dummy_table : tableinst := {| tableinst_elem := nil; tableinst_type :
 Definition module_func_typing (c : t_context) (mf : module_func) (tf : function_type) : Prop :=
   let '{| modfunc_type := x; modfunc_locals := t_locs; modfunc_body := b_es |} := mf in
   let '(Tf tn tm) := tf in
-  lookup_N c.(tc_types) x = Some (Tf tn tm) /\
+  lookup_N c.(tc_types) x = Some (CT_func (Tf tn tm)) /\
   let c' := upd_local_label_return c (tn ++ t_locs) [::tm] (Some tm) in
   be_typing c' b_es (Tf [::] tm) /\
   (* Revise when non-defaultable types are added *)
@@ -354,9 +355,13 @@ Definition module_start_typing (c : t_context) (ms : module_start) : bool :=
   | Some tf => tf == (Tf nil nil)
   end.
 
-Definition module_import_desc_typing (c : t_context) (imp_desc : module_import_desc) (e : extern_type) : bool := 
+Definition module_import_desc_typing (c : t_context) (imp_desc : module_import_desc) (e : extern_type) : bool :=
   match imp_desc with
-  | MID_func i => (option_map ET_func (lookup_N c.(tc_types) i) == Some e)
+  | MID_func i => match (lookup_N c.(tc_types) i) with
+                  | Some (CT_struct _) => false
+                  | Some (CT_func tf) => ET_func tf == e
+                  | _ => false
+                  end
   | MID_table t_t =>
       tabletype_valid t_t && (e == ET_table t_t)
   | MID_mem mt =>
@@ -490,7 +495,7 @@ Definition module_typing (m : module) (impts : list extern_type) (expts : list e
     tc_return := None;
     tc_refs := xs;
   |} in
-  List.Forall functype_valid tfs /\
+  List.Forall comptype_valid tfs /\
   List.Forall2 (module_func_typing c) fs fts /\
   List.Forall2 (module_table_typing c') ts tts /\
   List.Forall2 (module_mem_typing c') ms mts /\

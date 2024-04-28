@@ -213,27 +213,30 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       | BI_select ot => type_update_select ts ot
       | BI_block bt es =>
           match expand_t C bt with
-          | Some (Tf tn tm) =>
+          | Some (CT_func (Tf tn tm)) =>
               if b_e_type_checker (upd_label C ([::tm] ++ tc_labels C)) es (Tf tn tm)
               then type_update ts (tn) tm
               else None
+          | Some (CT_struct _) => None (* absurd *)
           | None => None
           end
       | BI_loop bt es =>
           match expand_t C bt with
-          | Some (Tf tn tm) =>
+          | Some (CT_func (Tf tn tm)) =>
               if b_e_type_checker (upd_label C ([::tn] ++ tc_labels C)) es (Tf tn tm)
               then type_update ts (tn) tm
               else None
+          | Some (CT_struct _) => None (* absurd *)
           | None => None
           end
       | BI_if bt es1 es2 =>
           match expand_t C bt with
-          | Some (Tf tn tm) =>
+          | Some (CT_func (Tf tn tm)) =>
               if b_e_type_checker (upd_label C ([::tm] ++ tc_labels C)) es1 (Tf tn tm)
                  && b_e_type_checker (upd_label C ([::tm] ++ tc_labels C)) es2 (Tf tn tm)
               then type_update ts ((T_num T_i32 :: tn)) tm
               else None
+          | Some (CT_struct _) => None (* absurd *)
           | None => None
           end
       | BI_br i =>
@@ -267,8 +270,9 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           | Some tabt =>
               if tabt.(tt_elem_type) == T_funcref then
                 match lookup_N (tc_types C) y with
-                | Some (Tf tn tm) =>
+                | Some (CT_func (Tf tn tm)) =>
                     type_update ts ((T_num T_i32 :: tn)) tm
+                | Some (CT_struct _) => None (* absurd *)
                 | None => None 
                 end
               else None
@@ -441,9 +445,15 @@ Definition rev_tf (tf: function_type) :=
   | Tf tn tm => Tf (rev tn) (rev tm)
   end.
 
+Definition rev_tc (tc : comp_type) :=
+  match tc with
+  | CT_func tf => CT_func (rev_tf tf)
+  | _ => tc (* not sure what to do here TODO*)
+  end.
+
 Definition context_reverse (C: t_context): t_context :=
   {|
-    tc_types := map rev_tf C.(tc_types);
+    tc_types := map rev_tc C.(tc_types);
     tc_funcs := map rev_tf C.(tc_funcs);
     tc_tables := C.(tc_tables);
     tc_mems := C.(tc_mems);

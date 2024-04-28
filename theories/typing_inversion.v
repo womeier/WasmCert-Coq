@@ -109,17 +109,17 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
   | BI_block tb es =>
       exists tn tm,
       tf = (Tf tn tm) /\
-        expand_t C tb = Some (Tf tn tm) /\
+        expand_t C tb = Some (CT_func (Tf tn tm)) /\
         be_typing (upd_label C ([::tm] ++ (tc_labels C))) es (Tf tn tm)
   | BI_loop tb es =>
       exists tn tm,
       tf = (Tf tn tm) /\
-        expand_t C tb = Some (Tf tn tm) /\
+        expand_t C tb = Some (CT_func (Tf tn tm)) /\
         be_typing (upd_label C ([::tn] ++ (tc_labels C))) es (Tf tn tm)
   | BI_if tb es1 es2 =>
       exists tn tm,
       tf = (Tf (tn ++ [::T_num T_i32]) tm) /\
-        expand_t C tb = Some (Tf tn tm) /\
+        expand_t C tb = Some (CT_func (Tf tn tm)) /\
         be_typing (upd_label C ([::tm] ++ (tc_labels C))) es1 (Tf tn tm) /\
         be_typing (upd_label C ([::tm] ++ (tc_labels C))) es2 (Tf tn tm)
   | BI_br k =>
@@ -147,7 +147,7 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       tf = (Tf (ts1 ++ [::T_num T_i32]) ts2)/\
         lookup_N (tc_tables C) x = Some tabt /\
         tabt.(tt_elem_type) = T_funcref /\
-        lookup_N (tc_types C) y = Some (Tf ts1 ts2)
+        lookup_N (tc_types C) y = Some (CT_func (Tf ts1 ts2))
   | BI_return_call n => True
   | BI_return_call_indirect x y => True
   | BI_local_get x =>

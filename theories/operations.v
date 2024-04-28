@@ -532,7 +532,7 @@ Definition upd_s_data (s : store_record) (ds : list datainst) : store_record :=
 Definition iota_N (offset: nat) (len: nat) : list N :=
   map N.of_nat (iota offset len).
 
-Definition stypes (s : store_record) (i : moduleinst) (j : typeidx) : option function_type :=
+Definition stypes (s : store_record) (i : moduleinst) (j : typeidx) : option comp_type :=
   lookup_N (inst_types i) j.
 
 
@@ -959,11 +959,11 @@ Definition e_is_trap (e : administrative_instruction) : bool :=
 Definition es_is_trap (es : seq administrative_instruction) : bool :=
   (es == [:: AI_trap]).
 
-Definition expand (inst: moduleinst) (tb: block_type) : option function_type :=
+Definition expand (inst: moduleinst) (tb: block_type) : option comp_type :=
   match tb with
   | BT_id n => lookup_N inst.(inst_types) n
-  | BT_valtype (Some t) => Some (Tf [::] [::t])
-  | BT_valtype None => Some (Tf [::] [::])
+  | BT_valtype (Some t) => Some (CT_func (Tf [::] [::t]))
+  | BT_valtype None => Some (CT_func (Tf [::] [::]))
   end.
   
 (** Converting a result into a stack. **)

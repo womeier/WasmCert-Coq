@@ -385,7 +385,7 @@ Proof.
       }
     }
 
-    replace (all functype_valid inst_types) with true; last by symmetry; apply Forall_all.
+    replace (all comptype_valid inst_types) with true; last by symmetry; apply Forall_all.
     rewrite Hfit Htit Hmit Hgit Heit Hdit.
     reflexivity.
   }

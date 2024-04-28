@@ -100,6 +100,18 @@ Canonical Structure function_type_eqMixin := EqMixin eqfunction_typeP.
 Canonical Structure function_type_eqType :=
   Eval hnf in EqType function_type function_type_eqMixin.
 
+Definition comp_type_eq_dec : forall tc1 tc2 : comp_type,
+  {tc1 = tc2} + {tc1 <> tc2}.
+Proof. decidable_equality. Defined.
+
+Definition comp_type_eqb v1 v2 : bool := comp_type_eq_dec v1 v2.
+Definition eqcomp_typeP : Equality.axiom comp_type_eqb :=
+  eq_dec_Equality_axiom comp_type_eq_dec.
+
+Canonical Structure comp_type_eqMixin := EqMixin eqcomp_typeP.
+Canonical Structure comp_type_eqType :=
+  Eval hnf in EqType comp_type comp_type_eqMixin.
+
 Definition t_context_eq_dec : forall x y : t_context, {x = y} + {x <> y}.
 Proof. decidable_equality. Defined.
 
