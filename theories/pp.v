@@ -53,6 +53,8 @@ Definition pp_reference_type (vt : reference_type) : string :=
     match vt with
     | T_funcref => "funcref"
     | T_externref => "externref"
+    | T_eqref => "eqref"
+    | T_i31ref => "i31ref"
     end in
   with_fg type_style s.
 

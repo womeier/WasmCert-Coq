@@ -138,6 +138,8 @@ Reference types are opaque, meaning that neither their size nor their bit patter
 Inductive reference_type : Set := 
 | T_funcref
 | T_externref
+| T_eqref
+| T_i31ref
 .
 
 (** std-doc:

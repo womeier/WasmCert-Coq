@@ -25,6 +25,8 @@ Definition binary_of_reference_type (t: reference_type) : byte :=
   match t with
   | T_funcref => x70
   | T_externref => x6f
+  | T_eqref => x6d
+  | T_i31ref => x6c
   end.
 
 Definition binary_of_value_type (t : value_type) : byte :=
