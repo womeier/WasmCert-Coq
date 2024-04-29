@@ -326,6 +326,9 @@ Fixpoint pp_basic_instruction (i : indentation) (be : basic_instruction) : strin
   | BI_struct_new x => indent i (with_fg be_style "struct.new " ++ pp_id x ++ newline)
   | BI_struct_get x y => indent i (with_fg be_style "struct.get " ++ pp_id x ++ " " ++ pp_id y ++ newline)
   | BI_struct_set x y => indent i (with_fg be_style "struct.set " ++ pp_id x ++ " " ++ pp_id y ++ newline)
+  | BI_ref_i31 => indent i (with_fg be_style "ref.i31" ++ newline)
+  | BI_i31_get_u => indent i (with_fg be_style "i31.get_u" ++ newline)
+  | BI_ref_cast t => indent i (with_fg be_style "ref.cast (" ++ pp_reference_type t ++ ")" ++ newline)
   | BI_block tf bes =>
     indent i (with_fg be_style "block" ++ with_fg type_style (pp_block_type tf) ++ newline)
     ++ pp_basic_instructions bes (S i)

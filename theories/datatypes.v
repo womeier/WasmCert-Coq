@@ -492,6 +492,9 @@ Instructions in this group are concerned with accessing references.
   | BI_struct_new : typeidx -> basic_instruction
   | BI_struct_get : typeidx -> fieldidx -> basic_instruction
   | BI_struct_set : typeidx -> fieldidx -> basic_instruction
+  | BI_ref_i31
+  | BI_i31_get_u
+  | BI_ref_cast : reference_type -> basic_instruction
 (** std-doc:
 Instructions in this group can operate on operands of any value type.
 **)

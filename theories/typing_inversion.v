@@ -81,6 +81,9 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
   | BI_struct_new x => True
   | BI_struct_get x y => True
   | BI_struct_set x y => True
+  | BI_ref_i31 => True
+  | BI_i31_get_u => True
+  | BI_ref_cast _ => True
   | BI_unop t op =>
       tf = (Tf [::T_num t] [::T_num t]) /\
         unop_type_agree t op

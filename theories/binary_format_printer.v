@@ -130,9 +130,12 @@ Fixpoint binary_of_be (be : basic_instruction) : list byte :=
   | BI_ref_null t => xd0 :: binary_of_reference_type t :: nil
   | BI_ref_is_null => xd1 :: nil
   | BI_ref_func x => xd2 :: binary_of_idx x
-  | BI_struct_new x => xfb :: binary_of_u32 0 ++ binary_of_idx x
-  | BI_struct_get x y => xfb :: binary_of_u32 2 ++ binary_of_idx x ++ binary_of_idx y
-  | BI_struct_set x y => xfb :: binary_of_u32 5 ++ binary_of_idx x ++ binary_of_idx y
+  | BI_struct_new x => xfb :: x00 :: binary_of_idx x
+  | BI_struct_get x y => xfb :: x02 :: binary_of_idx x ++ binary_of_idx y
+  | BI_struct_set x y => xfb :: x05 :: binary_of_idx x ++ binary_of_idx y
+  | BI_ref_i31 => xfb :: x1c :: nil
+  | BI_i31_get_u => xfb :: x1e :: nil
+  | BI_ref_cast t => xfb :: x16 :: binary_of_reference_type t :: nil (* non-null, TODO should use binary_of_heaptype *)
                         
   | BI_drop => x1a :: nil
   | BI_select None => x1b :: nil
