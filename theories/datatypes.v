@@ -46,6 +46,7 @@ Definition elemidx : Set := u32.
 Definition dataidx : Set := u32.
 Definition localidx : Set := u32.
 Definition labelidx : Set := u32.
+Definition fieldidx : Set := u32.
 
 (** std-doc:
 Function instances, table instances, memory instances, and global instances, element instances, 
@@ -488,6 +489,9 @@ Instructions in this group are concerned with accessing references.
   | BI_ref_null : reference_type -> basic_instruction  
   | BI_ref_is_null
   | BI_ref_func : funcidx -> basic_instruction
+  | BI_struct_new : typeidx -> basic_instruction
+  | BI_struct_get : typeidx -> fieldidx -> basic_instruction
+  | BI_struct_set : typeidx -> fieldidx -> basic_instruction
 (** std-doc:
 Instructions in this group can operate on operands of any value type.
 **)

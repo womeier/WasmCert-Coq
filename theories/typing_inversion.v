@@ -78,6 +78,9 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       exists t, tf = (Tf [::] [::T_ref T_funcref]) /\
              lookup_N (tc_funcs C) x = Some t /\
              List.In x (tc_refs C)
+  | BI_struct_new x => True
+  | BI_struct_get x y => True
+  | BI_struct_set x y => True
   | BI_unop t op =>
       tf = (Tf [::T_num t] [::T_num t]) /\
         unop_type_agree t op

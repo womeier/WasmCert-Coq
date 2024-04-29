@@ -167,6 +167,9 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
               else None
           | _ => None
           end
+      | BI_struct_new x => None
+      | BI_struct_get x y => None
+      | BI_struct_set x y => None
       | BI_unop t op =>
           match op with
           | Unop_i _ => if is_int_t t
