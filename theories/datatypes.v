@@ -126,22 +126,32 @@ Inductive vector_type : Set :=
 
 (** std-doc:
 
-Reference types classify first-class references to objects in the runtime store.
+Heap types are encoded as either a single byte, or as a type index encoded as a positive signed integer.
 
-The type funcref denotes the infinite union of all references to functions, regardless of their function types.
-
-The type externref denotes the infinite union of all references to objects owned by the embedder and that can be passed into WebAssembly under this type.
-
-Reference types are opaque, meaning that neither their size nor their bit pattern can be observed. Values of reference type can be stored in tables.
-
-[https://www.w3.org/TR/wasm-core-2/syntax/types.html#reference-types]
 *)
-Inductive reference_type : Set := 
+Inductive absheap_type : Set := 
 | T_funcref
 | T_externref
 | T_eqref
 | T_i31ref
 .
+
+Inductive heap_type : Set :=
+| T_abs : absheap_type -> heap_type
+| T_index : typeidx -> heap_type
+.
+
+(** std-doc:
+
+Reference types are either encoded by a single byte followed by a heap type, or, as a short form, directly as an
+abstract heap type.
+*)
+Inductive reference_type : Set :=
+| T_heap : heap_type -> reference_type
+| T_heap_null : heap_type -> reference_type
+| T_absheap : absheap_type -> reference_type
+.
+
 
 (** std-doc:
 
@@ -494,7 +504,7 @@ Instructions in this group are concerned with accessing references.
   | BI_struct_set : typeidx -> fieldidx -> basic_instruction
   | BI_ref_i31
   | BI_i31_get_u
-  | BI_ref_cast : reference_type -> basic_instruction
+  | BI_ref_cast : heap_type -> basic_instruction
 (** std-doc:
 Instructions in this group can operate on operands of any value type.
 **)

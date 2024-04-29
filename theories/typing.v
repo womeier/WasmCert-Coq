@@ -56,10 +56,10 @@ Definition typeof_ref (s: store_record) (v: value_ref) : option reference_type :
   | VAL_ref_null t => Some t
   | VAL_ref_func addr =>
       match ext_func_typing s addr with
-      | Some ft => Some T_funcref
+      | Some ft => Some (T_absheap T_funcref)
       | _ => None
       end
-  | VAL_ref_extern eaddr => Some T_externref
+  | VAL_ref_extern eaddr => Some (T_absheap T_externref)
   end.
 
 Definition typeof_value (s: store_record) (v: value) : option value_type :=
@@ -217,7 +217,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 | bet_ref_func: forall C t x,
     lookup_N (tc_funcs C) x = Some t ->
     List.In x (tc_refs C) ->
-    be_typing C [::BI_ref_func x] (Tf [::] [::T_ref T_funcref])
+    be_typing C [::BI_ref_func x] (Tf [::] [::T_ref (T_heap (T_abs T_funcref))])
 | bet_unop : forall C t op,
     unop_type_agree t op -> be_typing C [::BI_unop t op] (Tf [::T_num t] [::T_num t])
 | bet_binop : forall C t op,
@@ -264,7 +264,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   be_typing C [::BI_call i] tf
 | bet_call_indirect : forall C x y tabtype t1s t2s,
   lookup_N (tc_tables C) x = Some tabtype ->
-  tabtype.(tt_elem_type) = T_funcref ->
+  tabtype.(tt_elem_type) = T_heap (T_abs T_funcref) ->
   lookup_N (tc_types C) y = Some (CT_func (Tf t1s t2s)) ->
   be_typing C [::BI_call_indirect x y] (Tf (t1s ++ [::T_num T_i32]) t2s)
 (* https://webassembly.github.io/tail-call/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-return-call-x *)
@@ -275,7 +275,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 (* https://webassembly.github.io/tail-call/core/valid/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-return-call-indirect-x-y *)
 | bet_return_call_indirect : forall C x y tabtype t1s t2s t3s t4s,
   lookup_N (tc_tables C) x = Some tabtype ->
-  tabtype.(tt_elem_type) = T_funcref ->
+  tabtype.(tt_elem_type) = T_heap (T_abs T_funcref)  ->
   tc_return C = Some t2s ->
   lookup_N (tc_types C) y = Some (CT_func (Tf t1s t2s)) ->
   be_typing C [::BI_return_call_indirect x y] (Tf (t3s ++ (t1s ++ [::T_num T_i32])) t4s)
@@ -515,10 +515,10 @@ Inductive e_typing : store_record -> t_context -> seq administrative_instruction
 | ety_trap : forall s C tf,
   e_typing s C [::AI_trap] tf
 | ety_ref_extern : forall s C a,
-  e_typing s C [::AI_ref_extern a] (Tf [::] [::T_ref T_externref])
+  e_typing s C [::AI_ref_extern a] (Tf [::] [::T_ref (T_heap (T_abs T_externref)) ])
 | ety_ref : forall s C a tf,
   ext_func_typing s a = Some tf ->
-  e_typing s C [::AI_ref a] (Tf [::] [::T_ref T_funcref])
+  e_typing s C [::AI_ref a] (Tf [::] [::T_ref (T_heap (T_abs T_externref))])
 | ety_invoke : forall s (a: funcaddr) C tf,
   ext_func_typing s a = Some tf ->
   e_typing s C [::AI_invoke a] tf

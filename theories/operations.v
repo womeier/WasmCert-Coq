@@ -849,7 +849,7 @@ Definition e_to_vref (e: administrative_instruction) : value_ref :=
   | AI_basic (BI_ref_null t) => VAL_ref_null t
   | AI_ref addr => VAL_ref_func addr
   | AI_ref_extern eaddr => VAL_ref_extern eaddr
-  | _ => VAL_ref_null T_funcref
+  | _ => VAL_ref_null (T_absheap T_funcref)
   end.
 
 Definition e_to_vref_opt (e: administrative_instruction) : option value_ref :=
