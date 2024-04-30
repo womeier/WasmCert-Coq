@@ -147,6 +147,7 @@ Fixpoint binary_of_be (be : basic_instruction) : list byte :=
   | BI_struct_set x y => xfb :: x05 :: binary_of_idx x ++ binary_of_idx y
   | BI_ref_i31 => xfb :: x1c :: nil
   | BI_i31_get_u => xfb :: x1e :: nil
+  | BI_ref_test t => xfb :: x14 :: binary_of_heaptype t (* x16: non-null ref.cast (ref t) *)
   | BI_ref_cast t => xfb :: x16 :: binary_of_heaptype t (* x16: non-null ref.cast (ref t) *)
   | BI_drop => x1a :: nil
   | BI_select None => x1b :: nil

@@ -505,6 +505,7 @@ Instructions in this group are concerned with accessing references.
   | BI_ref_i31
   | BI_i31_get_u
   | BI_ref_cast : heap_type -> basic_instruction
+  | BI_ref_test : heap_type -> basic_instruction
 (** std-doc:
 Instructions in this group can operate on operands of any value type.
 **)
