@@ -15,12 +15,13 @@ on:
 jobs:
   build-matrix:
     runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
     strategy:
       matrix:
         opam_file:
           - 'coq-wasm.opam'
         coq_version:
-          - '8.19.2'
+          - '8.20'
       fail-fast: true
 
     steps:

@@ -1,14 +1,12 @@
 (** Soundness and correctness of the type checker **)
 
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
-
 From Coq Require Import Program Wf_nat.
+From Wasm Require Import type_checker typing_inversion.
 
 Set Implicit Arguments.
 Unset Strict Implicit.
 Unset Printing Implicit Defensive.
-
-From Wasm Require Import type_checker typing_inversion.
 
 Section Host.
 
@@ -194,12 +192,12 @@ Ltac simplify_tc_goal :=
   | H: ?expr = _ |-
     context [?expr] =>
       rewrite H
-  | H: unop_type_agree ?t ?op |- _ =>
+(*  | H: unop_type_agree ?t ?op = true |- _ =>
       destruct t, op; inversion H; subst; clear H
-  | H: binop_type_agree ?t ?op |- _ =>
+  | H: binop_type_agree ?t ?op = true |- _ =>
       destruct t, op; inversion H; subst; clear H
-  | H: relop_type_agree ?t ?op |- _ =>
-      destruct t, op; inversion H; subst; clear H
+  | H: relop_type_agree ?t ?op = true |- _ =>
+      destruct t, op; inversion H; subst; clear H*)
   | H: lookup_N ?l ?n = ?x
     |- context [lookup_N (map _ ?l) ?n] =>
     rewrite lookup_N_map H
@@ -1232,36 +1230,46 @@ Proof.
       split => //.
       by eapply bet_composition; eauto.
   (* Single *)
-  - destruct e => //=; (try destruct i as [tn' tm']); simplify_tc_goal; move => cts' Hs Hupdate Hagree => //; simplify_tc_goal; invert_update_agree; simplify_tc_goal; try resolve_check_agree; try rewrite rev_cat.
+  - destruct e => //=; (try destruct i as [tn' tm']); simplify_tc_goal;
+                 move => cts' Hs Hupdate Hagree => //; simplify_tc_goal;
+                 invert_update_agree; simplify_tc_goal;
+                 try resolve_check_agree; try rewrite rev_cat.
+    (* It is true that many cases can be automatically resolved. However,
+       we avoid doing so -- so that this proof is easier to be fixed when
+       there's a major update in the future. *)
     (* Const_num *)
     + by resolve_tc_be_typing.
-    (* Unop_i *)
+    (* Unop *)
     + apply bet_weakening, bet_unop.
       destruct n, u => //; by constructor.
-    (* Unop_f *)
-    + apply bet_weakening, bet_unop.
-      destruct n, u => //; by constructor.
-    (* Unop_extend *)
-    + apply bet_weakening, bet_unop.
-      destruct n, n0 => //; by constructor.
-    (* Binop_i *)
-    + apply bet_weakening, bet_binop.
-      destruct n, b => //; by constructor.
-    (* Binop_f *)
+    (* Binop *)
     + apply bet_weakening, bet_binop.
       destruct n, b => //; by constructor.
     (* Testop *)
     + by resolve_tc_be_typing.
-    (* Relop_i *)
-    + apply bet_weakening, bet_relop.
-      destruct n, r => //; by constructor.
-    (* Relop_f *)
+    (* Relop *)
     + apply bet_weakening, bet_relop.
       destruct n, r => //; by constructor.
     (* Cvtop *)
     + apply bet_weakening, bet_cvtop.
       destruct n, n0 => //; by constructor.
     (* Const_vec *)
+    + by resolve_tc_be_typing.
+    (* Unop_vec *)
+    + by resolve_tc_be_typing.
+    (* Binop_vec *)
+    + by resolve_tc_be_typing.
+    (* Ternop_vec *)
+    + by resolve_tc_be_typing.
+    (* Test_vec *)
+    + by resolve_tc_be_typing.
+    (* Shift_vec *)
+    + by resolve_tc_be_typing.
+    (* Splat_vec *)
+    + by resolve_tc_be_typing.
+    (* Extract_vec *)
+    + by resolve_tc_be_typing.
+    (* Replace_vec *)
     + by resolve_tc_be_typing.
     (* Ref_null *)
     + by resolve_tc_be_typing.
@@ -1314,7 +1322,13 @@ Proof.
       by apply bet_weakening_empty_both; econstructor; eauto.
     (* Load *)
     + by resolve_tc_be_typing.
+    (* Load_vec *)
+    + by resolve_tc_be_typing.
+    (* Load_vec_lane *)
+    + by resolve_tc_be_typing.
     (* Store *)
+    + by resolve_tc_be_typing.
+    (* Store_vec_lane *)
     + by resolve_tc_be_typing.
     (* Memory_size *)
     + by resolve_tc_be_typing.
@@ -1497,8 +1511,7 @@ Proof.
     assert (b_e_type_checker C bes (Tf tn tm)) as H; (try by rewrite H in Htc_bool); clear Htc_bool.
     induction Hbet; subst => //=; (try rewrite H); unfold type_update, type_update_top, produce; simplify_tc_goal; (try by unfold c_types_agree in *; simplify_tc_goal).
     (* Ref_func *)
-    + (* inP is slightly stupid *)
-      move/(@inP u32_eqType) in H0.
+    + move/inP in H0.
       by rewrite H0.
     + rewrite value_type_select_refl => //.
       unfold c_types_agree.

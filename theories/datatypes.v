@@ -4,8 +4,8 @@
 (* (C) J. Pichon, M. Bodin - see LICENSE.txt *)
 
 From Wasm Require array.
-From Wasm Require Import common memory memory_list.
-From Wasm Require Export numerics bytes.
+From Wasm Require Import memory memory_list.
+From Wasm Require Export common numerics bytes.
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From compcert Require common.Memdata.
 Require Import BinNat.
@@ -33,6 +33,7 @@ Label indices reference structured control instructions inside an instruction se
 [https://www.w3.org/TR/wasm-core-2/syntax/modules.html#indices]
 *)
 Definition u32 : Set := N.
+Definition u8: Set := N.
 
 (* 2^32 *)
 Definition u32_bound : N := 4294967296%N.
@@ -178,18 +179,6 @@ Inductive function_type := (* tf *)
 the same as function types. *)
 Definition instr_type := function_type.
 
-(*
-This is technically part of the spec, but the actual definitions never used the bottom case concretely except for the type checking algorithm.
-(** std-doc:
-Instructions are classified by stack types [t1∗]→[t2∗] that describe how instructions manipulate the operand stack.
- *)
-Definition operand_type := option value_type.
-
-Inductive stack_type :=
-| Tfs: list operand_type -> list operand_type -> stack_type
-.
-*)
-
 (** std-doc:
 Limits classify the size range of resizeable storage associated with memory types and table types.
 If no maximum is given, the respective storage can grow to any size.
@@ -317,27 +306,6 @@ Definition serialise_f32 (f : f32) : bytes :=
 Definition serialise_f64 (f : f64) : bytes :=
   common.Memdata.encode_int 8%nat (Integers.Int64.unsigned (numerics.Wasm_float.FloatSize64.to_bits f)).
 
-(*
-(* TODO: factor this out, following the `memory` branch *)
-Module Byte_Index <: array.Index_Sig.
-Definition Index := N.
-Definition Value := byte.
-Definition index_eqb := N.eqb.
-End Byte_Index.
-
-Module Byte_array := array.Make Byte_Index.
-
-Record data_vec : Set := {
-  dv_length : N;
-  dv_array : Byte_array.array;
-}.
-
-Record memory : Set := {
-  mem_data : memory_list;
-  mem_max_opt: option N; (* TODO: should be u32 *)
-}.
-*)
-
   
 Section Instructions.
   
@@ -446,6 +414,74 @@ Inductive packed_type : Set := (* tp *)
   | Tp_i32
   .
 
+Inductive shape_vec_i: Set :=
+  | SVI_8_16
+  | SVI_16_8
+  | SVI_32_4
+  | SVI_64_2
+  .
+  
+Inductive shape_vec_f: Set :=
+  | SVF_32_4
+  | SVF_64_2
+  .
+  
+Inductive shape_vec : Set := (* shape *)
+  | SV_ishape: shape_vec_i -> shape_vec
+  | SV_fshape: shape_vec_f -> shape_vec
+  .
+
+Inductive unop_vec : Set :=
+  | VUO_not
+  .
+  
+Inductive binop_vec : Set :=
+  | VBO_and
+  .
+  
+Inductive ternop_vec : Set :=
+  | VTO_bitselect
+  .
+  
+Inductive test_vec : Set :=
+  | VT_any_true
+  .
+  
+Inductive shift_vec : Set :=
+  | VSH_any_true
+  .
+
+Definition laneidx := u8.
+
+Inductive packed_type_vec :=
+  | Tptv_8_8
+  | Tptv_16_4
+  | Tptv_32_2
+.
+
+Inductive zero_type_vec :=
+  | Tztv_32
+  | Tztv_64
+.
+
+Inductive width_vec :=
+  | Twv_8
+  | Twv_16
+  | Twv_32
+  | Twv_64
+  .
+
+Inductive load_vec_arg :=
+  | LVA_packed: packed_type_vec -> sx -> load_vec_arg
+  | LVA_zero: zero_type_vec -> load_vec_arg
+  | LVA_splat: width_vec -> load_vec_arg
+  .
+
+Record memarg : Set :=
+  { memarg_offset : u32;
+    memarg_align: u32
+  }.
+  
 Inductive basic_instruction : Type := (* be *)
 (** std-doc:
 Numeric instructions provide basic operations over numeric values of specific type. These operations closely match respective operations available in hardware.
@@ -458,8 +494,27 @@ Numeric instructions provide basic operations over numeric values of specific ty
   | BI_cvtop : number_type -> cvtop -> number_type -> option sx -> basic_instruction
 (** std-doc: (not implemented yet)
 Vector instructions (also known as SIMD instructions, single data multiple value) provide basic operations over values of vector type.
+Vector instructions can be grouped into several subcategories:
+
+Constants: return a static constant.
+Unary Operations: consume one v128 operand and produce one v128 result.
+Binary Operations: consume two v128 operands and produce one v128 result.
+Ternary Operations: consume three v128 operands and produce one v128 result.
+Tests: consume one v128 operand and produce a Boolean integer result.
+Shifts: consume a v128 operand and a i32 operand, producing one v128 result.
+Splats: consume a value of numeric type and produce a v128 result of a specified shape.
+Extract lanes: consume a v128 operand and return the numeric value in a given lane.
+Replace lanes: consume a v128 operand and a numeric value for a given lane, and produce a v128 result.
 **)
   | BI_const_vec : value_vec -> basic_instruction
+  | BI_unop_vec: unop_vec -> basic_instruction
+  | BI_binop_vec: binop_vec -> basic_instruction
+  | BI_ternop_vec: ternop_vec -> basic_instruction
+  | BI_test_vec: test_vec -> basic_instruction
+  | BI_shift_vec: shift_vec -> basic_instruction
+  | BI_splat_vec: shape_vec -> basic_instruction
+  | BI_extract_vec: shape_vec -> option sx -> laneidx -> basic_instruction
+  | BI_replace_vec: shape_vec -> laneidx -> basic_instruction
 (** std-doc:
 Instructions in this group are concerned with accessing references.
 **)
@@ -478,7 +533,7 @@ Variable instructions are concerned with access to local or global variables.
   | BI_local_set : localidx -> basic_instruction
   | BI_local_tee : localidx -> basic_instruction
   | BI_global_get : globalidx -> basic_instruction
-| BI_global_set : globalidx -> basic_instruction
+  | BI_global_set : globalidx -> basic_instruction
 (** std-doc:
 Instructions in this group are concerned with tables.
 **)
@@ -493,9 +548,12 @@ Instructions in this group are concerned with tables.
 (** std-doc:
 Instructions in this group are concerned with linear memory.
 **)
-(* TODO: add comments on the implemented subset of memory load/store instructions *)                     
-  | BI_load : number_type -> option (packed_type * sx) -> alignment_exponent -> static_offset -> basic_instruction
-  | BI_store : number_type -> option packed_type -> alignment_exponent -> static_offset -> basic_instruction
+  | BI_load : number_type -> option (packed_type * sx) -> memarg -> basic_instruction
+  | BI_load_vec : load_vec_arg -> memarg -> basic_instruction
+  (* the lane version has a different type signature *)
+  | BI_load_vec_lane : width_vec -> memarg -> laneidx -> basic_instruction
+  | BI_store : number_type -> option packed_type -> memarg-> basic_instruction
+  | BI_store_vec_lane : width_vec -> memarg -> laneidx -> basic_instruction
   | BI_memory_size
   | BI_memory_grow
   | BI_memory_fill
@@ -1016,3 +1074,4 @@ End Host.
 
 (* Notations for values to basic/admin instructions *)
 Notation "$VN v" := (AI_basic (BI_const_num v)) (at level 60).
+Notation "$VV v" := (AI_basic (BI_const_vec v)) (at level 60).

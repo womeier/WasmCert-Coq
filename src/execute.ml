@@ -46,174 +46,141 @@ module Interpreter = Shim.Interpreter (Host)
 (** An alias of [Host] to be able to retrieve it later. *)
 module TopHost = Host
 
-open Host
 open Interpreter
 
-(* read-eval-print loop; work in progress *)
-let rec user_input prompt cb st =
-  match LNoise.linenoise prompt with
-  | None -> pure ()
-  | Some v ->
-    let* st' = cb v st in
-    user_input prompt cb st'
+type eval_cfg_result =
+  | Cfg_res of store_record * frame * value list
+  | Cfg_trap of store_record * frame
+  | Cfg_err
 
-let string_of_crash_reason = function
-  | () -> "error"
-
-(*
-let take_step verbosity _i cfg =
-  let res = run_step_compat cfg in
-  (*
-  let store_status = if s = s' then "unchanged" else "changed" in
-  debug_info result verbosity (fun _ ->
-    Printf.sprintf "%sand store %s\n%!" (pp_res_tuple_except_store (tuple_drop_hs res)) store_status) ;
-  *)
-  match res with
-  | ((_, _), Extract.RS_crash _) ->
-    debug_info result verbosity ~style:red (fun _ -> "crash:") ;
-    debug_info result verbosity (fun _ -> " " ^ string_of_crash_reason ()) ;
-    pure cfg
-  | ((_, _), Extract.RS_break _) ->
-    debug_info result verbosity ~style:red (fun _ -> "break") ;
-    pure cfg
-  | ((_, _), Extract.RS_return vs) ->
-    debug_info result verbosity ~style:green (fun _ -> "return:") ;
-    debug_info result verbosity (fun _ -> " " ^ pp_values vs) ;
-    pure cfg
-  | ((s', vs'), Extract.RS_normal es) ->
-    pure ((s', vs'), es)
-
-let repl verbosity sies (name : string) =
-  error ("unimplemented")
-  LNoise.set_hints_callback (fun line ->
-      (* FIXME: Documentation is needed here. I don’t know what these lines do. *)
-      if line <> "git remote add " then None
-      else Some (" <this is the remote name> <this is the remote URL>",
-                 LNoise.Yellow,
-                 true)
-    );
-  LNoise.history_load ~filename:"history.txt" |> ignore;
-  LNoise.history_set ~max_length:100 |> ignore;
-  LNoise.set_completion_callback begin fun line_so_far ln_completions ->
-    (if line_so_far = "" then
-      ["store"]
-    else if line_so_far <> "" && line_so_far.[0] = 's' then
-      ["store"]
-    else [])
-      |> List.iter (LNoise.add_completion ln_completions);
-  end;
-  ["interactive Wasm interpreter";
-   "get tab completion with <TAB>";
-   "type quit to exit gracefully"]
-  |> List.iter print_endline;
-  let (((_, s), i), _) = sies in
-  match lookup_exported_function name sies with
-  | None -> error ("unknown function `" ^ name ^ "`")
-  | Some cfg0 ->
-    debug_info result verbosity (fun _ ->
-      Printf.sprintf "\n%sand store\n%s\n%!"
-        (pp_config_tuple_except_store (tuple_drop_hs cfg0))
-        (pp_store 1 s)) ;
-    (fun from_user cfg ->
-      if from_user = "quit" then exit 0;
-      LNoise.history_add from_user |> ignore;
-      LNoise.history_save ~filename:"history.txt" |> ignore;
-      if from_user = "" || from_user = "step" then take_step verbosity i cfg
-      else if from_user = "s" || from_user = "store" then
-        (let (((_, s), _), _) = cfg in
-         Printf.sprintf "%s%!" (pp_store 0 s) |> print_endline;
-         pure cfg)
-      else if from_user = "help" then
-        (Printf.sprintf "commands:\nstep: take a step\nstore: display the store\nquit: quit\nhelp: this help message" |> print_endline;
-         pure cfg)
-      else (Printf.sprintf "unknown command" |> print_endline; pure cfg))
-    |> (fun cb -> user_input "> " cb cfg0)
-*)
-
-let invocation_interpret verbosity error_code_on_crash hsfes (name: string) =
+let rec eval_interp_cfg verbosity gen cfg =
   let print_step_header gen =
     debug_info verbosity intermediate ~style:bold
       (fun () -> Printf.sprintf "step %d:\n" gen) in
-  let (((hs, s), f_invocation), es_invocation) = hsfes in
+  let cfg_res = run_one_step cfg in
+  print_step_header gen;
+  debug_info verbosity intermediate
+    (fun _ -> pp_res_cfg_except_store cfg cfg_res);
+  match cfg_res with
+  | RSC_normal (_hs', cfg') ->
+    eval_interp_cfg verbosity (gen+1) cfg'
+  | RSC_value (s, f, vs) ->
+    debug_info verbosity stage ~style:green (fun _ -> "success after " ^ string_of_int gen ^ " steps\n");
+    (Cfg_res (s, f, vs))
+  | RSC_trap (s, f) ->
+    debug_info verbosity stage ~style:red (fun _ -> "trap after " ^ string_of_int gen ^ " steps\n");
+    Cfg_trap (s, f)
+  | RSC_invalid ->
+    debug_info verbosity stage ~style:red (fun _ -> "Invalid cfg\n");
+    Cfg_err
+  | RSC_error ->
+    debug_info verbosity stage ~style:red (fun _ -> "Ill-typed input\n");
+    Cfg_err
   
-  let rec eval_cfg gen hs cfg =
-      (let cfg_res = run_step_compat hs cfg in
-      print_step_header gen ;
-      debug_info verbosity intermediate
-        (fun _ -> pp_res_cfg_except_store hs cfg cfg_res);
-      match cfg_res with
-      | RSC_normal (hs', cfg') ->
-        begin match run_step_cfg_ctx_reform cfg' with
-        | Some cfg_next -> 
-            eval_cfg (gen+1) hs' cfg_next
-        | None ->
-          debug_info verbosity stage ~style:red (fun _ -> "Configuration reformation failure\n");
-          pure None
-        end
-      | RSC_value (hs, s, vs) ->
-        debug_info verbosity stage ~style:green (fun _ -> "success after " ^ string_of_int gen ^ " steps\n");
-        pure (Some (hs, s, vs))
-      | RSC_value_frame (hs, s, vs, _, _) ->
-        debug_info verbosity stage ~style:green (fun _ -> "success after " ^ string_of_int gen ^ " steps\n");
-        pure (Some (hs, s, vs))
-      | RSC_invalid ->
-        debug_info verbosity stage ~style:red (fun _ -> "Invalid cfg\n");
-        pure None
-      | RSC_error ->
-        debug_info verbosity stage ~style:red (fun _ -> "Ill-typed input\n");
-        pure None
-      )
-    in
+let eval_wasm_cfg verbosity cfg =
+  let interp_cfg_inst = interp_cfg_of_wasm cfg in
   debug_info verbosity intermediate (fun _ ->
-    Printf.sprintf "\nPost-instantiation stage for table and memory initialisers...\n");
-  
-  match run_v_init_with_frame s f_invocation O es_invocation with
-  | Some cfg_invocation -> 
-    let* res = eval_cfg 1 hs cfg_invocation in
-    begin match res with
-    | Some (hs', s', _) ->
-      debug_info verbosity intermediate (fun _ ->
-      Printf.sprintf "\nInstantiation success\n");
-      let* es_init =
-        TopHost.from_out (
-          ovpending verbosity stage "interpreting" (fun _ ->
-            match lookup_exported_function name s f_invocation with
-            | None -> Error ("unknown function `" ^ name ^ "`")
-            | Some es_init -> OK es_init)
-            ) in
-      begin match run_v_init_with_frame s' Extract.empty_frame O es_init with
-      | Some cfg_init -> 
-        print_step_header 0 ;
-        debug_info verbosity intermediate (fun _ ->
-          Printf.sprintf "\nExecuting configuration:\n%s\n" (pp_cfg_tuple_ctx_except_store cfg_init));
-        let* res = eval_cfg 1 hs' cfg_init in
-        debug_info_span verbosity result stage (fun _ ->
-          match res with
-          | Some (_, _, vs) -> pp_values vs
-          | None -> "");
-        if error_code_on_crash && (match res with None -> true | Some _ -> false) then exit 1
-        else pure ()
-      | None -> Printf.printf "Unable to construct initial configuration for named function";
-      pure ()
-      end
-    | None -> Printf.printf "Invocation failed"; pure ()
-    end
-  | None -> Printf.printf "Unable to construct initial configuration for invocation"; pure ()
+    Printf.sprintf "\nExecuting configuration:\n%s\n" (pp_cfg_tuple_ctx_except_store interp_cfg_inst));
+  eval_interp_cfg verbosity 1 interp_cfg_inst
 
 
+module StringMap = Map.Make(String);;
 
+type host_extern_store = (Interpreter.externval StringMap.t) StringMap.t
 
+let invoke_func verbosity exts sf args modname name =
+  let (s, f) = sf in
+  let* es_init =
+    TopHost.from_out (
+      ovpending verbosity stage "interpreting" (fun _ ->
+        if (String.equal name "") then
+          Error ("no function name specified")
+        else
+          begin match StringMap.find_opt modname exts with
+          | Some mmap ->
+            begin match StringMap.find_opt name mmap with
+            | Some extval ->
+              begin match invoke_extern s extval args with
+              | None -> Error ("Unknown function `" ^ name ^ "`, or invalid argument types")
+              | Some es_init -> OK es_init
+              end
+            | None -> Error "The specified function does not exist"
+            end
+          | None -> Error "The specified module does not exist"
+          end
+      )) in
+    let cfg_init = (s, (f, es_init)) in
+    let res = eval_wasm_cfg verbosity cfg_init in
+    debug_info_span verbosity result stage (fun _ ->
+      match res with
+      | Cfg_res (_, _, vs) -> pp_values vs
+      | Cfg_trap (_, _) -> "Execution returned a trap; run the interpreter in detailed mode (--vi) for more information\n"
+      | Cfg_err -> "Execution returned an error; run the interpreter in detailed mode (--vi) for more information\n"
+    );
+    match res with
+    | Cfg_res (s, _, _) -> pure s
+    | Cfg_trap (s, _) -> pure s
+    | Cfg_err -> TopHost.error ""
 
-  
-
-(* TODO: update the interactive to use the context-optimised version as well *)
-let instantiate_interpret verbosity error_code_on_crash m name =
-  let* hs_s_f_es =
+let instantiate_imps verbosity s m imps =
+  let* wasm_cfg =
     TopHost.from_out (
       ovpending verbosity stage "instantiation" (fun _ ->
-        match interp_instantiate_wrapper m with
+        match interp_instantiate_wrapper s m imps with
         | None -> Error "instantiation error"
-        | Some hs_s_f_es -> OK hs_s_f_es)) in
-  (*if interactive then repl verbosity store_inst_exps name
-  else if no_ctx_optimise then interpret verbosity error_code_on_crash store_inst_exps name
-  else*) invocation_interpret verbosity error_code_on_crash hs_s_f_es name
+        | Some cfg -> OK cfg)) in
+  pure (eval_wasm_cfg verbosity wasm_cfg)
+
+let get_ext_import exts path = 
+  let (m, imp_name) = path in
+  match StringMap.find_opt m exts with
+  | Some imps_map ->
+    StringMap.find_opt imp_name imps_map
+  | None -> None
+
+let instantiate verbosity exts s m = 
+  let import_paths = get_import_path m in
+  let oext_vals = List.map (get_ext_import exts) import_paths in
+  let ext_vals = List.filter_map (fun x -> x) oext_vals in
+  if List.length oext_vals = List.length ext_vals then
+    let* inst_res = instantiate_imps verbosity s m ext_vals in
+    pure inst_res
+  else
+    TopHost.error "invalid module imports"
+
+let instantiate_host verbosity exts s module_name m = 
+  let* inst_res = instantiate verbosity exts s m in
+  (* Add the exported instances to the host store. *)
+  match inst_res with
+  | Cfg_res (s', f, _vs) -> 
+    let exps = get_exports f in
+    let exps_str = List.map 
+      (fun exp -> 
+        match exp with
+        | (exp_name, exp_val) -> exp_name ^ " at " ^ pp_externval exp_val ^ ";") exps in
+    let exps_map = StringMap.of_seq (List.to_seq exps) in
+    let exts'' = StringMap.add module_name exps_map exts in
+    debug_info verbosity stage (fun _ -> "Adding the following exports to module " ^ module_name ^ " : " ^ (String.concat "" exps_str) ^ "\n");
+    pure (exts'', s')
+  (* Trap won't be counted as an irrecoverable error in the host *)
+  | Cfg_trap (s', f) -> 
+    let exps = get_exports f in
+    let exps_map = StringMap.of_seq (List.to_seq exps) in
+    let exts'' = StringMap.add module_name exps_map exts in
+    pure (exts'', s')
+  | Cfg_err -> TopHost.error "invalid module instantiation"
+
+(*
+let instantiate_interpret verbosity error_code_on_crash exts s m args name =
+  let* sf =
+    let* inst_result = instantiate verbosity empty_store_record m [] in
+    TopHost.from_out (
+      ovpending verbosity stage "instantiation" (fun _ ->
+        match inst_result with
+        | Cfg_err -> Error "instantiation error"
+        | Cfg_trap _ -> Error "instantiation error: initialisers resulted in a trap"
+        | Cfg_res (s, f, _vs) -> OK (s, f))
+  ) in
+    debug_info verbosity intermediate (fun _ -> Printf.sprintf "\nInstantiation success\n");
+    invocation_interpret verbosity error_code_on_crash sf args name
+*)

@@ -1,20 +1,21 @@
 (** Wasm type checker **)
-(* (C) J. Pichon, M. Bodin - see LICENSE.txt *)
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
-Require Import BinNat.
-Require Import common operations typing datatypes_properties.
+From HB Require Import structures.
+From Wasm Require Export typing datatypes_properties operations.
+From Coq Require Import BinNat.
 
 Set Implicit Arguments.
 Unset Strict Implicit.
 Unset Printing Implicit Defensive.
 
-(* flag for unreachable. Operand stack is represented in reverse direction (stack) *)
+(* Flag for unreachable.
+   The operand stack is represented in reverse direction (stack) *)
 Record checker_type: Type :=
   { CT_type: list value_type;
     CT_unr: bool;
   }.
 
-Notation "<< ts , unr >>" := (Build_checker_type ts unr) (at level 5).
+Notation "<< ts , unr >>" := (Build_checker_type ts unr) (at level 0).
 
 Definition checker_type_eq_dec : forall v1 v2 : checker_type, {v1 = v2} + {v1 <> v2}.
 Proof. decidable_equality. Defined.
@@ -23,8 +24,7 @@ Definition checker_type_eqb v1 v2 : bool := checker_type_eq_dec v1 v2.
 Definition eqchecker_typeP : Equality.axiom checker_type_eqb :=
   eq_dec_Equality_axiom checker_type_eq_dec.
 
-Canonical Structure checker_type_eqMixin := EqMixin eqchecker_typeP.
-Canonical Structure checker_type_eqType := Eval hnf in EqType checker_type checker_type_eqMixin.
+HB.instance Definition checker_type_eqMixin := hasDecEq.Build checker_type eqchecker_typeP.
 
 Fixpoint consume (ct: checker_type) (cons : list value_type) : option checker_type :=
   match cons with
@@ -168,44 +168,47 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           | _ => None
           end
       | BI_unop t op =>
-          match op with
-          | Unop_i _ => if is_int_t t
-                       then type_update ts [::(T_num t)] [::T_num t]
-                       else None
-          | Unop_f _ => if is_float_t t
-                       then type_update ts [::(T_num t)] [::T_num t]
-                       else None
-          | Unop_extend _ =>
-              (* Technically, this needs to check validity of the extend arg; but such instruction can never arise from parsing *)
-              if is_int_t t
-              then type_update ts [::(T_num t)] [::T_num t]
-              else None
+          match unop_type_agree t op with
+          | true => type_update ts [::T_num t] [::T_num t]
+          | false => None
           end
       | BI_binop t op =>
-          match op with
-          | Binop_i _ => if is_int_t t
-                        then type_update ts [::(T_num t); (T_num t)] [::(T_num t)]
-                        else None
-          | Binop_f _ => if is_float_t t
-                        then type_update ts [::(T_num t); (T_num t)] [::(T_num t)]
-                        else None
+          match binop_type_agree t op with
+          | true => type_update ts [::T_num t; T_num t] [::T_num t]
+          | false => None
           end
       | BI_testop t _ =>
           if is_int_t t
           then type_update ts [::(T_num t)] [::(T_num T_i32)]
           else None
       | BI_relop t op =>
-          match op with
-          | Relop_i _ => if is_int_t t
-                        then type_update ts [::(T_num t); (T_num t)] [::(T_num T_i32)]
-                        else None
-          | Relop_f _ => if is_float_t t
-                        then type_update ts [::(T_num t); (T_num t)] [::(T_num T_i32)]
-                        else None
+          match relop_type_agree t op with
+          | true => type_update ts [::T_num t; T_num t] [::T_num T_i32]
+          | false => None
           end
       | BI_cvtop t2 op t1 sx =>
           if cvtop_valid t2 op t1 sx
           then type_update ts [::(T_num t1)] [::(T_num t2)]
+          else None
+      | BI_unop_vec op =>
+          type_update ts [::T_vec T_v128] [::T_vec T_v128]
+      | BI_binop_vec op =>
+          type_update ts [::T_vec T_v128; T_vec T_v128] [::T_vec T_v128]
+      | BI_ternop_vec op =>
+          type_update ts [::T_vec T_v128; T_vec T_v128; T_vec T_v128] [::T_vec T_v128]
+      | BI_test_vec tv =>
+          type_update ts [::T_vec T_v128] [::T_num T_i32]
+      | BI_shift_vec sv =>
+          type_update ts [::T_num T_i32; T_vec T_v128] [::T_vec T_v128]
+      | BI_splat_vec shape =>
+          type_update ts [::T_num (typeof_shape_unpacked shape)] [::T_vec T_v128]
+      | BI_extract_vec shape sx x =>
+          if N.ltb x (shape_dim shape) then
+            type_update ts [::T_vec T_v128] [::T_num (typeof_shape_unpacked shape)]
+          else None
+      | BI_replace_vec shape x =>
+          if N.ltb x (shape_dim shape) then
+            type_update ts [::T_num (typeof_shape_unpacked shape); T_vec T_v128] [::T_vec T_v128]
           else None
       | BI_unreachable => Some <<nil, true>>
       | BI_nop => Some ts
@@ -363,19 +366,43 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           | None => None 
           | Some tabt => Some ts
           end
-      | BI_load t tp_sx a off =>
+      | BI_load t tp_sx marg =>
           match lookup_N C.(tc_mems) 0%N with
           | Some _ =>
-              if load_store_t_bounds a (option_projl tp_sx) t
+              if load_store_t_bounds marg.(memarg_align) (option_projl tp_sx) t
               then type_update ts [::(T_num T_i32)] [::T_num t]
               else None
           | None => None
           end
-      | BI_store t tp a off =>
+      | BI_load_vec lvarg marg =>
           match lookup_N C.(tc_mems) 0%N with
           | Some _ =>
-              if load_store_t_bounds a tp t
+              if load_vec_bounds lvarg marg
+              then type_update ts [::(T_num T_i32)] [::T_vec T_v128]
+              else None
+          | None => None
+          end
+      | BI_load_vec_lane width marg x =>
+          match lookup_N C.(tc_mems) 0%N with
+          | Some _ =>
+              if load_vec_lane_bounds width marg x
+              then type_update ts [:: T_vec T_v128; T_num T_i32] [::T_vec T_v128]
+              else None
+          | None => None
+          end
+      | BI_store t tp marg =>
+          match lookup_N C.(tc_mems) 0%N with
+          | Some _ =>
+              if load_store_t_bounds marg.(memarg_align) tp t
               then type_update ts [::T_num t; T_num T_i32] [::]
+              else None
+          | None => None
+          end
+      | BI_store_vec_lane width marg x =>
+          match lookup_N C.(tc_mems) 0%N with
+          | Some _ =>
+              if load_vec_lane_bounds width marg x
+              then type_update ts [::T_vec T_v128; T_num T_i32] [::]
               else None
           | None => None
           end

@@ -6,7 +6,6 @@
 From mathcomp Require Import ssreflect ssrbool eqtype seq ssrnat.
 From Wasm Require Import instantiation_spec instantiation_properties type_preservation.
 From Coq Require Import BinNat NArith ZArith.
-Require Import Coq.Program.Equality.
 
 Set Implicit Arguments.
 Unset Strict Implicit.
@@ -18,6 +17,7 @@ Section Host.
 
 Context `{ho: host}.
 
+(* Replacing the imported types by subtypes preserves the typing of a program *)
 Lemma bet_import_subtyping: forall ts fts tts mts gts ets dts locs labs ret refs imps1 imps2 bes tf,
     List.Forall2 import_subtyping imps2 imps1 ->
     be_typing (Build_t_context ts (ext_t_funcs imps1 ++ fts) (ext_t_tables imps1 ++ tts) (ext_t_mems imps1 ++ mts) (ext_t_globals imps1 ++ gts) ets dts locs labs ret refs) bes tf ->
@@ -44,7 +44,28 @@ Proof.
     by unfold import_global_subtyping in Hsub; remove_bools_options; simplify_multieq; subst; apply/eqP.
   }
 Qed.
-  
+
+Lemma bet_skip_refcheck: forall C C' bes tf,
+  C' = upd_refs C (iota_N 0 (length C.(tc_funcs))) ->
+  be_typing C bes tf ->
+  be_typing C' bes tf.
+Proof.
+  move => C C' bes [tx ty] HC' Hbet.
+  move: C' HC'.
+  induction Hbet; move => C' HC'; subst C' => /=; (try by econstructor; eauto).
+  (* ref_func *)
+  - apply bet_ref_func with (t := t) => //=.
+    + apply nth_error_Some_length in H.
+      apply List.nth_error_In with (n := (N.to_nat x)).
+      rewrite iota_N_lookup.
+      by rewrite add0n N2Nat.id.
+    + by lias.
+Qed.
+
+(** Soundness of the module instantiation operation
+The post-instantiation store is a valid extension of the old store,
+and the post-instantiation frame is well-typed within the new store.
+**)
 Lemma instantiation_sound: forall (s: store_record) m v_imps s' f exps,
   store_typing s ->
   instantiate s m v_imps (s', f, exps) ->
@@ -105,7 +126,7 @@ Proof.
       apply those_cat.
       (* Imports *)
       { apply those_spec.
-        { rewrite List.map_length.
+        { rewrite List.length_map.
           apply vt_imps_comp_len in Himptype as [? [? [??]]].
           by lias.
         }
@@ -122,7 +143,7 @@ Proof.
       (* New *)
       {
         apply those_spec.
-        { rewrite List.map_length iota_N_length.
+        { rewrite List.length_map iota_N_length.
           by apply List.Forall2_length in Hmfunctype; lias.
         }
         move => n ft Hnth.
@@ -149,7 +170,7 @@ Proof.
       apply those_cat.
       (* Imports *)
       { apply those_spec.
-        { rewrite List.map_length.
+        { rewrite List.length_map.
           apply vt_imps_comp_len in Himptype as [? [? [??]]].
           by lias.
         }
@@ -169,11 +190,11 @@ Proof.
       (* New *)
       {
         apply those_spec.
-        { rewrite List.map_length iota_N_length List.map_length.
+        { rewrite List.length_map iota_N_length List.length_map.
           by apply List.Forall2_length in Hmtabletype; lias.
         }
         move => n ft Hnth.
-        rewrite nth_error_map' List.map_length.
+        rewrite nth_error_map' List.length_map.
         eapply Forall2_nth_impl' in Hmtabletype as [x [Hnthm Hmap]]; eauto.
         rewrite iota_N_lookup => /=; last by apply nth_error_Some_length in Hnthm; lias.
         unfold ext_table_typing.
@@ -196,7 +217,7 @@ Proof.
       apply those_cat.
       (* Imports *)
       { apply those_spec.
-        { rewrite List.map_length.
+        { rewrite List.length_map.
           apply vt_imps_comp_len in Himptype as [? [? [??]]].
           by lias.
         }
@@ -216,11 +237,11 @@ Proof.
       (* New *)
       {
         apply those_spec.
-        { rewrite List.map_length iota_N_length List.map_length.
+        { rewrite List.length_map iota_N_length List.length_map.
           by apply List.Forall2_length in Hmmemtype; lias.
         }
         move => n ft Hnth.
-        rewrite nth_error_map' List.map_length.
+        rewrite nth_error_map' List.length_map.
         eapply Forall2_nth_impl' in Hmmemtype as [x [Hnthm Hmap]]; eauto.
         rewrite iota_N_lookup => /=; last by apply nth_error_Some_length in Hnthm; lias.
         unfold ext_mem_typing.
@@ -243,7 +264,7 @@ Proof.
       apply those_cat.
       (* Imports *)
       { apply those_spec.
-        { rewrite List.map_length.
+        { rewrite List.length_map.
           apply vt_imps_comp_len in Himptype as [? [? [??]]].
           by lias.
         }
@@ -263,7 +284,7 @@ Proof.
       (* New *)
       {
         apply those_spec.
-        { rewrite List.map_length iota_N_length.
+        { rewrite List.length_map iota_N_length.
           by apply List.Forall2_length in Hmglobaltype; lias.
         }
         move => n ft Hnth.
@@ -295,7 +316,7 @@ Proof.
       (* New *)
       {
         apply those_spec.
-        { rewrite List.map_length iota_N_length.
+        { rewrite List.length_map iota_N_length.
           by apply List.Forall2_length in Hmelemtype; lias.
         }
         move => n ft Hnth.
@@ -322,7 +343,7 @@ Proof.
         eapply init_value_typing; eauto.
         { move => m addr /= Hnth'.
           destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
-          rewrite List.app_length List.map_length.
+          rewrite List.length_app List.length_map.
           apply cat_lookup in Hnth' as [Hnth' | Hnth'].
           - apply ext_funcs_lookup_exist in Hnth' as [k Hnthaddr].
             eapply Forall2_nth_impl in Himptype as [et [Hnthext Hext]]; last by apply Hnthaddr.
@@ -367,7 +388,7 @@ Proof.
       (* New *)
       {
         apply those_spec.
-        { rewrite List.map_length iota_N_length.
+        { rewrite List.length_map iota_N_length.
           by apply List.Forall2_length in Hmdatatype; lias.
         }
         move => n ft Hnth.
@@ -425,7 +446,7 @@ Proof.
         eapply bet_import_subtyping; eauto.
         eapply bet_skip_refcheck => /=; eauto.
         unfold upd_refs => /=.
-        repeat rewrite List.app_length.
+        repeat rewrite List.length_app.
         rewrite iota_N_length.
         repeat f_equal.
         apply vt_imps_comp_len in Himptype.
@@ -515,7 +536,7 @@ Proof.
         simpl in *.
         eapply init_value_typing; eauto; simpl in *.
         { move => m addr Hnthaddr.
-          rewrite List.app_length List.map_length.
+          rewrite List.length_app List.length_map.
           rewrite H6 in Hnthaddr.
           apply cat_lookup in Hnthaddr as [Hnth' | Hnth'].
           - apply ext_funcs_lookup_exist in Hnth' as [k Hnthaddr].
@@ -578,7 +599,7 @@ Proof.
         eapply Forall_lookup in Hconstbet as [Hconst Hbet]; eauto.
         eapply init_value_typing; eauto; simpl in *.
         { move => n' addr Hnthaddr.
-          rewrite List.app_length List.map_length.
+          rewrite List.length_app List.length_map.
           rewrite H6 in Hnthaddr.
           apply cat_lookup in Hnthaddr as [Hnth' | Hnth'].
           - apply ext_funcs_lookup_exist in Hnth' as [k Hnthaddr].

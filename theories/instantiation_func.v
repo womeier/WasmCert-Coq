@@ -8,7 +8,6 @@ Section Instantiation_func.
 
 Context `{ho: host}.
   
-
 Definition gather_m_f_type (tfs : list function_type) (m_f : module_func) : option function_type :=
   lookup_N tfs m_f.(modfunc_type).
 
@@ -246,6 +245,31 @@ Definition get_global_inits (s: store_record) (f: frame) (gs: list module_global
 Definition get_elem_inits (s: store_record) (f: frame) (els: list module_element) : option (list (list value_ref)):=
   those (map (fun el => those (map (fun e => interp_get_vref s f e) el.(modelem_init))) els).
 
+Definition interp_alloc_module (s : store_record) (m : module) (imps : list extern_value) (gvs : list value) (rvs: list (list value_ref)) : (store_record * moduleinst) :=
+  let i_fs := iota_N (length s.(s_funcs)) (length m.(mod_funcs)) in
+  let i_ts := iota_N (length s.(s_tables)) (length m.(mod_tables)) in
+  let i_ms := iota_N (length s.(s_mems)) (length m.(mod_mems)) in
+  let i_gs := iota_N (length s.(s_globals)) (length m.(mod_globals)) in
+  let i_es := iota_N (length s.(s_elems)) (length m.(mod_elems)) in
+  let i_ds := iota_N (length s.(s_datas)) (length m.(mod_datas)) in
+  let inst := {|
+    inst_types := m.(mod_types);
+    inst_funcs := (ext_funcs imps ++ i_fs);
+    inst_tables := (ext_tables imps ++ i_ts);
+    inst_mems := (ext_mems imps ++ i_ms);
+    inst_globals := (ext_globals imps ++ i_gs);
+    inst_elems := (i_es);
+    inst_datas := (i_ds);
+    inst_exports := (map (get_exportinst (Build_moduleinst nil (ext_funcs imps ++ i_fs) (ext_tables imps ++ i_ts) (ext_mems imps ++ i_ms) (ext_globals imps ++ i_gs) nil nil nil)) m.(mod_exports))
+  |} in
+  let '(s1, _) := alloc_funcs s m.(mod_funcs) inst in
+  let '(s2, _) := alloc_tabs s1 (map modtab_type m.(mod_tables)) in
+  let '(s3, _) := alloc_mems s2 (map modmem_type m.(mod_mems)) in
+  let '(s4, i_gs) := alloc_globs s3 m.(mod_globals) gvs in
+  let '(s5, i_es) := alloc_elems s4 m.(mod_elems) rvs in
+  let '(s', i_ds) := alloc_datas s5 m.(mod_datas) in
+  (s', inst).
+
 Definition interp_instantiate (hs: host_state) (s : store_record) (m : module) (v_imps : list extern_value) : option (host_state * store_record * frame * list basic_instruction) :=
   match module_type_checker m with
   | None => None
@@ -281,6 +305,16 @@ Definition interp_instantiate (hs: host_state) (s : store_record) (m : module) (
       end
   end.
 
+End Instantiation_func.
+
+(** Extraction **)
+
+Require Import Coq.Strings.String.
+
+Module Instantiation_func_extract.
+
+Import Interpreter_ctx_extract.
+
 Definition empty_store_record : store_record := {|
     s_funcs := nil;
     s_tables := nil;
@@ -290,41 +324,34 @@ Definition empty_store_record : store_record := {|
     s_datas := nil;
   |}.
 
-End Instantiation_func.
-
-(** Extraction **)
-
-Module Instantiation_func_extract.
-
-Import Interpreter_ctx_extract.
-  
-(* Add an empty host and provide an initial empty store, and convert the 
-   starting expression to administrative *)
-Definition interp_instantiate_wrapper (m : module) : option (host_state * store_record * frame * list administrative_instruction) :=
-  match interp_instantiate tt empty_store_record m nil with
-  | Some (hs, s, i, bes) => Some (hs, s, i, to_e_list bes)
+(* Provide a unit host state and convert the starting expression to administrative *)
+Definition interp_instantiate_wrapper (s: store_record) (m : module) (v_imps: list extern_value) : option config_tuple :=
+  match interp_instantiate tt s m v_imps with
+  | Some (hs', s', f, bes) => Some (s', (f, to_e_list bes))
   | None => None
   end.
 
-Definition lookup_exported_function (n : name) (s: store_record) (f: frame)
-    : option (list administrative_instruction) :=
-  List.fold_left
-    (fun acc e =>
-      match acc with
-      | Some cfg => Some cfg
-      | None =>
-        if e.(exportinst_name) == n then
-          match e.(exportinst_val) with
-          | EV_func fi =>
-            match lookup_N s.(s_funcs) fi with
-            | None => None
-            | Some fc => Some ([::AI_invoke fi])
-            end
-          | _ => None
-          end
-        else None
-      end)
-    f.(f_inst).(inst_exports)
-    None.
+Definition string_of_name (n: name) : string :=
+  string_of_list_byte n.
+
+Definition get_import_path (m: module) : list (string * string) :=
+  map (fun imp => (string_of_name (imp_module imp), string_of_name (imp_name imp))) m.(mod_imports).
+
+Definition get_exports (f: frame) : list (string * extern_value) :=
+  map (fun exp_inst => (string_of_name (exportinst_name exp_inst), exportinst_val exp_inst)) f.(f_inst).(inst_exports).
+
+(* Provide the instruction for invoking an external function under a given store *)
+Definition invoke_extern (s: store_record) (ext: extern_value) (args: list value) : option (list administrative_instruction) :=
+  match ext with
+  | EV_func fi =>
+      match lookup_N s.(s_funcs) fi with
+      | Some (FC_func_native (Tf ts1 ts2) _ _) =>
+          if (those (map (typeof_value s) args) == Some ts1) then
+            Some (v_to_e_list args ++ [::AI_invoke fi])
+          else None
+      | _ => None
+      end
+  | _ => None
+  end.
 
 End Instantiation_func_extract.

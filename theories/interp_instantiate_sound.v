@@ -43,7 +43,7 @@ Proof.
   (* funcs *)
   { clear - Hfunccheck Hmftypes hfc.
     unfold gather_m_f_types in Hmftypes.
-    apply Forall2_spec => //; first by apply those_length in Hmftypes; rewrite List.map_length in Hmftypes.
+    apply Forall2_spec => //; first by apply those_length in Hmftypes; rewrite List.length_map in Hmftypes.
     move => n mfunc [tx ty] Hfuncnth Hftsnth.
     eapply all_projection in Hfunccheck; eauto.
     eapply those_map_lookup in Hmftypes as [ft [Hmap Hnth]]; eauto.
@@ -59,7 +59,7 @@ Proof.
     by apply/b_e_type_checker_reflects_typing.
   }
   (* tables *)
-  { apply Forall2_spec => //; first by rewrite List.map_length.
+  { apply Forall2_spec => //; first by rewrite List.length_map.
     move => n mtable [tx ty] Htablenth Hftsnth.
     eapply all_projection in Htablecheck; eauto.
     simpl in *.
@@ -69,7 +69,7 @@ Proof.
     by apply/eqP.
   }
   (* memories *)
-  { apply Forall2_spec => //; first by rewrite List.map_length.
+  { apply Forall2_spec => //; first by rewrite List.length_map.
     move => n mmem [tx ty] Hmemnth Hftsnth.
     eapply all_projection in Hmemcheck; eauto.
     simpl in *.
@@ -81,7 +81,7 @@ Proof.
   (* globals *)
   { clear -Hglobalcheck hfc.
     unfold gather_m_g_types.
-    apply Forall2_spec; first by rewrite List.map_length.
+    apply Forall2_spec; first by rewrite List.length_map.
     move => n mglob gt Hgnth Hmgnth.
     erewrite List.map_nth_error in Hmgnth; last by eauto.
     injection Hmgnth as <-.
@@ -96,7 +96,7 @@ Proof.
   (* elem *)
   { clear -Helemcheck Hmetypes hfc.
     unfold gather_m_e_types in Hmetypes.
-    apply Forall2_spec => //; first by apply those_length in Hmetypes; rewrite List.map_length in Hmetypes.
+    apply Forall2_spec => //; first by apply those_length in Hmetypes; rewrite List.length_map in Hmetypes.
     move => n x tref Hnthelem Hntht.
     eapply those_map_lookup in Hmetypes as [t [Hmap Hnth]]; eauto; simpl in *.
     simplify_multieq.
@@ -130,7 +130,7 @@ Proof.
   (* data *)
   { clear -Hdatacheck Hmdtypes hfc.
     unfold gather_m_d_types in Hmdtypes.
-    apply Forall2_spec => //; first by apply those_length in Hmdtypes; rewrite List.map_length in Hmdtypes.
+    apply Forall2_spec => //; first by apply those_length in Hmdtypes; rewrite List.length_map in Hmdtypes.
     move => n x tref Hnthdata Hntht.
     eapply those_map_lookup in Hmdtypes as [t [Hmap Hnth]]; eauto; simpl in *.
     simplify_multieq.
@@ -146,7 +146,7 @@ Proof.
   (* imports *)
   { clear - Hmitypes.
     unfold module_imports_typer in Hmitypes.
-    apply Forall2_spec; first by apply those_length in Hmitypes; rewrite List.map_length in Hmitypes.
+    apply Forall2_spec; first by apply those_length in Hmitypes; rewrite List.length_map in Hmitypes.
     move => n mi extt Hminth Htinth.
     eapply those_map_lookup in Hmitypes as [Htext [Hmap Hnth]]; eauto.
     simplify_multieq.
@@ -158,7 +158,7 @@ Proof.
   (* exports *)
   { clear - Hmexptypes.
     unfold module_exports_typer in Hmexptypes.
-    apply Forall2_spec; first by apply those_length in Hmexptypes; rewrite List.map_length in Hmexptypes.
+    apply Forall2_spec; first by apply those_length in Hmexptypes; rewrite List.length_map in Hmexptypes.
     move => n me extt Hmexpth Htexpth.
     eapply those_map_lookup in Hmexptypes as [Htext [Hmap Hnth]]; eauto.
     simplify_multieq.
@@ -208,7 +208,7 @@ Proof.
 
   destruct s, s1, s2, s3, s4, s5, s6; simpl in *.
   subst.
-  repeat rewrite List.map_length.
+  repeat rewrite List.length_map.
   by repeat rewrite eq_refl => /=.
 Qed.
 
@@ -239,12 +239,12 @@ Proof.
   simpl in *.
   by eexists; eauto.
 Qed.
-  
-Lemma interp_instantiate_imp_instantiate : forall hs hs' s m v_imps s_end inst exps,
-  interp_instantiate hs s m v_imps = Some (hs', s_end, inst, exps) ->
-  instantiate s m v_imps (s_end, inst, exps).
+
+Lemma interp_instantiate_imp_instantiate : forall hs hs' s m v_imps s_end f bes,
+  interp_instantiate hs s m v_imps = Some (hs', s_end, f, bes) ->
+  instantiate s m v_imps (s_end, f, bes).
 Proof.
-  move => hs hs' s m v_imps s_end inst exps.
+  move => hs hs' s m v_imps s_end f bes.
   unfold interp_instantiate, instantiate.
   move => Hinterp.
   destruct (module_type_checker m) as [[t_imps_mod t_exps] |] eqn:Hmodcheck => //.
@@ -269,7 +269,7 @@ Proof.
   assert (List.Forall2 (external_typing s) v_imps t_imps) as Hexttype.
   { apply Forall2_spec.
     - apply those_length in Hextcheck.
-      by rewrite List.map_length in Hextcheck.
+      by rewrite List.length_map in Hextcheck.
     - move => n vext text Hnthv Hntht.
       apply external_type_checker_sound.
       eapply those_map_lookup in Hextcheck as [text' [Hmap Hnth]]; eauto.
@@ -361,7 +361,7 @@ Proof.
     simplify_multieq.
     apply Forall2_spec => //=.
     + apply those_length in Hmap.
-      by rewrite List.map_length in Hmap; simpl in Hmap.
+      by rewrite List.length_map in Hmap; simpl in Hmap.
     + move => i bes vref Hnthinit Hnthei.
       eapply all_projection in Hbetype; eauto.
       eapply all_projection in Hconstexpr; eauto.

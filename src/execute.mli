@@ -20,17 +20,30 @@ module Host : sig
   end
 
 module Interpreter : Shim.InterpreterType with type 'a host_event = 'a Host.host_event
-(*
-(** Read-eval-print-loop. *)
-val repl : Output.verbosity -> ((Extract.Equality.sort * Interpreter.store_record) * Extract.frame) * Extract.module_export list -> string -> unit Host.host_event
-*)
 
-(** Given a verbosity level, a boolean stating whether the program should crash if the interpreted
-   code does, a configuration tuple, a function name, interpret the Wasm function. *)
-val invocation_interpret : Output.verbosity -> bool -> ((Extract.Equality.sort * Interpreter.store_record) * Extract.frame) * Extract.administrative_instruction list -> string -> unit Host.host_event
+(* Type of the interpreter evaluation result *)
+type eval_cfg_result =
+  | Cfg_res of Interpreter.store_record * Extract.frame * Extract.value0 list
+  | Cfg_trap of Interpreter.store_record * Extract.frame
+  | Cfg_err
 
-(** Given a verbosity level, a boolean stating whether interactive mode is enable, another boolan
-   stating whether the program should crash if the interpreted code does, a module, a function name,
-   instantiate, then interpret a parsed Wasm module. *)
-val instantiate_interpret : Output.verbosity -> bool -> Extract.module0 -> string -> unit Host.host_event
+(* Evaluating an interpreter configuration fully. *)
+val eval_interp_cfg: Output.verbosity -> int -> Interpreter.interp_config_tuple -> eval_cfg_result
 
+(* Evaluate a Wasm configuration using the interpreter configuration. *)
+val eval_wasm_cfg: Output.verbosity -> Interpreter.wasm_config_tuple -> eval_cfg_result
+
+(* Type of the host extern val store *)
+module StringMap : Map.S with type key = string
+
+type host_extern_store = (Interpreter.externval StringMap.t) StringMap.t
+
+(* Given a starting state and a list of imports (store references), instantiating a module.
+   Return the interpreter result after running the instantiation instructions. Does not update the host export store. *)
+val instantiate: Output.verbosity -> host_extern_store -> Interpreter.store_record -> Extract.module0 -> eval_cfg_result Host.host_event
+
+(* A host wrapper for the instantiation function that updates the host export store. *)
+val instantiate_host: Output.verbosity -> host_extern_store -> Interpreter.store_record -> string -> Extract.module0 -> (host_extern_store * Interpreter.store_record) Host.host_event
+
+(** Given a verbosity level, a host and Wasm state, a list of arguments, and a module and function name, invoke the Wasm function. *)
+val invoke_func : Output.verbosity -> host_extern_store -> (Interpreter.store_record * Extract.frame) -> Extract.value0 list -> string -> string -> Interpreter.store_record Host.host_event

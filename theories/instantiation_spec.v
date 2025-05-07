@@ -176,7 +176,8 @@ Definition alloc_datas (s : store_record) (m_d: list module_data) : store_record
   alloc_Xs alloc_data s m_d.
 
 Definition export_get_v_ext (inst : moduleinst) (exp : module_export_desc) : extern_value :=
-  (* we circumvent partiality by providing 0 as a default *)
+  (* we circumvent partiality by providing 0 as a default. This is fine as the module_typing
+     relation will validate of the export indices *)
   match exp with
   | MED_func i => EV_func ( (List.nth i inst.(inst_funcs) N0))
   | MED_table i => EV_table ( (List.nth i inst.(inst_tables) N0))
@@ -269,9 +270,7 @@ Definition alloc_module (s : store_record) (m : module) (imps : list extern_valu
   (inst.(inst_globals) == ((ext_globals imps) ++ i_gs)) &&
   (inst.(inst_elems) == i_es) &&
   (inst.(inst_datas) == i_ds) &&
-  (inst.(inst_exports) == (map (get_exportinst
-                                    (Build_moduleinst nil i_fs i_ts i_ms i_gs nil nil nil))
-                               m.(mod_exports))).
+  (inst.(inst_exports) == (map (get_exportinst inst) m.(mod_exports))).
 
 Definition dummy_table : tableinst := {| tableinst_elem := nil; tableinst_type := Build_table_type (Build_limits N0 None) T_funcref |}.
 
@@ -442,7 +441,7 @@ Definition module_filter_funcidx (m: module) : list funcidx :=
      module_elems_get_funcidx m.(mod_elems)).
 
 Definition export_name_unique (exps: list module_export) : bool :=
-  List.nodup name_eqb (map modexp_name exps) == (map modexp_name exps).
+  List.nodup name_eq_dec (map modexp_name exps) == (map modexp_name exps).
 
 (* We deliberately omit the artificial restriction on the length of memory here. *)
 Definition module_typing (m : module) (impts : list extern_type) (expts : list extern_type) : Prop :=
@@ -587,6 +586,7 @@ Definition import_subtyping (t1 t2: extern_type) : bool :=
   | _, _ => false
   end.
 
+(* In Wasm 2.0, the module exports are now a part of the module instance. *)
 Definition instantiate (s : store_record) (m : module) (v_imps : list extern_value)
                        (z : (store_record * frame * list basic_instruction)) : Prop :=
   let '(s_end, f, bes) := z in
@@ -602,30 +602,5 @@ Definition instantiate (s : store_record) (m : module) (v_imps : list extern_val
     instantiate_elems f_init hs' s_end m r_inits /\
     f = Build_frame nil inst /\
       bes = get_init_expr_elems m.(mod_elems) ++ get_init_expr_datas m.(mod_datas) ++ get_init_expr_start m.(mod_start).
-
-Definition interp_alloc_module (s : store_record) (m : module) (imps : list extern_value) (gvs : list value) (rvs: list (list value_ref)) : (store_record * moduleinst) :=
-  let i_fs := iota_N (length s.(s_funcs)) (length m.(mod_funcs)) in
-  let i_ts := iota_N (length s.(s_tables)) (length m.(mod_tables)) in
-  let i_ms := iota_N (length s.(s_mems)) (length m.(mod_mems)) in
-  let i_gs := iota_N (length s.(s_globals)) (length m.(mod_globals)) in
-  let i_es := iota_N (length s.(s_elems)) (length m.(mod_elems)) in
-  let i_ds := iota_N (length s.(s_datas)) (length m.(mod_datas)) in
-  let inst := {|
-    inst_types := m.(mod_types);
-    inst_funcs := (ext_funcs imps ++ i_fs);
-    inst_tables := (ext_tables imps ++ i_ts);
-    inst_mems := (ext_mems imps ++ i_ms);
-    inst_globals := (ext_globals imps ++ i_gs);
-    inst_elems := (i_es);
-    inst_datas := (i_ds);
-    inst_exports := (map (get_exportinst (Build_moduleinst nil i_fs i_ts i_ms i_gs nil nil nil)) m.(mod_exports))
-  |} in
-  let '(s1, _) := alloc_funcs s m.(mod_funcs) inst in
-  let '(s2, _) := alloc_tabs s1 (map modtab_type m.(mod_tables)) in
-  let '(s3, _) := alloc_mems s2 (map modmem_type m.(mod_mems)) in
-  let '(s4, i_gs) := alloc_globs s3 m.(mod_globals) gvs in
-  let '(s5, i_es) := alloc_elems s4 m.(mod_elems) rvs in
-  let '(s', i_ds) := alloc_datas s5 m.(mod_datas) in
-  (s', inst).
 
 End Instantiation_spec.

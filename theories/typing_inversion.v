@@ -1,9 +1,8 @@
 (** Typing inversion lemmas **)
 
-From Wasm Require Export common.
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From Coq Require Import Program.Equality NArith ZArith_base.
-From Wasm Require Export properties subtyping_properties.
+From Wasm Require Export common properties subtyping_properties.
 
 Set Implicit Arguments.
 Unset Strict Implicit.
@@ -49,7 +48,6 @@ Proof.
   by resolve_subtyping.
 Qed.
 
-
 Hint Constructors be_typing : core.
 
 (* Structural inversions *)
@@ -64,6 +62,9 @@ Proof.
     by extract_premise; subst.
 Qed.
 
+(* Defining a principal typing 'condition' for each instruction.
+   
+ *)
 Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr_type) : Prop :=
   match be with
   | BI_const_num c =>
@@ -93,6 +94,24 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
   | BI_cvtop t2 op t1 sx =>
       tf = (Tf [::T_num t1] [::T_num t2]) /\
         cvtop_valid t2 op t1 sx
+  | BI_unop_vec op =>
+      tf = (Tf [::T_vec T_v128] [::T_vec T_v128])
+  | BI_binop_vec op =>
+      tf = (Tf [::T_vec T_v128; T_vec T_v128] [::T_vec T_v128])
+  | BI_ternop_vec op =>
+      tf = (Tf [::T_vec T_v128; T_vec T_v128; T_vec T_v128] [::T_vec T_v128])
+  | BI_test_vec op =>
+      tf = (Tf [::T_vec T_v128] [::T_num T_i32])
+  | BI_shift_vec op =>
+      tf = (Tf [::T_vec T_v128; T_num T_i32] [::T_vec T_v128])
+  | BI_splat_vec shape =>
+      tf = (Tf [::T_num (typeof_shape_unpacked shape)] [::T_vec T_v128])
+  | BI_extract_vec shape sx x =>
+      tf = (Tf [::T_vec T_v128] [::T_num (typeof_shape_unpacked shape)]) /\
+      N.ltb x (shape_dim shape) = true
+  | BI_replace_vec shape x =>
+      tf = (Tf [::T_vec T_v128; T_num (typeof_shape_unpacked shape)] [::T_vec T_v128]) /\
+      N.ltb x (shape_dim shape) = true
   | BI_unreachable =>
       True (* Equivalently, put existential quantifiers and trivial equalities *)
   | BI_nop =>
@@ -214,16 +233,31 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       exists t,
       tf = (Tf nil nil) /\
         lookup_N (tc_elems C) x = Some t
-  | BI_load t tp_sx a off =>
+  | BI_load t tp_sx marg =>
       exists mt,
       tf = (Tf [::T_num T_i32] [::T_num t]) /\
         lookup_N (tc_mems C) 0%N = Some mt /\
-        load_store_t_bounds a (option_projl tp_sx) t
-  | BI_store t tp a off =>
+        load_store_t_bounds marg.(memarg_align) (option_projl tp_sx) t
+  | BI_load_vec lvarg marg =>
+      exists mt,
+      tf = (Tf [::T_num T_i32] [::T_vec T_v128]) /\
+        lookup_N (tc_mems C) 0%N = Some mt /\
+        load_vec_bounds lvarg marg
+  | BI_load_vec_lane width marg x =>
+      exists mt,
+      tf = (Tf [::T_num T_i32; T_vec T_v128] [::T_vec T_v128]) /\
+        lookup_N (tc_mems C) 0%N = Some mt /\
+        load_vec_lane_bounds width marg x
+  | BI_store t tp marg =>
       exists mt,
       tf = (Tf [::T_num T_i32; T_num t] [::]) /\
         lookup_N (tc_mems C) 0%N = Some mt /\
-        load_store_t_bounds a tp t
+        load_store_t_bounds marg.(memarg_align) tp t
+  | BI_store_vec_lane width marg x =>
+      exists mt,
+      tf = (Tf [::T_num T_i32; T_vec T_v128] [::]) /\
+        lookup_N (tc_mems C) 0%N = Some mt /\
+        load_vec_lane_bounds width marg x
   | BI_memory_size =>
       exists mt,
       tf = (Tf [::] [::T_num T_i32]) /\
@@ -258,10 +292,7 @@ Lemma be_typing_inversion: forall C be tf,
       be_principal_typing C be tf_principal.
 Proof.
   move => C be tf HType.
-  gen_ind_subst HType => //; try by (eexists; split; first (by apply instr_subtyping_eq); try by repeat eexists; eauto).
-  (* Table copy -- needs a separate resolve since substitution simplified the premises by too much *)
-  - eexists; split; first (by apply instr_subtyping_eq).
-    by exists tabtype1, tabtype2, (tt_elem_type tabtype1).
+  gen_ind_subst HType => //; try by (eexists; split; first (by apply instr_subtyping_eq); try by repeat (eexists; eauto)).
   (* Composition *)
   - extract_listn; extract_premise.
     apply empty_typing in HType1.
@@ -778,6 +809,8 @@ Ltac invert_e_typing :=
     let Htisub := fresh "Htisub" in
     let Hinvgoal := fresh "Hinvgoal" in
     apply e_typing_inversion in H as [tf_principal [Htisub Hinvgoal]]; simpl in Hinvgoal; extract_premise
+  | H: e_typing _ _ nil _ |- _ =>
+    apply empty_e_typing in H
   | H: e_typing _ _ (cons ?x _) _ |- _ =>
     rewrite -(cat1s x) in H
   end; invert_be_typing; resolve_list_eq.
@@ -806,6 +839,36 @@ Proof.
   unfold inst_typing, typing.inst_typing in HInstType.
   destruct i => //=.
   by remove_bools_options.
+Qed.
+
+Lemma inst_t_context_return_None: forall s i C,
+    inst_typing s i = Some C ->
+    tc_return C = None.
+Proof.
+  move => s i C HInstType.
+  unfold inst_typing, typing.inst_typing in HInstType.
+  destruct i => //=.
+  by remove_bools_options.
+Qed.
+
+Lemma frame_typing_label_empty: forall s f C,
+    frame_typing s f C ->
+    tc_labels C = nil.
+Proof.
+  move => s f C Hftype.
+  unfold frame_typing in Hftype; remove_bools_options.
+  destruct Hftype as [ts [-> Hvt]] => /=.
+  by eapply inst_t_context_label_empty; eauto.
+Qed.
+
+Lemma frame_typing_return_None: forall s f C,
+    frame_typing s f C ->
+    tc_return C = None.
+Proof.
+  move => s f C Hftype.
+  unfold frame_typing in Hftype; remove_bools_options.
+  destruct Hftype as [ts [-> Hvt]] => /=.
+  by eapply inst_t_context_return_None; eauto.
 Qed.
 
 Lemma global_type_reference: forall s i j C v t,

@@ -1,10 +1,9 @@
 (** Basic operations over Wasm datatypes **)
 (* (C) J. Pichon, M. Bodin - see LICENSE.txt *)
 
-From Wasm Require Import common memory_list.
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
-From compcert Require lib.Floats.
-From Wasm Require Export datatypes_properties list_extra.
+From compcert Require Floats.
+From Wasm Require Export common memory_list datatypes_properties list_extra.
 From Coq Require Import BinNat.
 
 Set Implicit Arguments.
@@ -90,15 +89,53 @@ Definition mem_grow (m : meminst) (len_delta : N) : option meminst :=
   end
   else None.
 
+Definition ptv_to_nm (ptv: packed_type_vec) : N * N :=
+  match ptv with
+  | Tptv_8_8 => (8%N, 8%N)
+  | Tptv_16_4 => (16%N, 4%N)
+  | Tptv_32_2 => (32%N, 2%N)
+  end.
+
+Definition ztv_to_n (ztv: zero_type_vec) : N :=
+  match ztv with
+  | Tztv_32 => 32%N
+  | Tztv_64 => 64%N
+  end.
+
+Definition width_to_n (ww: width_vec) : N :=
+  match ww with
+  | Twv_8 => 8%N
+  | Twv_16 => 16%N
+  | Twv_32 => 32%N
+  | Twv_64 => 64%N
+  end.
+
+Definition load_vec_bounds (lv_arg: load_vec_arg) (m_arg: memarg) : bool :=
+  match lv_arg with
+  | LVA_packed ptv sx =>
+      let (n, m) := ptv_to_nm ptv in
+      N.leb (N.pow 2 m_arg.(memarg_align)) (N.mul (N.div n 8) m)
+  | LVA_zero ztv =>
+      N.leb (N.pow 2 m_arg.(memarg_align)) (N.div (ztv_to_n ztv) 8)
+  | LVA_splat width =>
+      N.leb (N.pow 2 m_arg.(memarg_align)) (N.div (width_to_n width) 8)
+  end.
+
+Definition load_vec_lane_bounds (width: width_vec) (m_arg: memarg) (x: laneidx) : bool :=
+   (N.leb (N.pow 2 (memarg_align m_arg)) (width_to_n width / 8))%N &&
+                         (N.ltb x (128 / width_to_n width)%N). 
+  
 (* TODO: We crucially need documentation here. *)
 
+(* Operation for the memory_load instruction. *)
 Definition load (m : meminst) (n : N) (off : static_offset) (l : nat) : option bytes :=
   if N.leb (N.add n (N.add off (N.of_nat l))) (mem_length m)
   then read_bytes m (N.add n off) l
   else None.
 
+(* TODO: implement sign extension. *)
 Definition sign_extend (s : sx) (l : nat) (bs : bytes) : bytes :=
-  (* TODO: implement sign extension *) bs.
+  bs.
 (* TODO
   let: msb := msb (msbyte bytes) in
   let: byte := (match sx with sx_U => O | sx_S => if msb then -1 else 0) in
@@ -108,12 +145,42 @@ Definition sign_extend (s : sx) (l : nat) (bs : bytes) : bytes :=
 Definition load_packed (s : sx) (m : meminst) (n : N) (off : static_offset) (lp : nat) (l : nat) : option bytes :=
   option_map (sign_extend s l) (load m n off lp).
 
+Definition int_of_bytes (bs: list byte) (m: N) : value_num :=
+  VAL_int32 int32_minus_one.
+
+(* TODO: placeholder for vector load -- currently unimplemented. *)
+Definition load_vec (m: meminst) (i: N) (lvarg: load_vec_arg) (marg: memarg) : option value_vec :=
+  (* Placeholder just so that this operation can return both successful and error result *)
+(*  let ea := i + marg.(memarg_offset) in
+  match load_vec_arg with
+  | LVA_packed ptv sx =>
+      let (m, n) := ptv_to_nm in
+      if N.leb (ea + (N.div (N.mul m n) 8%N)) (m.(mem_length)) then
+        let bs = int_of_bytes (take (drop m
+  if ea + *)
+  match (i == marg.(memarg_offset)) with
+  | true => Some (VAL_vec128 tt)
+  | _ => None
+  end.
+
+Definition load_vec_lane (m: meminst) (i: N) (v: value_vec) (width: width_vec) (marg: memarg) (x: laneidx) : option value_vec :=
+  match (i == marg.(memarg_offset)) with
+  | true => Some v
+  | _ => None
+  end.
+
 Definition store (m : meminst) (n : N) (off : static_offset) (bs : bytes) (l : nat) : option meminst :=
   if N.leb (n + off + N.of_nat l) (mem_length m)
   then write_bytes m (n + off) (bytes_takefill #00 l bs)
   else None.
 
 Definition store_packed := store.
+
+Definition store_vec_lane (m: meminst) (n: N) (v: value_vec) (width: width_vec) (marg: memarg) (x: laneidx) : option meminst :=
+  match (n == marg.(memarg_offset)) with
+  | true => Some m
+  | _ => None
+  end.
 
 Definition wasm_deserialise (bs : bytes) (vt : number_type) : value_num :=
   match vt with
@@ -150,32 +217,6 @@ Definition default_val (t: value_type) : option value :=
 Definition default_vals (ts : seq value_type) : option (seq value) :=
   those (map default_val ts).
 
-Definition value_subtyping (t1: value_type) (t2: value_type) : bool :=
-  (t1 == t2) || (t1 == T_bot).
-
-Definition values_subtyping (ts1: list value_type) (ts2: list value_type) : bool :=
-  all2 value_subtyping ts1 ts2.
-
-Definition func_subtyping (tf tf': function_type) : Prop :=
-  let '(Tf ts1 ts2) := tf in
-  let '(Tf ts1' ts2') := tf' in
-    values_subtyping ts1' ts1 /\
-    values_subtyping ts2 ts2'.
-
-Definition instr_subtyping (tf tf': function_type) : Prop :=
-  let '(Tf ts1 ts2) := tf in
-  let '(Tf ts1' ts2') := tf' in
-  exists ts ts' ts1_sub ts2_sub,
-    ts1' = ts ++ ts1_sub /\
-    ts2' = ts' ++ ts2_sub /\
-    values_subtyping ts ts' /\  
-    values_subtyping ts1_sub ts1 /\
-    values_subtyping ts2 ts2_sub.
-
-Notation "t1 <t: t2" := (value_subtyping t1 t2) (at level 30).
-Notation "ts1 <ts: ts2" := (values_subtyping ts1 ts2) (at level 60).
-Notation "tf1 <ti: tf2" := (instr_subtyping tf1 tf2) (at level 60).
-Notation "tf1 <tf: tf2" := (func_subtyping tf1 tf2) (at level 60).
 
 Definition func_agree (t1 t2: function_type) : bool :=
   t1 == t2.
@@ -188,7 +229,7 @@ Definition mem_agree (t1 t2: memory_type) : bool :=
   
 Definition global_agree (t1 t2: global_type) : bool :=
   t1 == t2.
-
+          
 Definition context_agree (C C': t_context) : bool :=
   (C.(tc_types) == C'.(tc_types)) &&
   (all2 func_agree C.(tc_funcs) C'.(tc_funcs)) &&
@@ -202,6 +243,26 @@ Definition context_agree (C C': t_context) : bool :=
   (C.(tc_labels) == C'.(tc_labels)) &&
   (C.(tc_return) == C'.(tc_return)).
 
+
+(* Auxiliary definitions for expressing numerics semantics and typing *)
+Definition unop_type_agree (t: number_type) (op: unop): bool :=
+  match op with
+  | Unop_i _ | Unop_extend _ => (t == T_i32) || (t == T_i64)
+  | Unop_f _ => (t == T_f32) || (t == T_f64)
+  end.
+
+Definition binop_type_agree (t: number_type) (op: binop): bool :=
+  match op with
+  | Binop_i _ => (t == T_i32) || (t == T_i64)
+  | Binop_f _ => (t == T_f32) || (t == T_f64)
+  end.
+
+Definition relop_type_agree (t: number_type) (op: relop): bool :=
+  match op with
+  | Relop_i _ => (t == T_i32) || (t == T_i64)
+  | Relop_f _ => (t == T_f32) || (t == T_f64)
+  end.
+
 Definition typeof_num (v : value_num) : number_type :=
   match v with
   | VAL_int32 _ => T_i32
@@ -209,6 +270,16 @@ Definition typeof_num (v : value_num) : number_type :=
   | VAL_float32 _ => T_f32
   | VAL_float64 _ => T_f64
   end.
+
+Definition unop_typecheck (v: value_num) (t: number_type) (op: unop): bool :=
+  (typeof_num v == t) && unop_type_agree t op.
+
+Definition binop_typecheck (v1 v2: value_num) (t: number_type) (op: binop) : bool :=
+  (typeof_num v1 == t) && (typeof_num v2 == t) && binop_type_agree t op.
+
+Definition relop_typecheck (v1 v2: value_num) (t: number_type) (op: relop) : bool :=
+  (typeof_num v1 == t) && (typeof_num v2 == t) && relop_type_agree t op.
+
 
 Definition typeof_vec (v: value_vec) : vector_type :=
   match v with
@@ -268,19 +339,14 @@ Definition is_ref_t (t: value_type) : bool :=
 Definition is_mut (tg : global_type) : bool :=
   tg_mut tg == MUT_var.
 
-
-Definition app_unop_i (e : Wasm_int.type) (iop : unop_i) : Wasm_int.sort e -> Wasm_int.sort e :=
-  let: Wasm_int.Pack u (Wasm_int.Class eqmx intmx) as e' := e
-    return Wasm_int.sort e' -> Wasm_int.sort e' in
+Definition app_unop_i {T: Type} (mx : Wasm_int.mixin_of T) (iop : unop_i) : T -> T :=
   match iop with
-  | UOI_ctz => Wasm_int.int_ctz intmx
-  | UOI_clz => Wasm_int.int_clz intmx
-  | UOI_popcnt => Wasm_int.int_popcnt intmx
+  | UOI_ctz => Wasm_int.int_ctz mx
+  | UOI_clz => Wasm_int.int_clz mx
+  | UOI_popcnt => Wasm_int.int_popcnt mx
   end.
 
-Definition app_unop_f (e : Wasm_float.type) (fop : unop_f) : Wasm_float.sort e -> Wasm_float.sort e :=
-  let: Wasm_float.Pack u (Wasm_float.Class eqmx mx) as e' := e
-    return Wasm_float.sort e' -> Wasm_float.sort e' in
+Definition app_unop_f {T: Type} (mx : Wasm_float.mixin_of T) (fop : unop_f) : T -> T :=
   match fop with
   | UOF_neg => Wasm_float.float_neg mx
   | UOF_abs => Wasm_float.float_abs mx
@@ -299,23 +365,21 @@ Definition app_unop (op: unop) (v: value_num) :=
   match op with
   | Unop_i iop =>
     match v with
-    | VAL_int32 c => VAL_int32 (@app_unop_i i32t iop c)
-    | VAL_int64 c => VAL_int64 (@app_unop_i i64t iop c)
+    | VAL_int32 c => VAL_int32 (app_unop_i i32m iop c)
+    | VAL_int64 c => VAL_int64 (app_unop_i i64m iop c)
     | _ => v
     end
   | Unop_f fop =>
     match v with
-    | VAL_float32 c => VAL_float32 (@app_unop_f f32t fop c)
-    | VAL_float64 c => VAL_float64 (@app_unop_f f64t fop c)
+    | VAL_float32 c => VAL_float32 (app_unop_f f32m fop c)
+    | VAL_float64 c => VAL_float64 (app_unop_f f64m fop c)
     | _ => v
     end
   | Unop_extend n => app_unop_extend n v
   end.
 
-Definition app_binop_i (e : Wasm_int.type) (iop : binop_i)
-    : Wasm_int.sort e -> Wasm_int.sort e -> option (Wasm_int.sort e) :=
-  let: Wasm_int.Pack u (Wasm_int.Class _ mx) as e' := e
-    return Wasm_int.sort e' -> Wasm_int.sort e' -> option (Wasm_int.sort e') in
+Definition app_binop_i {T: Type} (mx : Wasm_int.mixin_of T) (iop : binop_i)
+    : T -> T -> option T :=
   let: add_some := fun f c1 c2 => Some (f c1 c2) in
   match iop with
   | BOI_add => add_some (Wasm_int.int_add mx)
@@ -335,10 +399,8 @@ Definition app_binop_i (e : Wasm_int.type) (iop : binop_i)
   | BOI_rotr => add_some (Wasm_int.int_rotr mx)
   end.
 
-Definition app_binop_f (e : Wasm_float.type) (fop : binop_f)
-    : Wasm_float.sort e -> Wasm_float.sort e -> option (Wasm_float.sort e) :=
-  let: Wasm_float.Pack u (Wasm_float.Class _ mx) as e' := e
-    return Wasm_float.sort e' -> Wasm_float.sort e' -> option (Wasm_float.sort e') in
+Definition app_binop_f {T: Type} (mx : Wasm_float.mixin_of T) (fop : binop_f)
+    : T -> T -> option T :=
   let: add_some := fun f c1 c2 => Some (f c1 c2) in
   match fop with
   | BOF_add => add_some (Wasm_float.float_add mx)
@@ -356,12 +418,12 @@ Definition app_binop (op: binop) (v1: value_num) (v2: value_num) :=
     match v1 with
     | VAL_int32 c1 =>
       match v2 with
-      | VAL_int32 c2 => option_map (fun v => VAL_int32 v) (@app_binop_i i32t iop c1 c2)
+      | VAL_int32 c2 => option_map (fun v => VAL_int32 v) (app_binop_i i32m iop c1 c2)
       |  _ => None
       end                              
     | VAL_int64 c1 =>
       match v2 with
-      | VAL_int64 c2 => option_map (fun v => VAL_int64 v) (@app_binop_i i64t iop c1 c2)
+      | VAL_int64 c2 => option_map (fun v => VAL_int64 v) (app_binop_i i64m iop c1 c2)
       |  _ => None
       end                              
     | _ => None
@@ -370,31 +432,28 @@ Definition app_binop (op: binop) (v1: value_num) (v2: value_num) :=
     match v1 with
     | VAL_float32 c1 =>
       match v2 with
-      | VAL_float32 c2 => option_map (fun v => VAL_float32 v) (@app_binop_f f32t fop c1 c2)
+      | VAL_float32 c2 => option_map (fun v => VAL_float32 v) (app_binop_f f32m fop c1 c2)
       |  _ => None
       end                              
     | VAL_float64 c1 =>
       match v2 with
-      | VAL_float64 c2 => option_map (fun v => VAL_float64 v) (@app_binop_f f64t fop c1 c2)
+      | VAL_float64 c2 => option_map (fun v => VAL_float64 v) (app_binop_f f64m fop c1 c2)
       |  _ => None
       end                              
     | _ => None
     end
   end.
 
-Definition app_testop_i (e : Wasm_int.type) (o : testop) : Wasm_int.sort e -> bool :=
-  let: Wasm_int.Pack u (Wasm_int.Class _ mx) as e' := e return Wasm_int.sort e' -> bool in
+Definition app_testop_i {T: Type} (mx : Wasm_int.mixin_of T) (o : testop) : T -> bool :=
   match o with
   | Eqz => Wasm_int.int_eqz mx
   end.
 
-Definition app_relop_i (e : Wasm_int.type) (rop : relop_i)
-    : Wasm_int.sort e -> Wasm_int.sort e -> bool :=
-  let: Wasm_int.Pack u (Wasm_int.Class _ mx) as e' := e
-    return Wasm_int.sort e' -> Wasm_int.sort e' -> bool in
+Definition app_relop_i {T: Type} (mx: Wasm_int.mixin_of T) (rop : relop_i)
+    : T -> T -> bool :=
   match rop with
   | ROI_eq => Wasm_int.int_eq mx
-  | ROI_ne => @Wasm_int.int_ne _
+  | ROI_ne => Wasm_int.int_ne mx
   | ROI_lt SX_U => Wasm_int.int_lt_u mx
   | ROI_lt SX_S => Wasm_int.int_lt_s mx
   | ROI_gt SX_U => Wasm_int.int_gt_u mx
@@ -405,13 +464,11 @@ Definition app_relop_i (e : Wasm_int.type) (rop : relop_i)
   | ROI_ge SX_S => Wasm_int.int_ge_s mx
   end.
 
-Definition app_relop_f (e : Wasm_float.type) (rop : relop_f)
-    : Wasm_float.sort e -> Wasm_float.sort e -> bool :=
-  let: Wasm_float.Pack u (Wasm_float.Class _ mx) as e' := e
-    return Wasm_float.sort e' -> Wasm_float.sort e' -> bool in
+Definition app_relop_f {T: Type} (mx: Wasm_float.mixin_of T) (rop : relop_f)
+    : T -> T -> bool :=
   match rop with
   | ROF_eq => Wasm_float.float_eq mx
-  | ROF_ne => @Wasm_float.float_ne _
+  | ROF_ne => Wasm_float.float_ne mx
   | ROF_lt => Wasm_float.float_lt mx
   | ROF_gt => Wasm_float.float_gt mx
   | ROF_le => Wasm_float.float_le mx
@@ -424,12 +481,12 @@ Definition app_relop (op: relop) (v1: value_num) (v2: value_num) :=
     match v1 with
     | VAL_int32 c1 =>
       match v2 with
-      | VAL_int32 c2 => @app_relop_i i32t iop c1 c2
+      | VAL_int32 c2 => app_relop_i i32m iop c1 c2
       |  _ => false
       end                              
     | VAL_int64 c1 =>
       match v2 with
-      | VAL_int64 c2 => @app_relop_i i64t iop c1 c2
+      | VAL_int64 c2 => app_relop_i i64m iop c1 c2
       |  _ => false
       end                              
     | _ => false
@@ -438,16 +495,67 @@ Definition app_relop (op: relop) (v1: value_num) (v2: value_num) :=
     match v1 with
     | VAL_float32 c1 =>
       match v2 with
-      | VAL_float32 c2 => @app_relop_f f32t fop c1 c2
+      | VAL_float32 c2 => app_relop_f f32m fop c1 c2
       |  _ => false
       end                              
     | VAL_float64 c1 =>
       match v2 with
-      | VAL_float64 c2 => @app_relop_f f64t fop c1 c2
+      | VAL_float64 c2 => app_relop_f f64m fop c1 c2
       |  _ => false
-      end                              
+      end
     | _ => false
     end
+  end.
+
+Definition app_unop_vec (op: unop_vec) (v1: value_vec) : value_vec :=
+  v1.
+
+Definition app_binop_vec (op: binop_vec) (v1 v2: value_vec) : value_vec :=
+  v1.
+
+Definition app_ternop_vec (op: ternop_vec) (v1 v2 v3: value_vec) : value_vec :=
+  v1.
+
+Definition app_test_vec (op: test_vec) (v1: value_vec) : bool :=
+  true.
+
+Definition app_shift_vec (op: shift_vec) (v1: value_vec) (v2: i32) : value_vec :=
+  v1.
+
+Definition app_splat_vec (shape: shape_vec) (v1: value_num) : value_vec :=
+  VAL_vec128 tt.
+
+Definition app_extract_vec (shape: shape_vec) (s: option sx) (n: laneidx) (v1: value_vec) : value_num :=
+  match shape with
+  | SV_ishape svi =>
+      match svi with
+      | SVI_64_2 => bitzero T_i64
+      | _ => bitzero T_i32
+      end
+  | SV_fshape svf =>
+      match svf with
+      | SVF_32_4 => bitzero T_f32
+      | SVF_64_2 => bitzero T_f64
+      end
+  end.
+
+Definition app_replace_vec (shape: shape_vec) (n: laneidx) (v1: value_vec) (v2: value_num) : value_vec :=
+  v1.
+
+Definition shape_dim (shape: shape_vec) : N :=
+  match shape with
+  | SV_ishape svi =>
+      match svi with
+      | SVI_8_16 => 16
+      | SVI_16_8 => 8
+      | SVI_32_4 => 4
+      | SVI_64_2 => 2
+      end
+  | SV_fshape svf =>
+      match svf with
+      | SVF_32_4 => 4
+      | SVF_64_2 => 2
+      end
   end.
 
 Definition rglob_is_mut (g : module_global) : bool :=
@@ -634,6 +742,21 @@ Definition smem_store_packed (s: store_record) (inst: moduleinst) (n: N) (off: s
   | None => None
   end.
 
+Definition smem_store_vec_lane (s: store_record) (inst: moduleinst) (n: N) (v: value_vec) (width: width_vec) (marg: memarg) (x: laneidx) : option store_record :=
+  match lookup_N inst.(inst_mems) 0%N with
+  | Some addr =>
+      match lookup_N s.(s_mems) addr with
+      | Some mem =>
+        match store_vec_lane mem n v width marg x with
+        | Some mem' =>
+           Some (upd_s_mem s (set_nth mem' s.(s_mems) (N.to_nat addr) mem'))
+        | None => None
+        end
+      | None => None
+      end
+  | None => None
+  end.
+
 Definition smem_grow (s: store_record) (inst: moduleinst) (n: N) : option (store_record * N) :=
   match lookup_N inst.(inst_mems) 0%N with
   | Some addr =>
@@ -773,6 +896,11 @@ Definition component_extension {T: Type} (ext_rel: T -> T -> bool) (l1 l2: list 
   (length l1 <= length l2) &&
   all2 ext_rel l1 (take (length l1) l2).
 
+(* The invariant of the typing context preserved by the opsem.
+   The entire typing context used to be invariant in Wasm 1.0.
+   However, with the introduction of the full table/memory types in Wasm 2.0,
+   the table/memory grow instructions modify the corresponding types.
+*)
 Definition context_extension C C' : bool :=
   (C.(tc_types) == C'.(tc_types)) &&
   (C.(tc_funcs) == C'.(tc_funcs)) &&
@@ -975,85 +1103,8 @@ Definition result_to_stack (r : result) :=
 
 Definition load_store_t_bounds (a : alignment_exponent) (tp : option packed_type) (t : number_type) : bool :=
   match tp with
-  | None => Nat.pow 2 a <= tnum_length t
-  | Some tp' => (Nat.pow 2 a <= tp_length tp') && (tp_length tp' < tnum_length t) && (is_int_t t)
-  end.
-
-Definition cvt_i32 (s : option sx) (v : value_num) : option i32 :=
-  match v with
-  | VAL_int32 _ => None
-  | VAL_int64 c => Some (wasm_wrap c)
-  | VAL_float32 c =>
-    match s with
-    | Some SX_U => Wasm_float.float_ui32_trunc f32m c
-    | Some SX_S => Wasm_float.float_ui32_trunc f32m c
-    | None => None
-    end
-  | VAL_float64 c =>
-    match s with
-    | Some SX_U => Wasm_float.float_ui32_trunc f64m c
-    | Some SX_S => Wasm_float.float_ui32_trunc f64m c
-    | None => None
-    end
-  end.
-
-Definition cvt_i64 (s : option sx) (v : value_num) : option i64 :=
-  match v with
-  | VAL_int32 c =>
-    match s with
-    | Some SX_U => Some (wasm_extend_u c)
-    | Some SX_S => Some (wasm_extend_s c)
-    | None => None
-    end
-  | VAL_int64 c => None
-  | VAL_float32 c =>
-    match s with
-    | Some SX_U => Wasm_float.float_ui64_trunc f32m c
-    | Some SX_S => Wasm_float.float_si64_trunc f32m c
-    | None => None
-    end
-  | VAL_float64 c =>
-    match s with
-    | Some SX_U => Wasm_float.float_ui64_trunc f64m c
-    | Some SX_S => Wasm_float.float_si64_trunc f64m c
-    | None => None
-    end
-  end.
-
-Definition cvt_f32 (s : option sx) (v : value_num) : option f32 :=
-  match v with
-  | VAL_int32 c =>
-    match s with
-    | Some SX_U => Some (Wasm_float.float_convert_ui32 f32m c)
-    | Some SX_S => Some (Wasm_float.float_convert_si32 f32m c)
-    | None => None
-    end
-  | VAL_int64 c =>
-    match s with
-    | Some SX_U => Some (Wasm_float.float_convert_ui64 f32m c)
-    | Some SX_S => Some (Wasm_float.float_convert_si64 f32m c)
-    | None => None
-    end
-  | VAL_float32 c => None
-  | VAL_float64 c => Some (wasm_demote c)
-  end.
-
-Definition cvt_f64 (s : option sx) (v : value_num) : option f64 :=
-  match v with
-  | VAL_int32 c =>
-    match s with
-    | Some SX_U => Some (Wasm_float.float_convert_ui32 f64m c)
-    | Some SX_S => Some (Wasm_float.float_convert_si32 f64m c)
-    | None => None
-    end
-  | VAL_int64 c =>
-    match s with
-    | Some SX_U => Some (Wasm_float.float_convert_ui64 f64m c)
-    | Some SX_S => Some (Wasm_float.float_convert_si64 f64m c)
-    | None => None
-    end
-  | VAL_float32 c => Some (wasm_promote c)
-  | VAL_float64 c => None
+  | None => N.pow 2 a <= tnum_length t
+  | Some tp' => (N.pow 2 a <= tp_length tp') && (tp_length tp' < tnum_length t) && (is_int_t t)
   end.
 
 Definition cvt_wrap t v : option value_num :=
@@ -1074,13 +1125,13 @@ Definition cvt_trunc t s v : option value_num :=
          | VAL_float32 c =>
              match s with
              | Some SX_U => Wasm_float.float_ui32_trunc f32m c
-             | Some SX_S => Wasm_float.float_ui32_trunc f32m c
+             | Some SX_S => Wasm_float.float_si32_trunc f32m c
              | None => None
              end
          | VAL_float64 c =>
              match s with
              | Some SX_U => Wasm_float.float_ui32_trunc f64m c
-             | Some SX_S => Wasm_float.float_ui32_trunc f64m c
+             | Some SX_S => Wasm_float.float_si32_trunc f64m c
              | None => None
              end
          | _ => None
@@ -1105,9 +1156,46 @@ Definition cvt_trunc t s v : option value_num :=
   | _ => None
   end.
 
-(* TODO: implement the actual definition *)
-Definition cvt_trunc_sat (t: number_type) (s: option sx) (v: value_num) : option value_num :=
-  Some (bitzero t).
+(* This is still partial as there could be a mismatch between the input
+   value and type. The underlying operation trunc_sat is total. *)
+Definition cvt_trunc_sat t s v : option value_num :=
+  match t with
+  | T_i32 =>
+      option_map VAL_int32
+        (match v with
+         | VAL_float32 c =>
+             match s with
+             | Some SX_U => Some (Wasm_float.float_ui32_trunc_sat f32m c)
+             | Some SX_S => Some (Wasm_float.float_si32_trunc_sat f32m c)
+             | None => None
+             end
+         | VAL_float64 c =>
+             match s with
+             | Some SX_U => Some (Wasm_float.float_ui32_trunc_sat f64m c)
+             | Some SX_S => Some (Wasm_float.float_si32_trunc_sat f64m c)
+             | None => None
+             end
+         | _ => None
+         end)
+  | T_i64 =>
+      option_map VAL_int64
+        (match v with
+         | VAL_float32 c =>
+             match s with
+             | Some SX_U => Some (Wasm_float.float_ui64_trunc_sat f32m c)
+             | Some SX_S => Some (Wasm_float.float_si64_trunc_sat f32m c)
+             | None => None
+             end
+         | VAL_float64 c =>
+             match s with
+             | Some SX_U => Some (Wasm_float.float_ui64_trunc_sat f64m c)
+             | Some SX_S => Some (Wasm_float.float_si64_trunc_sat f64m c)
+             | None => None
+             end
+         | _ => None
+         end)
+  | _ => None
+  end.
 
 Definition cvt_extend t s v: option value_num :=
   match t with

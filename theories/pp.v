@@ -3,9 +3,10 @@
 Require Import Coq.Strings.String.
 From compcert Require Import Floats.
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
+From Wasm Require Export bytes_pp.
+From Wasm Require Import datatypes interpreter_ctx.
 Require Import Coq.Init.Decimal.
-Require Export bytes_pp datatypes interpreter_ctx.
-Require Import BinNat.
+Require Import BinNat ZArith.
 Require Import ansi list_extra.
 
 Open Scope string_scope.
@@ -13,7 +14,7 @@ Open Scope string_scope.
 Section Host.
 
 Context `{ho: host}.
-  
+
 Variable show_host_function : host_function -> string.
 
 Definition newline_char : Ascii.ascii := Ascii.ascii_of_byte Byte.x0a.
@@ -25,7 +26,7 @@ Definition indentation := nat.
 
 Fixpoint indent (i : indentation) (s : string) : string :=
   match i with
-  | 0 => s
+  | 0%nat => s
   | S i' => "  " ++ indent i' s
   end.
 
@@ -99,6 +100,13 @@ Definition pp_Z (z: Z) : string :=
   | Zneg p => "-" ++ pp_positive p
   end.
 
+Definition pp_Z_signed (z: Z) : string :=
+  match z with
+  | Z0 => "0"
+  | Zpos p => "+" ++ pp_positive p
+  | Zneg p => "-" ++ pp_positive p
+  end.
+
 Definition pp_id := pp_N.
 
 Definition pp_addr := pp_N.
@@ -116,8 +124,150 @@ Definition pp_i32 i :=
 Definition pp_i64 i :=
   pp_Z (Wasm_int.Int64.signed i).
 
-(* TODO: all this printing of floats business is highly dubious,
-   and completely untested *)
+
+(** Floating Point Printing **)
+
+Fixpoint N_of_bits_aux (bs: list bool) (acc: N) : N :=
+  match bs with
+  | nil => acc
+  | true :: bs' => N_of_bits_aux bs' (acc*2+1)
+  | false :: bs' => N_of_bits_aux bs' (acc*2)
+  end.
+
+Definition N_of_bits (bs: list bool) : N :=
+  N_of_bits_aux bs 0.
+
+Definition subarray {T: Type} (l: list T) (n: nat) (m: nat) : list T :=
+  List.firstn m (List.skipn n l).
+
+(* Typeclass for IEEE 754 floating point lengths *)
+Class IEEE_754_lengths :=
+  Fspec {
+      exponent_bits: nat;
+      mantissa_bits: nat;
+    }.
+
+Section Parse_IEEE_754.
+  Context `{fspec: IEEE_754_lengths}.
+  
+  Definition get_mantissa (bs: list bool) : list bool :=
+    subarray bs (exponent_bits + 1) mantissa_bits.
+  
+  Definition get_exponent (bs: list bool) : list bool :=
+    subarray bs 1 exponent_bits.
+
+  Definition is_number (bs: list bool) : bool :=
+    negb (List.forallb (fun b => b) (get_exponent bs)).
+
+  Definition is_mantissa_all0 (bs: list bool) : bool :=
+    List.forallb (fun b => negb b) (get_mantissa bs).
+  
+  Definition is_mantissa_all1 (bs: list bool) : bool :=
+    List.forallb (fun b => b) (get_mantissa bs).
+
+  Definition is_mantissa_canon (bs: list bool) : bool :=
+    let mbs := get_mantissa bs in
+    match mbs with
+    | true :: mbs' => List.forallb (fun b => negb b) mbs'
+    | _ => false
+    end.
+  
+  Definition is_mantissa_arith (bs: list bool) : bool :=
+    let mbs := get_mantissa bs in
+    match mbs with
+    | true :: mbs' => true
+    | _ => false
+    end.
+  
+  Definition is_inf (bs: list bool) : bool :=
+    (negb (is_number bs)) && (is_mantissa_all0 bs).
+  
+  Definition is_nan_canon (bs: list bool) : bool :=
+    (negb (is_number bs)) && (is_mantissa_canon bs).
+
+  Definition is_nan_arith (bs: list bool) : bool :=
+    (negb (is_number bs)) && (is_mantissa_arith bs).
+  
+  Definition is_nan (bs: list bool) : bool :=
+    (negb (is_number bs)).
+  
+  Definition is_subnormal (bs: list bool) : bool :=
+    (List.forallb (fun b => negb b) (get_exponent bs)).
+  
+  Definition is_zero (bs: list bool) : bool :=
+    is_subnormal bs &&
+      is_mantissa_all0 bs.
+  
+  
+End Parse_IEEE_754.
+
+Definition bits_fill (bs: list bool) (n: nat) (b: bool) : list bool :=
+  if (List.length bs >= n)%nat then bs
+  else ((List.repeat b (n - List.length bs)) ++ bs)%list.
+
+Definition get_sign (bs: list bool) : bool :=
+  match bs with
+  | nil => true
+  | b :: _ => b
+  end.
+
+Definition pp_sign (b: bool) : string :=
+  if b then "-" else "+".
+
+(* a bit stupid *)
+Definition pp_4bits (bs: list bool) : string :=
+  match bs with
+  | [::false; false; false; false] => "0"
+  | [::false; false; false; true] => "1"
+  | [::false; false; true; false] => "2"
+  | [::false; false; true; true] => "3"
+  | [::false; true; false; false] => "4"
+  | [::false; true; false; true] => "5"
+  | [::false; true; true; false] => "6"
+  | [::false; true; true; true] => "7"
+  | [::true; false; false; false] => "8"
+  | [::true; false; false; true] => "9"
+  | [::true; false; true; false] => "a"
+  | [::true; false; true; true] => "b"
+  | [::true; true; false; false] => "c"
+  | [::true; true; false; true] => "d"
+  | [::true; true; true; false] => "e"
+  | [::true; true; true; true] => "f"
+  | _ => "?"
+  end.
+
+Fixpoint pp_mantissa_aux (bs: list bool) (acc: string) : string :=
+  match bs with
+  | nil => acc
+  | b0 :: b1 :: b2 :: b3 :: bs' =>
+      pp_mantissa_aux bs' (acc ++ pp_4bits ([::b0; b1; b2; b3]))
+  | _ => acc ++ pp_4bits (bs ++ (List.repeat false (4 - List.length bs)))%list
+  end.
+
+Definition pp_mantissa (bs: list bool) : string :=
+(*  if (List.forallb (fun b => negb b) bs) then "" 
+  else "." ++ *) pp_mantissa_aux bs "".
+
+(* nan payload treat the mantissa as an int, therefore printing cannot be
+   implemented by grouping every 4 bits from the start. *)
+Fixpoint pp_nanpl_aux (bs: list bool) (acc: string): string :=
+  match bs with
+  | nil => acc
+  | b0 :: b1 :: b2 :: b3 :: bs' =>
+      pp_nanpl_aux bs' (pp_4bits ([::b3; b2; b1; b0]) ++ acc)
+  | _ => pp_4bits (List.repeat false (4 - List.length bs) ++ List.rev bs)%list ++ acc
+  end.
+
+Definition pp_nanpl (bs: list bool) : string :=
+  pp_nanpl_aux (List.rev bs) "".
+
+Fixpoint pp_subnormal_mantissa (bs: list bool) (exp: N) : string :=
+  match bs with
+  | nil => "error"
+  | false :: bs' => pp_subnormal_mantissa bs' (exp+1)
+  | true :: bs' => pp_mantissa bs' ++ "p-" ++ pp_N exp
+  end.
+
 Fixpoint bool_list_of_pos (acc : list bool) (p : BinNums.positive) :=
   match p with
   | BinNums.xI p' => bool_list_of_pos (true :: acc) p'
@@ -125,42 +275,104 @@ Fixpoint bool_list_of_pos (acc : list bool) (p : BinNums.positive) :=
   | BinNums.xH => true :: acc
   end.
 
-Open Scope list.
 
-Fixpoint pp_bools (acc : list Byte.byte) (bools : list bool) : list Byte.byte :=
-  (* TODO: I am ashamed I wrote this *)
-  match bools with
-  | nil => acc
-  | b1 :: b2 :: b3 :: b4 :: b5 :: b6 :: b7 :: b8 :: bools' =>
-    pp_bools (Byte.of_bits (b1, (b2, (b3, (b4, (b5, (b6, (b7, b8))))))) :: acc) bools'
-  | b1 :: b2 :: b3 :: b4 :: b5 :: b6 :: b7 ::  nil =>
-    Byte.of_bits (b1, (b2, (b3, (b4, (b5, (b6, (b7, false))))))) :: acc
-  | b1 :: b2 :: b3 :: b4 :: b5 :: b6 :: nil =>
-    Byte.of_bits (b1, (b2, (b3, (b4, (b5, (b6, (false, false))))))) :: acc
-  | b1 :: b2 :: b3 :: b4 :: b5 :: nil =>
-    Byte.of_bits (b1, (b2, (b3, (b4, (b5, (false, (false, false))))))) :: acc
-  | b1 :: b2 :: b3 :: b4 :: nil =>
-    Byte.of_bits (b1, (b2, (b3, (b4, (false, (false, (false, false))))))) :: acc
-  | b1 :: b2 :: b3 :: nil =>
-    Byte.of_bits (b1, (b2, (b3, (false, (false, (false, (false, false))))))) :: acc
-  | b1 :: b2 :: nil =>
-    Byte.of_bits (b1, (b2, (false, (false, (false, (false, (false, false))))))) :: acc
-  | b1 :: nil =>
-    Byte.of_bits (b1, (false, (false, (false, (false, (false, (false, false))))))) :: acc
-  end.
+Section f32_Printer.
 
-Definition pp_f32 (f : float32) : string :=
+#[local]
+Instance binary32_spec : IEEE_754_lengths := Fspec 8 23.
+
+Definition bits_of_f32_aux (f: float32) : list bool :=
   match BinIntDef.Z.to_N ((Float32.to_bits f).(Integers.Int.intval)) with
-  | BinNums.N0 => "0"
+  | BinNums.N0 => nil
   | BinNums.Npos p =>
-    bytes_pp.hex_small_no_prefix_of_bytes_compact (pp_bools nil (List.rev (bool_list_of_pos nil p)))
+      bool_list_of_pos nil p
   end.
 
-Definition pp_f64 (f : float) : string :=
+Definition bits_of_f32 (f: float32) : list bool :=
+  bits_fill (bits_of_f32_aux f) 32 false.
+
+Definition pp_exponent32 (bs: list bool) : string :=
+  pp_Z_signed (BinInt.Z.sub (BinInt.Z.of_N (N_of_bits bs)) 127).
+
+(* TODO: wast format and wasm text format disagree on the representation of
+  nan. Find a sensible representation here *)
+Definition pp_f32 (f: float32) : string :=
+  let bits_f := bits_of_f32 f in
+(*  (* nan has no sign in the wast format. *)
+  if is_nan_canon bits_f then "nan:canonical"
+  else
+    if is_nan_arith bits_f then "nan:arithmetic"*)
+  (pp_sign (get_sign bits_f)) ++
+    if is_nan_canon bits_f then "nan"
+    else
+      (* As nans chooses its payload and sign non-det, it is difficult to
+         use mdx to test this bit. Also, since the current implementation
+         in numerics.v always returns the canonical nan (made opaque),
+         this clause will never be entered *)
+      if is_nan bits_f then "nan:0x" ++ pp_nanpl (get_mantissa bits_f)
+      else
+        (if is_inf bits_f then "inf"
+         else
+           "0x" ++
+             (if is_zero bits_f then "0" else
+                (if is_subnormal bits_f then
+                   "1." ++ pp_subnormal_mantissa (get_mantissa bits_f) 127
+                 else
+                   ("1." ++ pp_mantissa (get_mantissa bits_f)) ++ "p" ++
+                     (pp_exponent32 (get_exponent bits_f)))))
+.
+
+End f32_Printer.
+
+Section f64_Printer.
+
+#[local]
+Instance binary64_spec : IEEE_754_lengths := Fspec 11 52.
+
+Definition bits_of_f64_aux (f: float) : list bool :=
   match BinIntDef.Z.to_N ((Float.to_bits f).(Integers.Int64.intval)) with
-  | BinNums.N0 => "0"
+  | BinNums.N0 => nil
   | BinNums.Npos p =>
-    bytes_pp.hex_small_no_prefix_of_bytes_compact (pp_bools nil (List.rev (bool_list_of_pos nil p)))
+      bool_list_of_pos nil p
+  end.
+
+Definition bits_of_f64 (f: float) : list bool :=
+  bits_fill (bits_of_f64_aux f) 64 false.
+
+Definition pp_exponent64 (bs: list bool) : string :=
+  pp_Z_signed (BinInt.Z.sub (BinInt.Z.of_N (N_of_bits bs)) 1023).
+
+Definition pp_f64 (f: float) : string :=
+  let bits_f := bits_of_f64 f in
+  (pp_sign (get_sign bits_f)) ++
+                              (*
+  if is_nan_canon bits_f then "nan:canonical"
+  else
+    if is_nan_arith bits_f then "nan:arithmetic"
+    else*)
+    if is_nan_canon bits_f then "nan"
+    else
+      if is_nan bits_f then "nan:0x" ++ pp_nanpl (get_mantissa bits_f)
+      else
+        (if is_inf bits_f then "inf"
+         else
+           "0x" ++
+             (if is_zero bits_f then "0" else
+                (if is_subnormal bits_f then
+                   "1." ++ pp_subnormal_mantissa (get_mantissa bits_f) 1023
+                 else
+                   ("1." ++ pp_mantissa (get_mantissa bits_f)) ++ "p" ++
+                     (pp_exponent64 (get_exponent bits_f)))))
+.
+
+End f64_Printer.
+
+Definition pp_extern_value (extv: extern_value) : string :=
+  match extv with
+  | EV_func a => "func " ++ pp_addr a
+  | EV_table a => "table " ++ pp_addr a
+  | EV_mem a => "mem " ++ pp_addr a
+  | EV_global a => "global " ++ pp_addr a
   end.
 
 Definition pp_value_num (v : value_num) : string :=
@@ -277,8 +489,8 @@ Definition pp_rel_op_f (rof : relop_f) : string :=
   end.
 
 (* The alignment exponent is the exponent in both the spec and the binary, but needs to be the power in the text format. *)
-Definition pp_memarg (a: alignment_exponent) (o: static_offset) : string :=
-  "offset=" ++ pp_N o ++ " " ++ "align=" ++ pp_N (N.shiftl 1 a).
+Definition pp_memarg (marg: memarg) : string :=
+  "offset=" ++ pp_N marg.(memarg_offset) ++ " " ++ "align=" ++ pp_N (N.shiftl 1 marg.(memarg_align)).
 
 Definition pp_packing (p : packed_type) :=
   match p with
@@ -308,6 +520,42 @@ Definition pp_cvtop (cvt: cvtop) : string :=
   | CVO_trunc_sat => "trunc_sat"
   end.
 
+(* placeholder for vector operations added in 2.0, to be filled in a future update
+https://webassembly.github.io/spec/core/binary/instructions.html#vector-instructions
+*)
+Definition pp_unop_vec (op: unop_vec) :=
+  "(not implemented)".
+
+Definition pp_binop_vec (op: binop_vec) :=
+  "(not implemented)".
+
+Definition pp_ternop_vec (op: ternop_vec) :=
+  "(not implemented)".
+
+Definition pp_test_vec (op: test_vec) :=
+  "(not implemented)".
+
+Definition pp_shift_vec (op: shift_vec) :=
+  "(not implemented)".
+
+Definition pp_splat_vec (sh: shape_vec) :=
+  "(not implemented)".
+
+Definition pp_extract_vec (sh: shape_vec) (s: option sx) (x: laneidx) :=
+  "(not implemented)".
+
+Definition pp_replace_vec (sh: shape_vec) (x: laneidx) :=
+  "(not implemented)".
+  
+Definition pp_load_vec (lvarg: load_vec_arg) (marg: memarg) :=
+  "(not implemented)".
+
+Definition pp_load_vec_lane (w: width_vec) (marg: memarg) (x: laneidx) :=
+  "(not implemented)".
+
+(* store_vec_lane and load_vec uses the same args. Maybe it's better to find a new name *)
+Definition pp_store_vec_lane (w: width_vec) (marg: memarg) (x: laneidx) :=
+  "(not implemented)".
 
 Fixpoint pp_basic_instruction (i : indentation) (be : basic_instruction) : string :=
   let pp_basic_instructions bes i :=
@@ -383,14 +631,14 @@ Fixpoint pp_basic_instruction (i : indentation) (be : basic_instruction) : strin
   | BI_table_fill x =>
     indent i (with_fg be_style "table.fill " ++ pp_id x ++ newline)
              
-  | BI_load vt None a o =>
-    indent i (pp_number_type vt ++ ".load " ++ pp_memarg a o ++ newline)
-  | BI_load vt (Some ps) a o =>
-    indent i (pp_number_type vt ++ ".load" ++ pp_ps ps ++ " " ++ pp_memarg a o ++ newline)
-  | BI_store vt None a o =>
-    indent i (pp_number_type vt ++ ".store " ++ pp_memarg a o ++ newline)
-  | BI_store vt (Some p) a o =>
-    indent i (pp_number_type vt ++ ".store" ++ pp_packing p ++ " " ++ pp_memarg a o ++ newline)
+  | BI_load vt None marg =>
+    indent i (pp_number_type vt ++ ".load " ++ pp_memarg marg ++ newline)
+  | BI_load vt (Some ps) marg =>
+    indent i (pp_number_type vt ++ ".load" ++ pp_ps ps ++ " " ++ pp_memarg marg ++ newline)
+  | BI_store vt None marg =>
+    indent i (pp_number_type vt ++ ".store " ++ pp_memarg marg ++ newline)
+  | BI_store vt (Some p) marg =>
+    indent i (pp_number_type vt ++ ".store" ++ pp_packing p ++ " " ++ pp_memarg marg ++ newline)
   | BI_memory_size =>
     indent i (with_fg be_style "memory.size" ++ newline ++ newline)
   | BI_memory_grow =>
@@ -425,6 +673,31 @@ Fixpoint pp_basic_instruction (i : indentation) (be : basic_instruction) : strin
     indent i (pp_number_type vt ++ "." ++ pp_rel_op_f rof ++ newline)
   | BI_cvtop vt1 cvtop vt2 sxo =>
       indent i (pp_number_type vt1 ++ "." ++ pp_cvtop cvtop ++ "_" ++ pp_number_type vt2 ++ pp_sx_o sxo ++ newline)
+
+  (* vector instructions currently unimplemented *)
+  | BI_unop_vec op =>
+      indent i (pp_unop_vec op)
+  | BI_binop_vec op =>
+      indent i (pp_binop_vec op)
+  | BI_ternop_vec op =>
+      indent i (pp_ternop_vec op)
+  | BI_test_vec op =>
+      indent i (pp_test_vec op)
+  | BI_shift_vec op =>
+      indent i (pp_shift_vec op)
+  | BI_splat_vec sh =>
+      indent i (pp_splat_vec sh)
+  | BI_extract_vec sh s lanex =>
+      indent i (pp_extract_vec sh s lanex)
+  | BI_replace_vec sh lanex =>
+      indent i (pp_replace_vec sh lanex)
+
+  | BI_load_vec lvarg marg =>
+      indent i (pp_load_vec lvarg marg)
+  | BI_load_vec_lane width marg lanex =>
+      indent i (pp_load_vec_lane width marg lanex)
+  | BI_store_vec_lane width marg lanex =>
+      indent i (pp_store_vec_lane width marg lanex)
   end.
 
 Definition pp_basic_instructions n bes :=
@@ -529,16 +802,16 @@ Definition pp_cfg_tuple_ctx_except_store (cfg: cfg_tuple_ctx) : string :=
 
 Definition pp_res_cfg_except_store {hs: host_state} {cfg: cfg_tuple_ctx} (res: run_step_ctx_result hs cfg) : string :=
   match res with
-  | RSC_normal hs' cfg' _ =>
+  | RSC_normal hs' cfg' _ _ =>
       pp_cfg_tuple_ctx_except_store cfg' ++ newline
-  | RSC_value _ _ vs _ _ _ =>
+  | RSC_value _ _ vs _ =>
       "Value:" ++ newline ++ pp_values_hint_empty vs ++ newline
-  | RSC_value_frame _ _ vs _ _ _ _ _ =>
-      "Value:" ++ newline ++ pp_values_hint_empty vs ++ newline
+  | RSC_trap _ _ _ =>
+      "Trap" ++ newline
   | RSC_invalid _ =>
-      "Invalid context. This should not happen when executing a module start function. Please report a bug if this error arises during invocation of module start functions." ++ newline
+      "Invalid context decomposition. This result should not be observed when invoking valid Wasm module functions without arguments. Please submit a bug report at GitHub/WasmCert-Coq." ++ newline
   | RSC_error _ =>
-      "Ill-typed input configuration"
+      "Ill-typed input configuration. This result should not be observed when invoking valid Wasm module functions without arguments. Please submit a bug report at GitHub/WasmCert-Coq." ++ newline
   end.
 
 End Host.
@@ -557,11 +830,12 @@ Definition pp_store := pp_store.
 
 Definition pp_cfg_tuple_ctx_except_store := pp_cfg_tuple_ctx_except_store.
 
-Definition pp_res_cfg_except_store {hs: host_state} {cfg: cfg_tuple_ctx} (res: run_step_ctx_result hs cfg) := pp_res_cfg_except_store res.
+Definition pp_res_cfg_except_store {cfg: cfg_tuple_ctx} (res: run_step_ctx_result tt cfg) := pp_res_cfg_except_store res.
 
 Definition pp_administrative_instructions := pp_administrative_instructions.
+
+Definition pp_extern_value := pp_extern_value.
 
 End Show.
 
 End PP.
-
