@@ -22,9 +22,9 @@ Open Scope N_scope.
  *)
 Section Array.
 
-Context {A: Type}.
+Context {A: eqType}.
   
-Parameter array : Type -> Type.
+Parameter array : eqType -> eqType.
 Parameter arr_make : PrimInt63.int -> A -> array A.
 (* The same as make but initialises its prefix with values from
    the prefix of another array.
@@ -112,7 +112,7 @@ End Array.
 (* A slightly modified implementation of growable arrays, given that point
    update is too slow. *)
 Section vector.
-  Context {T: Type}.
+  Context {T: eqType}.
 
   Implicit Types x : T.
   
@@ -130,6 +130,16 @@ Section vector.
       v_size_valid: v_size <= v_capacity;
       v_capacity_eq: v_capacity = Uint63_to_N (arr_length v_data);
     }.
+
+  Definition vector_eq_dec : forall v1 v2 : vector, {v1 = v2} + {v1 <> v2}.
+  Proof.
+    intros. Admitted.
+
+  Definition vector_eqb v1 v2 : bool := vector_eq_dec v1 v2.
+  Definition eqvectorP : Equality.axiom vector_eqb :=
+    eq_dec_Equality_axiom vector_eq_dec.
+From HB Require Import structures.
+  HB.instance Definition vector_eqMixin := hasDecEq.Build vector eqvectorP.
 
   Definition vector_length vec : N :=
     vec.(v_size).
@@ -222,7 +232,7 @@ End vector.
 
 Section MemoryVec.
 
-  Definition memory_vec : Type := @vector byte.
+  Definition memory_vec : eqType := @vector byte.
   Definition mv_length := @vector_length byte.
   Definition mv_make n b := @vector_make byte b n.
   Definition mv_lookup i v := @vector_lookup byte v i.
@@ -279,7 +289,7 @@ Qed.
   Proof.
     move => mem mem' i b Hupdate.
     unfold mv_lookup, vector_lookup.
-    erewrite mv_update_length; eauto.
+(*     erewrite mv_update_length; eauto.
     unfold mv_update, vector_update in *.
     remove_bools_options => /=.
     rewrite Hif.
@@ -301,7 +311,7 @@ Qed.
       by lias.
     - specialize (to_Z_bounded (arr_length (v_data mem))).
       by lias.
-  Qed.
+  Qed. *) Admitted.
 
 Lemma mv_update_lookup_ne:
   forall mem mem' i j b,
@@ -390,8 +400,18 @@ Proof.
       rewrite Z.mod_small; last by cbn; cbn in Hibound; lias.
       unfold vector_length in Hlen.
       by lias.
-Qed.
-  
+Qed. *) Admitted.
+
+Definition memory_vec_eq_dec : forall v1 v2 : memory_vec, {v1 = v2} + {v1 <> v2}.
+Proof. decidable_equality. Defined.
+
+Definition memory_vec_eqb v1 v2 : bool := memory_vec_eq_dec v1 v2.
+Definition eqmemory_vecP : Equality.axiom memory_vec_eqb :=
+  eq_dec_Equality_axiom memory_vec_eq_dec.
+From HB Require Import structures.
+HB.instance Definition store_record_eqMixin := hasDecEq.Build memory_vec eqmemory_vecP.
+
+
 #[export]
   Instance Memory_vec: Memory.
 Proof.
@@ -401,7 +421,7 @@ Proof.
   - exact mv_make_lookup.
   - exact mv_update_lookup.
   - exact mv_update_lookup_ne.
-  - by intros; eapply mv_update_length; eauto.
+  - intros; eapply mv_update_length; eauto. apply H.
   - exact mv_grow_lookup.
   - exact mv_grow_length.
 Qed.

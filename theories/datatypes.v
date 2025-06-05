@@ -5,12 +5,13 @@
 
 From Wasm Require Export common numerics bytes memory.
 From compcert Require common.Memdata.
+From mathcomp Require Import eqtype.
 Require Import BinNat.
 
 Set Implicit Arguments.
 Unset Strict Implicit.
 Unset Printing Implicit Defensive.
- 
+
 
 (** * Basic Datatypes **)
 

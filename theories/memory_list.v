@@ -3,6 +3,7 @@
 From mathcomp Require Import ssreflect ssrbool eqtype seq ssrnat.
 From Coq Require Import BinNums ZArith NArith Lia.
 From Wasm Require Import numerics bytes memory common.
+From HB Require Import structures.
 
 Set Implicit Arguments.
 Unset Strict Implicit.
@@ -14,6 +15,15 @@ Section MemoryList.
       ml_init : byte;
       ml_data : list byte;
     }.
+
+  Definition memory_list_eq_dec : forall v1 v2 : memory_list, {v1 = v2} + {v1 <> v2}.
+  Proof. decidable_equality. Defined.
+
+  Definition memory_list_eqb v1 v2 : bool := memory_list_eq_dec v1 v2.
+  Definition eqmemory_listP : Equality.axiom memory_list_eqb :=
+    eq_dec_Equality_axiom memory_list_eq_dec.
+
+  HB.instance Definition store_record_eqMixin := hasDecEq.Build memory_list eqmemory_listP.
 
   Definition ml_make :=
     fun v len =>

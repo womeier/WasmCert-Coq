@@ -19,7 +19,7 @@ Section Memory.
   Definition byte_limit : N := N.mul page_size page_limit.
 
   Class Memory := {
-      mem_t : Type;
+      mem_t : eqType;
       mem_make : byte -> N -> mem_t;
       mem_length : mem_t -> N;
       mem_lookup : N -> mem_t -> option byte;
