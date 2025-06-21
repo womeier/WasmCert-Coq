@@ -229,6 +229,18 @@ Section MemoryVec.
   Definition mv_update i b v:= @vector_update byte v i b.
   Definition mv_grow n v:= @vector_grow byte v n.
 
+  Lemma mv_lookup_ib:
+    forall mem i,
+      (i < mv_length mem)%N ->
+      mv_lookup i mem <> None.
+  Proof.
+    move => mem i => /=.
+    rewrite /mv_length /mv_lookup /vector_lookup.
+    move => H.
+    apply N.ltb_lt in H.
+    by rewrite H.
+  Qed.
+
   Lemma mv_lookup_oob:
     forall mem i,
       (i >= mv_length mem)%N ->
@@ -396,6 +408,7 @@ Qed.
   Instance Memory_vec: Memory.
 Proof.
   apply (@Build_Memory memory_vec mv_make mv_length mv_lookup mv_grow mv_update).
+  - exact mv_lookup_ib.
   - exact mv_lookup_oob.
   - exact mv_make_length.
   - exact mv_make_lookup.

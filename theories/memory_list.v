@@ -47,6 +47,18 @@ Section MemoryList.
                 |}
       else None.
 
+  Lemma ml_lookup_ib:
+    forall mem i,
+      (i < ml_length mem)%N ->
+      ml_lookup i mem <> None.
+  Proof.
+    move => mem i => /=.
+    rewrite /ml_length /ml_lookup.
+    move => H.
+    apply N.ltb_lt in H.
+    by rewrite H.
+  Qed.
+
   Lemma ml_lookup_oob:
     forall mem i,
       (i >= ml_length mem)%N ->
@@ -174,6 +186,7 @@ Qed.
   Instance Memory_list: Memory.
 Proof.
   apply (@Build_Memory memory_list ml_make ml_length ml_lookup ml_grow ml_update).
+  - exact ml_lookup_ib.
   - exact ml_lookup_oob.
   - exact ml_make_length.
   - exact ml_make_lookup.
