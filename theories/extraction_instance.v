@@ -6,6 +6,7 @@ From Wasm Require Import numerics memory_vec binary_format_parser text_format_pa
 From ExtLib Require Import Structures.Monad IdentityMonad.
 
 From Wasm Require Import memory_vec binary_format_parser text_format_parser.
+From Wasm Require Import binary_format_printer.
 
 (* see common.v *)
 Set SsrOldRewriteGoalsOrder.
@@ -59,6 +60,25 @@ Module Monadic_host (PH: Parametric_host).
 End Monadic_host.
   
 Module Utility.
+
+  (* Non-GC production codec entry points.  The scalar correctness theorems
+     refer to these very printer/parser definitions, not replacement codecs. *)
+  Module Binary.
+    Definition print_i32 := binary_of_i32.
+    Definition print_i64 := binary_of_i64.
+    Definition print_u32 := binary_of_u32.
+    Definition print_signed := leb128.encode_signed.
+    Definition parse_i32 (bs : list Byte.byte) : option i32 :=
+      run bs (fun _ => parse_s32).
+    Definition parse_i64 (bs : list Byte.byte) : option i64 :=
+      run bs (fun _ => parse_s64).
+    Definition parse_u32 (bs : list Byte.byte) : option N :=
+      run bs (fun _ => parse_u32_as_N).
+    Definition parse_signed (bs : list Byte.byte) : option Z :=
+      run bs leb128.parse_signed.
+    Definition print_instruction := binary_of_be.
+    Definition parse_instruction := run_parse_be.
+  End Binary.
   
   Definition vali32_of_Z (z: Z) : value :=
     VAL_num (VAL_int32 (Wasm_int.int_of_Z i32m z)).

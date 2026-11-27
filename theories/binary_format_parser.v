@@ -101,7 +101,10 @@ Definition parse_vec_aux {B} {n} (f : byte_parser B n) (k : N)
 
 (* parsing a length-indexed list *)
 Definition parse_vec {B} {n} (f : byte_parser B n) : byte_parser (list B) n :=
-  exact_byte x00 $> nil <|>
+  (* Empty vectors can have a padded u32 length, not only the byte 0x00.
+     Return nil while consuming the length itself: Parseque parsers must
+     consume input, so [parse_vec_aux f 0] cannot be a pure nil parser. *)
+  guardM (fun k => if N.eqb k 0 then Some nil else None) parse_vec_length <|>
   (parse_vec_length >>= (fun k => parse_vec_aux f k)).
 
 Definition parse_16bytes {n} : byte_parser SIMD.v128 n :=
@@ -1321,6 +1324,15 @@ End Run.
 
 Definition run_parse_be (bs : list byte) : option basic_instruction :=
   run bs parse_be.
+
+(* Shared non-GC prefix interface from 6fddcdf: the same production parser
+   instances as [run], retaining the complete unconsumed suffix. *)
+Definition run_parse_prefix {A}
+    (p : forall n, Parser (SizedList byte) byte option A n) (bs : list byte) :
+    option (A * list byte) :=
+  option_map
+    (fun s => (Success.value s, @Sized.value _ _ _ (Success.leftovers s)))
+    (runParser (p (List.length bs)) (Nat.le_refl _) (mkSizedList bs)).
 
 Definition run_parse_expr (bs : list byte) : option (list basic_instruction) :=
   run bs (fun n => parse_expr).

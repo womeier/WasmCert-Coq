@@ -33,6 +33,11 @@
   (modules addressing_extracted)
   (libraries wasmcert_extracted parray zarith))
 
+(test
+ (name scalar_codec_extracted)
+ (modules scalar_codec_extracted)
+ (libraries wasmcert_extracted parray zarith))
+
 (rule
  (alias runtest)
  (deps run_wast_test.sh ../run_wast.sh)

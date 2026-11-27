@@ -4,6 +4,37 @@ From parseque Require Import Parseque.
 From Wasm Require Import binary_format_parser binary_format_printer
                          datatypes_properties check_toks.
 
+(** A vector's u32 length may have a non-minimal LEB128 representation.
+    In particular, a padded zero length must not require an element parser
+    to consume a token.  These tests use the actual whole-module parser. *)
+Definition empty_module_header : list Byte.byte :=
+  x00 :: x61 :: x73 :: x6d :: x01 :: x00 :: x00 :: x00 :: nil.
+
+Lemma padded_empty_type_vector :
+  run_parse_module
+    (empty_module_header ++ (x01 :: x02 :: x80 :: x00 :: nil)) =
+  run_parse_module empty_module_header.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma maximally_padded_empty_type_vector :
+  run_parse_module
+    (empty_module_header ++
+      (x01 :: x05 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil)) =
+  run_parse_module empty_module_header.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma overlong_empty_type_vector_rejected :
+  run_parse_module
+    (empty_module_header ++
+      (x01 :: x06 :: x80 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma overflowing_type_vector_length_rejected :
+  run_parse_module
+    (empty_module_header ++
+      (x01 :: x05 :: x80 :: x80 :: x80 :: x80 :: x10 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
 Open Scope string_scope.
 Import Stdlib.Strings.String.StringSyntax.
 Open Scope list_scope.
@@ -64,8 +95,13 @@ Lemma indexed_scalar_simd_round_trips :
 Proof. vm_compute. reflexivity. Qed.
 
 Lemma indexed_memarg_encoding :
-  (* The shared LEB encoder emits a legal padded encoding of flags 64. *)
-  binary_of_memarg indexed_memarg = xc0 :: x00 :: x80 :: x01 :: xd2 :: x09 :: nil.
+  (* The verified arithmetic unsigned encoder emits canonical flags 64. *)
+  binary_of_memarg indexed_memarg = x40 :: x80 :: x01 :: xd2 :: x09 :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma indexed_memarg_padded_flags_accepted :
+  run_parse_bes (x28 :: xc0 :: x00 :: x80 :: x01 :: xd2 :: x09 :: nil) =
+    Some (BI_load T_i32 None indexed_memarg :: nil).
 Proof. vm_compute. reflexivity. Qed.
 
 Lemma explicit_zero_memory_index_accepted :
