@@ -447,15 +447,46 @@ Definition parse_v128_store_lane {n} : byte_parser basic_instruction n :=
   assert_u32 90%N &> ((BI_store_vec_lane 32%N <$> parse_memarg) <*> parse_laneidx) <|>
   assert_u32 91%N &> ((BI_store_vec_lane 64%N <$> parse_memarg) <*> parse_laneidx).
              
+Inductive vector_memory_immediate :=
+| VMI_memarg : (memarg -> basic_instruction) -> vector_memory_immediate
+| VMI_lane : (memarg -> laneidx -> basic_instruction) -> vector_memory_immediate.
+
+Definition vector_memory_opcode (code: N) : option vector_memory_immediate :=
+  match code with
+  | 0%N => Some (VMI_memarg (BI_load_vec LVA_none))
+  | 1%N => Some (VMI_memarg (BI_load_vec (LVA_extend (8%N, 8%N) SX_S)))
+  | 2%N => Some (VMI_memarg (BI_load_vec (LVA_extend (8%N, 8%N) SX_U)))
+  | 3%N => Some (VMI_memarg (BI_load_vec (LVA_extend (16%N, 4%N) SX_S)))
+  | 4%N => Some (VMI_memarg (BI_load_vec (LVA_extend (16%N, 4%N) SX_U)))
+  | 5%N => Some (VMI_memarg (BI_load_vec (LVA_extend (32%N, 2%N) SX_S)))
+  | 6%N => Some (VMI_memarg (BI_load_vec (LVA_extend (32%N, 2%N) SX_U)))
+  | 7%N => Some (VMI_memarg (BI_load_vec (LVA_splat 8%N)))
+  | 8%N => Some (VMI_memarg (BI_load_vec (LVA_splat 16%N)))
+  | 9%N => Some (VMI_memarg (BI_load_vec (LVA_splat 32%N)))
+  | 10%N => Some (VMI_memarg (BI_load_vec (LVA_splat 64%N)))
+  | 11%N => Some (VMI_memarg BI_store_vec)
+  | 84%N => Some (VMI_lane (BI_load_vec_lane 8%N))
+  | 85%N => Some (VMI_lane (BI_load_vec_lane 16%N))
+  | 86%N => Some (VMI_lane (BI_load_vec_lane 32%N))
+  | 87%N => Some (VMI_lane (BI_load_vec_lane 64%N))
+  | 88%N => Some (VMI_lane (BI_store_vec_lane 8%N))
+  | 89%N => Some (VMI_lane (BI_store_vec_lane 16%N))
+  | 90%N => Some (VMI_lane (BI_store_vec_lane 32%N))
+  | 91%N => Some (VMI_lane (BI_store_vec_lane 64%N))
+  | 92%N => Some (VMI_memarg (BI_load_vec (LVA_zero 32%N)))
+  | 93%N => Some (VMI_memarg (BI_load_vec (LVA_zero 64%N)))
+  | _ => None
+  end.
+
+Definition parse_vector_memory_tail {n} (code: N) : byte_parser basic_instruction n :=
+  match vector_memory_opcode code with
+  | Some (VMI_memarg build) => build <$> parse_memarg
+  | Some (VMI_lane build) => (build <$> parse_memarg) <*> parse_laneidx
+  | None => fail
+  end.
+
 Definition parse_vector_memory_instruction {n} : byte_parser basic_instruction n :=
-  exact_byte xfd &>
-  (parse_v128_load <|>
-  parse_v128_load_packed <|>
-  parse_v128_load_splat <|>
-  parse_v128_load_zero <|>
-  parse_v128_store <|>
-  parse_v128_load_lane <|>
-  parse_v128_store_lane).
+  exact_byte xfd &> (parse_u32_as_N >>= (fun code => parse_vector_memory_tail code)).
 
 Definition parse_memory_instruction {n} : byte_parser basic_instruction n :=
   parse_i32_load <|>

@@ -2,7 +2,7 @@
 From Wasm Require Import binary_codec binary_parser_combinators
   binary_format_parser binary_format_printer binary_format_properties
   datatypes_properties operations.
-From Stdlib Require Import List Strings.Byte NArith.
+From Stdlib Require Import List Strings.Byte NArith Lia.
 From parseque Require Import Parseque.
 
 Definition decode_exact_byte (tag: byte) (input: list byte) :=
@@ -308,4 +308,187 @@ Proof.
   intros op x y Hx Hy.
   rewrite <- (List.app_nil_r (binary_of_be (indexed_memop_build op x y))).
   apply run_of_prefix. now apply indexed_memop_prefix_round_trip.
+Qed.
+
+Definition decode_laneidx (input: list byte) :=
+  match input with nil => None | b :: rest => Some (Byte.to_N b, rest) end.
+
+Lemma prefix_laneidx :
+  prefix_semantics (fun n =>
+    (parse_laneidx: Parser (SizedList byte) byte option laneidx n))
+    decode_laneidx.
+Proof.
+  intros n [|b rest] Hbound; reflexivity.
+Qed.
+
+Definition decode_vector_memory_tail code input :=
+  match vector_memory_opcode code with
+  | Some (VMI_memarg build) => decode_map build decode_memarg input
+  | Some (VMI_lane build) =>
+      match decode_map build decode_memarg input with
+      | Some (f, rest) => decode_map f decode_laneidx rest
+      | None => None
+      end
+  | None => None
+  end.
+
+Lemma prefix_vector_memory_tail : forall code,
+  prefix_semantics (fun n =>
+    (parse_vector_memory_tail code:
+      Parser (SizedList byte) byte option basic_instruction n))
+    (decode_vector_memory_tail code).
+Proof.
+  intros code. unfold parse_vector_memory_tail, decode_vector_memory_tail.
+  destruct (vector_memory_opcode code) as [[build|build]|].
+  - apply prefix_map. apply parse_memarg_prefix_correct.
+  - unfold decode_map.
+    apply prefix_app; [apply prefix_map; apply parse_memarg_prefix_correct|].
+    apply prefix_laneidx.
+  - apply prefix_fail.
+Qed.
+
+Definition decode_vector_memory input :=
+  decode_sequence (decode_exact_byte xfd)
+    (fun input =>
+      match decode_uint 32 5 input with
+      | Some (code, rest) => decode_vector_memory_tail code rest
+      | None => None
+      end) input.
+
+Theorem vector_memory_prefix_correct :
+  prefix_semantics (fun n =>
+    (parse_vector_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction n))
+    decode_vector_memory.
+Proof.
+  unfold parse_vector_memory_instruction, decode_vector_memory, decode_sequence.
+  apply prefix_rand; [apply prefix_exact_byte|].
+  apply prefix_bind; [apply prefix_u32|apply prefix_vector_memory_tail].
+Qed.
+
+Ltac split_vector_opcode H :=
+  do 7 (try match goal with p: positive |- _ => destruct p end;
+    cbn [vector_memory_opcode] in H; try discriminate).
+
+Lemma vector_memory_opcode_bound : forall code args,
+  vector_memory_opcode code = Some args ->
+  N.lt code 128.
+Proof.
+  intros [|p] args H; split_vector_opcode H; reflexivity.
+Qed.
+
+Lemma vector_memarg_print : forall code build marg,
+  vector_memory_opcode code = Some (VMI_memarg build) ->
+  binary_of_be (build marg) =
+    xfd :: binary_of_u32 code ++ binary_of_memarg marg.
+Proof.
+  intros [|p] build marg H; split_vector_opcode H;
+    inversion H; subst; reflexivity.
+Qed.
+
+Lemma vector_lane_print : forall code build marg lane,
+  vector_memory_opcode code = Some (VMI_lane build) ->
+  binary_of_be (build marg lane) =
+    xfd :: binary_of_u32 code ++ binary_of_memarg marg ++ binary_of_laneidx lane.
+Proof.
+  intros [|p] build marg lane H; split_vector_opcode H;
+    inversion H; subst; reflexivity.
+Qed.
+
+Lemma decode_binary_lane_suffix : forall lane suffix,
+  N.lt lane 256 ->
+  decode_laneidx (binary_of_laneidx lane ++ suffix) = Some (lane, suffix).
+Proof.
+  intros lane suffix Hlane. unfold binary_of_laneidx.
+  destruct (Byte.of_N lane) eqn:Hbyte.
+  - simpl. apply Byte.to_of_N in Hbyte. now rewrite Hbyte.
+  - apply Byte.of_N_None_iff in Hbyte. lia.
+Qed.
+
+Theorem vector_memarg_prefix_round_trip : forall code build marg suffix bound
+  (Hbound: (List.length (binary_of_be (build marg) ++ suffix) <= bound)%nat),
+  vector_memory_opcode code = Some (VMI_memarg build) ->
+  N.lt marg.(memarg_align) 64 ->
+  N.lt marg.(memarg_memory) u32_bound ->
+  N.lt marg.(memarg_offset) u32_bound ->
+  observe_prefix (runParser
+    (parse_vector_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (binary_of_be (build marg) ++ suffix))) =
+    Some (build marg, suffix).
+Proof.
+  intros code build marg suffix bound Hbound Hcode Ha Hm Ho.
+  rewrite vector_memory_prefix_correct.
+  rewrite (vector_memarg_print _ _ _ Hcode).
+  unfold decode_vector_memory, decode_sequence.
+  cbn [List.app decode_exact_byte].
+  rewrite (Byte.byte_dec_lb (eq_refl xfd)).
+  rewrite <- List.app_assoc.
+  rewrite decode_binary_u32_suffix.
+  2: { pose proof (vector_memory_opcode_bound _ _ Hcode).
+       unfold u32_bound. lia. }
+  unfold decode_vector_memory_tail. rewrite Hcode.
+  unfold decode_map.
+  rewrite decode_binary_memarg_suffix by assumption. reflexivity.
+Qed.
+
+Theorem vector_lane_prefix_round_trip : forall code build marg lane suffix bound
+  (Hbound: (List.length (binary_of_be (build marg lane) ++ suffix) <= bound)%nat),
+  vector_memory_opcode code = Some (VMI_lane build) ->
+  N.lt marg.(memarg_align) 64 ->
+  N.lt marg.(memarg_memory) u32_bound ->
+  N.lt marg.(memarg_offset) u32_bound ->
+  N.lt lane 256 ->
+  observe_prefix (runParser
+    (parse_vector_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (binary_of_be (build marg lane) ++ suffix))) =
+    Some (build marg lane, suffix).
+Proof.
+  intros code build marg lane suffix bound Hbound Hcode Ha Hm Ho Hlane.
+  rewrite vector_memory_prefix_correct.
+  rewrite (vector_lane_print _ _ _ _ Hcode).
+  unfold decode_vector_memory, decode_sequence.
+  cbn [List.app decode_exact_byte].
+  rewrite (Byte.byte_dec_lb (eq_refl xfd)).
+  repeat rewrite <- List.app_assoc.
+  rewrite decode_binary_u32_suffix.
+  2: { pose proof (vector_memory_opcode_bound _ _ Hcode).
+       unfold u32_bound. lia. }
+  unfold decode_vector_memory_tail. rewrite Hcode.
+  unfold decode_map.
+  rewrite decode_binary_memarg_suffix by assumption. simpl.
+  rewrite decode_binary_lane_suffix by assumption. reflexivity.
+Qed.
+
+Theorem vector_memarg_run_round_trip : forall code build marg,
+  vector_memory_opcode code = Some (VMI_memarg build) ->
+  N.lt marg.(memarg_align) 64 ->
+  N.lt marg.(memarg_memory) u32_bound ->
+  N.lt marg.(memarg_offset) u32_bound ->
+  binary_format_parser.run (binary_of_be (build marg))
+    (fun n => (parse_vector_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction n)) = Some (build marg).
+Proof.
+  intros code build marg Hcode Ha Hm Ho.
+  rewrite <- (List.app_nil_r (binary_of_be (build marg))).
+  apply run_of_prefix.
+  now eapply vector_memarg_prefix_round_trip with (code := code).
+Qed.
+
+Theorem vector_lane_run_round_trip : forall code build marg lane,
+  vector_memory_opcode code = Some (VMI_lane build) ->
+  N.lt marg.(memarg_align) 64 ->
+  N.lt marg.(memarg_memory) u32_bound ->
+  N.lt marg.(memarg_offset) u32_bound ->
+  N.lt lane 256 ->
+  binary_format_parser.run (binary_of_be (build marg lane))
+    (fun n => (parse_vector_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction n)) =
+    Some (build marg lane).
+Proof.
+  intros code build marg lane Hcode Ha Hm Ho Hl.
+  rewrite <- (List.app_nil_r (binary_of_be (build marg lane))).
+  apply run_of_prefix.
+  now eapply vector_lane_prefix_round_trip with (code := code).
 Qed.
