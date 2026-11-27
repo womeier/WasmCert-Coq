@@ -3,7 +3,7 @@
    gallais.github.io/pdf/agdarsec18.pdf
 *)
 
-From Wasm Require Import datatypes_properties typing leb128 utf8.
+From Wasm Require Import datatypes_properties typing leb128 utf8 addressing addressing_parseque.
 From compcert Require Import Integers.
 From parseque Require Import Parseque.
 From Stdlib Require Import Strings.Byte ZArith.
@@ -52,10 +52,10 @@ Definition parse_u8_as_N {n} : byte_parser N n :=
     (assert_sized (extract parse_unsigned n) (fun sz => N.leb sz 2)).
 
 Definition parse_u32_as_N {n} : byte_parser N n :=
-  guardM
-    (fun n => if (N.leb n 4294967295%N) then Some n
-           else None)
-  (assert_sized (extract parse_unsigned n) (fun sz => N.leb sz 5)).
+  AddressingParseque.parse_address Addressing.AT_i32.
+
+Definition parse_u64_as_N {n} : byte_parser N n :=
+  AddressingParseque.parse_address Addressing.AT_i64.
 
 Definition assert_u32 {n} (k: N) : byte_parser N n :=
   guardM

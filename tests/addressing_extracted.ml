@@ -6,6 +6,7 @@ module B = AddressingBinary
 module M = AddressingMemory
 module T = AddressingTable
 module U = AddressingBulk
+module P = AddressingParseque
 
 let n = Big_int_Z.big_int_of_string
 let z = n "0"
@@ -30,6 +31,15 @@ let () =
   check "decode u64 maximum"
     (match B.decode_address A.AT_i64 bytes with
      | Some (v, []) -> equal v max64 | _ -> false);
+  check "actual parser u64 maximum"
+    (match P.run_prefix A.AT_i64 bytes with
+     | Some (v, []) -> equal v max64 | _ -> false);
+  check "actual parser preserves suffix"
+    (P.run_prefix A.AT_i64 (bytes @ [Char.chr 255]) =
+       Some (max64, [Char.chr 255]));
+  check "actual parser rejects excessive length"
+    (P.run_prefix A.AT_i64
+       (List.init 10 (fun _ -> Char.chr 128) @ [Char.chr 0]) = None);
   check "reject u64 overflow"
     (B.decode_address A.AT_i64
        (List.init 9 (fun _ -> Char.chr 128) @ [Char.chr 2]) = None);

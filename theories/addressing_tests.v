@@ -1,6 +1,7 @@
 (** Regression tests for the memory64/table64 address and binary layers.
     These do not claim end-to-end proposal conformance of the legacy AST. *)
-From Wasm Require Import datatypes addressing addressing_binary.
+From Wasm Require Import datatypes addressing addressing_binary
+  binary_format_parser check_toks.
 From Stdlib Require Import Strings.Byte ZArith List.
 Import ListNotations Addressing AddressingBinary.
 Open Scope N_scope.
@@ -218,4 +219,37 @@ Example limits32_round_trip :
   decode_limits (encode_limits AT_i32
     (lim 0 (Some 4294967295))) =
     Some (AT_i32, lim 0 (Some 4294967295), []).
+Proof. vm_compute. reflexivity. Qed.
+
+Example parser_u64_maximum :
+  check_toks [xff; xff; xff; xff; xff; xff; xff; xff; xff; x01]
+    (fun n => parse_u64_as_N (n := n)) = Running.Singleton 18446744073709551615%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Example parser_u64_rejects_overflow :
+  check_toks [x80; x80; x80; x80; x80; x80; x80; x80; x80; x02]
+    (fun n => parse_u64_as_N (n := n)) = False.
+Proof. vm_compute. reflexivity. Qed.
+
+Example parser_u64_rejects_excess_length :
+  check_toks [x80; x80; x80; x80; x80; x80; x80; x80; x80; x80; x00]
+    (fun n => parse_u64_as_N (n := n)) = False.
+Proof. vm_compute. reflexivity. Qed.
+
+Example parser_u64_allows_noncanonical_zero :
+  check_toks [x80; x80; x80; x80; x80; x80; x80; x80; x80; x00]
+    (fun n => parse_u64_as_N (n := n)) = Running.Singleton 0%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Example parser_u32_maximum :
+  check_toks [xff; xff; xff; xff; x0f] (fun n => parse_u32_as_N (n := n)) =
+    Running.Singleton 4294967295%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Example parser_u32_rejects_overflow :
+  check_toks [x80; x80; x80; x80; x10] (fun n => parse_u32_as_N (n := n)) = False.
+Proof. vm_compute. reflexivity. Qed.
+
+Example parser_u32_rejects_excess_length :
+  check_toks [x80; x80; x80; x80; x80; x00] (fun n => parse_u32_as_N (n := n)) = False.
 Proof. vm_compute. reflexivity. Qed.
