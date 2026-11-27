@@ -873,6 +873,26 @@ Proof.
   by exists t; eapply store_extension_datainst_typing; eauto.
 Qed.
 
+Lemma exninst_typing_extension s s' e :
+  store_extension s s' ->
+  exninst_typing s e -> exninst_typing s' e.
+Proof.
+  move => Hext [ps [Htag Hfields]].
+  exists ps; split.
+  - by eapply store_extension_lookup_tag; eauto.
+  - by eapply values_typing_extension; eauto.
+Qed.
+
+Lemma store_extension_exns_typing s s' es :
+  store_extension s s' ->
+  List.Forall (exninst_typing s) es ->
+  List.Forall (exninst_typing s') es.
+Proof.
+  move => Hext Hall.
+  eapply List.Forall_impl; last exact Hall.
+  move => e Htype; by eapply exninst_typing_extension; eauto.
+Qed.
+
 Ltac resolve_store_extension :=
   repeat lazymatch goal with
   | |- context [ component_extension (@operations.func_extension _) ?x ?x ] =>
@@ -890,11 +910,19 @@ Ltac resolve_store_extension :=
   | |- context [ component_extension (fun (ps ps': seq value_type) => ps == ps') ?x ?x ] =>
       rewrite -> component_extension_same_refl
         with (f := fun (ps ps': seq value_type) => ps == ps');
-        last by move => ps; rewrite eq_refl
+        last (let p := fresh "params" in move => p; by rewrite eq_refl)
+  | |- context [ component_extension (fun (e e': exninst) => e == e') ?x ?x ] =>
+      rewrite -> component_extension_same_refl
+        with (f := fun (e e': exninst) => e == e');
+        last (let ex := fresh "exception" in move => ex; by apply/eqexninstP)
     | _ => repeat rewrite andbT
     end; cbn.
 
 Ltac resolve_store_typing :=
+  repeat match goal with
+  | H: _ /\ _ |- _ =>
+      let H' := fresh "Hcomponent" in destruct H as [H H']
+  end;
   repeat split;
   repeat lazymatch goal with
   | |- List.Forall (fun x => exists t, funcinst_typing ?s x t) _ =>
@@ -909,7 +937,49 @@ Ltac resolve_store_typing :=
       by eapply store_extension_elems_typing; eauto
   | |- List.Forall (fun x => exists t, datainst_typing ?s x = Some t) _ =>
       by eapply store_extension_datas_typing; eauto
+  | |- List.Forall (exninst_typing ?s) _ =>
+      by eapply store_extension_exns_typing; eauto
     end.
+
+Lemma alloc_exn_extension s e :
+  store_extension s (fst (alloc_exn s e)).
+Proof.
+  unfold alloc_exn, upd_s_exns, store_extension => /=.
+  resolve_store_extension.
+  change (component_extension (fun (x y: exninst) => x == y)
+            s.(s_exns) (s.(s_exns) ++ [::e])).
+  eapply component_extension_extend; first reflexivity.
+  move => l; apply reflexive_all2_same; move => x; by rewrite eq_refl.
+Qed.
+
+Lemma alloc_exn_typing s e :
+  store_typing s -> exninst_typing s e ->
+  store_typing (fst (alloc_exn s e)).
+Proof.
+  move => Hstore He.
+  pose proof (alloc_exn_extension s e) as Hext.
+  unfold store_typing in *; destruct s; simpl in *.
+  destruct Hstore as [Hfs [Hts [Hms [Hgs [Hes [Hds Hxs]]]]]].
+  repeat split.
+  - by eapply store_extension_funcs_typing; eauto.
+  - by eapply store_extension_tables_typing; eauto.
+  - by eapply store_extension_mems_typing; eauto.
+  - by eapply store_extension_globals_typing; eauto.
+  - by eapply store_extension_elems_typing; eauto.
+  - by eapply store_extension_datas_typing; eauto.
+  - apply List.Forall_app; split.
+    + by eapply store_extension_exns_typing; eauto.
+    + constructor; last constructor.
+      by eapply exninst_typing_extension; eauto.
+Qed.
+
+Lemma alloc_exn_lookup s e :
+  lookup_N (s_exns (fst (alloc_exn s e))) (snd (alloc_exn s e)) = Some e.
+Proof.
+  unfold alloc_exn, upd_s_exns, lookup_N => /=.
+  rewrite Nnat.Nat2N.id List.nth_error_app2; last by lias.
+  by rewrite Nat.sub_diag.
+Qed.
 
 Lemma supdate_glob_extension: forall s f i v s' C gt,
   store_typing s ->
@@ -1089,6 +1159,7 @@ Proof.
   move => s f x s' C tref Hst Hupd Hit Hnth.
   unfold store_extension; unfold_store_operations => /=; resolve_store_extension; resolve_store_inst_lookup; remove_bools_options => /=.
   destruct e0; simpl in *; remove_bools_options; simpl in *.
+  resolve_store_extension.
   eapply component_extension_update; eauto; first by apply elem_extension_refl.
   unfold elem_extension => /=; repeat rewrite eq_refl => /=.
   rewrite Hnth in Hnthet; injection Hnthet as <-.

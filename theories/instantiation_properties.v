@@ -320,6 +320,55 @@ Proof.
     + by rewrite catA.
 Qed.
 
+Lemma alloc_funcs_exns s fs inst s' addrs :
+  alloc_funcs s fs inst = (s', addrs) -> s_exns s' = s_exns s.
+Proof.
+  unfold alloc_funcs; apply alloc_Xs_preserves.
+  by move => st x; unfold alloc_func, add_func.
+Qed.
+
+Lemma alloc_tabs_exns s ts s' addrs :
+  alloc_tabs s ts = (s', addrs) -> s_exns s' = s_exns s.
+Proof.
+  unfold alloc_tabs; apply alloc_Xs_preserves.
+  move => st [lim rt]; destruct lim; reflexivity.
+Qed.
+
+Lemma alloc_mems_exns s ms s' addrs :
+  alloc_mems s ms = (s', addrs) -> s_exns s' = s_exns s.
+Proof.
+  unfold alloc_mems; apply alloc_Xs_preserves.
+  move => st [lo hi]; reflexivity.
+Qed.
+
+Lemma alloc_globs_exns s gs vs s' addrs :
+  alloc_globs s gs vs = (s', addrs) -> s_exns s' = s_exns s.
+Proof.
+  unfold alloc_globs; apply alloc_Xs_preserves.
+  by move => st [g v]; unfold alloc_glob, add_glob.
+Qed.
+
+Lemma alloc_elems_exns s es vs s' addrs :
+  alloc_elems s es vs = (s', addrs) -> s_exns s' = s_exns s.
+Proof.
+  unfold alloc_elems; apply alloc_Xs_preserves.
+  by move => st [e rs]; unfold alloc_elem, add_elem.
+Qed.
+
+Lemma alloc_datas_exns s ds s' addrs :
+  alloc_datas s ds = (s', addrs) -> s_exns s' = s_exns s.
+Proof.
+  unfold alloc_datas; apply alloc_Xs_preserves.
+  by move => st d; unfold alloc_data, add_data.
+Qed.
+
+Lemma alloc_tags_exns s types tags s' addrs :
+  alloc_tags s types tags = (s', addrs) -> s_exns s' = s_exns s.
+Proof.
+  unfold alloc_tags; apply alloc_Xs_preserves.
+  by move => st x; unfold alloc_tag, upd_s_tags.
+Qed.
+
 Lemma alloc_table_iota_N modtables ws ws' l:
   alloc_tabs ws modtables = (ws', l) ->
   l = iota_N (length (s_tables ws)) (length modtables) /\

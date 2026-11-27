@@ -2040,6 +2040,10 @@ Proof.
   { eapply component_extension_trans; eauto.
     move => x y z /eqP -> /eqP ->; by rewrite eq_refl.
   }
+  apply/andP; split; last first.
+  { eapply component_extension_trans; eauto.
+    move => x y z /eqP -> /eqP ->; by rewrite eq_refl.
+  }
   apply/andP; split; last by eapply component_extension_trans; eauto; apply data_extension_trans.
   apply/andP; split; last by eapply component_extension_trans; eauto; apply elem_extension_trans.
   apply/andP; split; last by eapply component_extension_trans; eauto; apply global_extension_trans.
@@ -2059,6 +2063,7 @@ Proof.
   + by apply all2_global_extension_same.
   + by apply all2_elem_extension_same.
   + by apply all2_data_extension_same.
+  + apply reflexive_all2_same; move => x; by rewrite eq_refl.
   + apply reflexive_all2_same; move => x; by rewrite eq_refl.
 Qed.
 
@@ -2096,9 +2101,22 @@ Lemma store_extension_lookup_tag: forall s s' n ps,
 Proof.
   move => s s' n ps Hext Hlookup.
   unfold store_extension in Hext.
+  move/andP in Hext; destruct Hext as [Hext _].
   move/andP in Hext; destruct Hext as [_ Htags].
   destruct (component_extension_lookup Htags Hlookup) as [ps' [Hlookup' Heq]].
   move/eqP in Heq; by subst ps'.
+Qed.
+
+Lemma store_extension_lookup_exn: forall s s' n e,
+    store_extension s s' ->
+    lookup_N (s_exns s) n = Some e ->
+    lookup_N (s_exns s') n = Some e.
+Proof.
+  move => s s' n e Hext Hlookup.
+  unfold store_extension in Hext.
+  move/andP in Hext; destruct Hext as [_ Hexns].
+  destruct (component_extension_lookup Hexns Hlookup) as [e' [Hlookup' Heq]].
+  move/eqP in Heq; by subst e'.
 Qed.
 
 Lemma store_extension_lookup_func: forall s s' n cl,
@@ -2428,8 +2446,19 @@ Lemma store_typing_data_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [_ [_ [_ [_ [_ Hd]]]]]; simpl in *.
+  destruct Hst as [_ [_ [_ [_ [_ [Hd _]]]]]]; simpl in *.
   by eapply Forall_lookup in Hd; eauto.
+Qed.
+
+Lemma store_typing_exn_lookup: forall s n e,
+    store_typing s ->
+    lookup_N s.(s_exns) n = Some e ->
+    exninst_typing s e.
+Proof.
+  move => s n e Hst Hnth.
+  unfold store_typing in Hst; destruct s.
+  destruct Hst as [_ [_ [_ [_ [_ [_ Hexns]]]]]]; simpl in *.
+  by eapply Forall_lookup in Hexns; eauto.
 Qed.
 
 End Host.

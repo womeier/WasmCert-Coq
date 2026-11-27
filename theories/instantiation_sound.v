@@ -93,6 +93,13 @@ Proof.
   pose proof (alloc_globs_tags Hallocglobs) as HT4.
   pose proof (alloc_elems_tags Hallocelems) as HT5.
   pose proof (alloc_datas_tags Hallocdatas) as HT6.
+  pose proof (alloc_funcs_exns Hallocfuncs) as HX1.
+  pose proof (alloc_tabs_exns Halloctabs) as HX2.
+  pose proof (alloc_mems_exns Hallocmems) as HX3.
+  pose proof (alloc_globs_exns Hallocglobs) as HX4.
+  pose proof (alloc_elems_exns Hallocelems) as HX5.
+  pose proof (alloc_datas_exns Hallocdatas) as HX6.
+  pose proof (alloc_tags_exns Halloctags) as HX7.
 
   remove_bools_options.
 
@@ -117,7 +124,11 @@ Proof.
     erewrite component_extension_extend; eauto; last by apply all2_elem_extension_same.
     erewrite component_extension_extend; eauto; last by apply all2_data_extension_same.
     erewrite component_extension_extend; eauto.
-    move => l; apply reflexive_all2_same; move => x; by rewrite eq_refl.
+    - rewrite -> component_extension_same_refl
+        with (f := fun (x y: exninst) => x == y);
+        last by move => ex; apply/eqexninstP.
+      done.
+    - move => l; apply reflexive_all2_same; move => x; by rewrite eq_refl.
   }
 
   destruct m; unfold module_typing in Hmodtype; simpl in *.
@@ -442,7 +453,7 @@ Proof.
   {
     extract_premise.
     destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
-    destruct HST as [Hsfunctype [Hstabletype [Hsmemtype [Hsglobaltype [Hselemtype Hsdatatype]]]]].
+    destruct HST as [Hsfunctype [Hstabletype [Hsmemtype [Hsglobaltype [Hselemtype [Hsdatatype Hsexnstype]]]]]].
     repeat split => //.
     (* Functions *)
     {
@@ -690,6 +701,8 @@ Proof.
         by exists tt.
       }
     }
+    (* Existing exceptions retain identity, tag type and well-typed fields. *)
+    { by eapply store_extension_exns_typing; eauto. }
   }
   repeat split => //.
   exists C.

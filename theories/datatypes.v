@@ -69,6 +69,7 @@ Definition elemaddr : Set := addr.
 Definition dataaddr : Set := addr.
 Definition externaddr : Set := addr.
 Definition tagaddr : Set := addr.
+Definition exnaddr : Set := addr.
 
 (** std-doc:
 WebAssembly programs operate on primitive numeric values. Moreover, in the definition of programs, immutable sequences of values occur to represent more complex data, such as text strings or other vectors.
@@ -903,6 +904,12 @@ Record datainst : Set := {
   datainst_data : list byte;
 }.
 
+(** Exception identity is its address, not its tag or payload. *)
+Record exninst : Type := {
+  exninst_tag : tagaddr;
+  exninst_fields : list value;
+}.
+
 (** std-doc:
 An external value is the runtime representation of an entity that can be imported or 
 exported. It is an address denoting either a function instance, table instance, memory 
@@ -1011,6 +1018,7 @@ Record store_record : Type := (* s *) {
   (** A tag instance contains its parameter types; it has no result types.
       Identity is its position in this separate store component. *)
   s_tags : list result_type;
+  s_exns : list exninst;
 }.
 
                             

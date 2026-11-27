@@ -581,15 +581,20 @@ Definition funcinst_typing (s: store_record) (fi: funcinst) (tf0: function_type)
       functype_valid tf (* No host function assumptions *)
   end.
 
+Definition exninst_typing (s : store_record) (e : exninst) : Prop :=
+  exists ps, lookup_N s.(s_tags) e.(exninst_tag) = Some ps /\
+             values_typing s e.(exninst_fields) ps.
+
 Definition store_typing (s : store_record) : Prop :=
   match s with
-  | Build_store_record fs tabs ms gs es ds tags =>
+  | Build_store_record fs tabs ms gs es ds tags exns =>
     (List.Forall (fun x => exists t, funcinst_typing s x t) fs) /\
     (List.Forall (fun x => exists t, tableinst_typing s x = Some t) tabs) /\
     (List.Forall (fun x => exists t, meminst_typing s x = Some t) ms) /\
     (List.Forall (fun x => exists t, globalinst_typing s x = Some t) gs) /\
     (List.Forall (fun x => exists t, eleminst_typing s x = Some t) es) /\
-    (List.Forall (fun x => exists t, datainst_typing s x = Some t) ds)
+    (List.Forall (fun x => exists t, datainst_typing s x = Some t) ds) /\
+    List.Forall (exninst_typing s) exns
   end.
 
 Definition config_typing (s: store_record) (th: thread) (ts: result_type) : Prop :=

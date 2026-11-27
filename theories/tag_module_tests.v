@@ -8,7 +8,7 @@ Context `{hfc: host_function_class} `{memory: BlockUpdateMemory}.
 
 Definition tag_test_store : store_record :=
   {| s_funcs := []; s_tables := []; s_mems := []; s_globals := [];
-     s_elems := []; s_datas := []; s_tags := [[T_num T_i32]] |}.
+     s_elems := []; s_datas := []; s_tags := [[T_num T_i32]]; s_exns := [] |}.
 
 Definition tag_test_instance (addrs : list tagaddr) : moduleinst :=
   {| inst_types := []; inst_funcs := []; inst_tables := []; inst_mems := [];
@@ -30,5 +30,26 @@ Proof. reflexivity. Qed.
 Example tag_instance_without_tags :
   inst_typing tag_test_store (tag_test_instance []) = Some empty_t_context.
 Proof. reflexivity. Qed.
+
+Example exception_payload_has_tag_parameters :
+  exninst_typing tag_test_store
+    {| exninst_tag := 0%N;
+       exninst_fields := [VAL_num (VAL_int32 Wasm_int.Int32.one)] |}.
+Proof. exists [T_num T_i32]; split; reflexivity. Qed.
+
+Example exception_unknown_tag_rejected :
+  ~ exninst_typing tag_test_store
+      {| exninst_tag := 1%N; exninst_fields := [] |}.
+Proof.
+  intros [ps [Hlookup Hfields]]; discriminate Hlookup.
+Qed.
+
+Example exception_missing_payload_rejected :
+  ~ exninst_typing tag_test_store
+      {| exninst_tag := 0%N; exninst_fields := [] |}.
+Proof.
+  intros [ps [Hlookup Hfields]].
+  inversion Hlookup; subst; discriminate Hfields.
+Qed.
 
 End Host.

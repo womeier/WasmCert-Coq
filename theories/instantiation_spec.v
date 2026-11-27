@@ -39,6 +39,7 @@ Definition globals_of_externals (evs : list extern_value) : list globaladdr :=
   seq.pmap (fun ev => match ev with | EV_global ta => Some ta | _ => None end) evs.
 
 Definition add_func (s : store_record) funcinst := {|
+  s_exns := s.(s_exns);
   s_tags := s.(s_tags);
   s_funcs := cat s.(s_funcs) [::funcinst];
   s_tables := s.(s_tables);
@@ -68,6 +69,7 @@ Definition alloc_funcs (s : store_record) (m_fs : list module_func) (mi : module
   alloc_Xs (fun s m_f => alloc_func s m_f mi) s m_fs.
 
 Definition add_table (s : store_record) (ti : tableinst) : store_record := {|
+  s_exns := s.(s_exns);
   s_tags := s.(s_tags);
   s_funcs := s.(s_funcs);
   s_tables := cat s.(s_tables) [::ti];
@@ -102,6 +104,7 @@ Definition gen_mem_instance (lim : limits) : meminst :=
   |}.
 
 Definition add_mem (s : store_record) (m_m : meminst) : store_record := {|
+  s_exns := s.(s_exns);
   s_tags := s.(s_tags);
   s_funcs := s.(s_funcs);
   s_tables := s.(s_tables);
@@ -121,6 +124,7 @@ Definition alloc_mems (s : store_record) (m_mts : list memory_type) : store_reco
   alloc_Xs alloc_mem s m_mts.
 
 Definition add_glob (s : store_record) (m_g : globalinst) : store_record := {|
+  s_exns := s.(s_exns);
   s_tags := s.(s_tags);
   s_funcs := s.(s_funcs);
   s_tables := s.(s_tables);
@@ -146,6 +150,7 @@ Definition alloc_globs s m_gs vs :=
   alloc_Xs alloc_glob s (List.combine m_gs vs).
 
 Definition add_elem (s : store_record) (m_e : eleminst) : store_record := {|
+  s_exns := s.(s_exns);
   s_tags := s.(s_tags);
   s_funcs := s.(s_funcs);
   s_tables := s.(s_tables);
@@ -166,6 +171,7 @@ Definition alloc_elems (s : store_record) (m_es : list module_element) (elem_ini
   alloc_Xs alloc_elem s (List.combine m_es elem_inits).
 
 Definition add_data (s : store_record) (m_d : datainst) : store_record := {|
+  s_exns := s.(s_exns);
   s_tags := s.(s_tags);
   s_funcs := s.(s_funcs);
   s_tables := s.(s_tables);

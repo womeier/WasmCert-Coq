@@ -169,6 +169,13 @@ Definition eqvalueP : Equality.axiom value_eqb :=
 
 HB.instance Definition value_eqMixin := hasDecEq.Build value eqvalueP.
 
+Definition exninst_eq_dec : forall x y : exninst, {x = y} + {x <> y}.
+Proof. decidable_equality. Defined.
+Definition exninst_eqb x y : bool := exninst_eq_dec x y.
+Definition eqexninstP : Equality.axiom exninst_eqb :=
+  eq_dec_Equality_axiom exninst_eq_dec.
+HB.instance Definition exninst_eqMixin := hasDecEq.Build exninst eqexninstP.
+
 Definition value_num_eq_dec : forall v1 v2 : value_num, {v1 = v2} + {v1 <> v2}.
 Proof. decidable_equality. Defined.
 

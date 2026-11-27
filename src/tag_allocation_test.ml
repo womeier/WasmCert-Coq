@@ -46,4 +46,10 @@ let () =
   | [FC_func_native (_, inst, _)] ->
     check (inst.inst_tags = i4.inst_tags) "native closure lost its tag addresses"
   | _ -> failwith "expected exactly one native function");
-  print_endline "Extracted tag allocation tests: 4/4"
+
+  let old_exception = {exninst_tag = List.hd i1.inst_tags; exninst_fields = []} in
+  let seeded = {s1 with s_exns = [old_exception]} in
+  let s5, i5 = instantiate seeded single in
+  check (i5.inst_tags = addresses [1]) "exception store disturbed tag allocation";
+  check (s5.s_exns = [old_exception]) "module allocation changed an exception";
+  print_endline "Extracted tag allocation tests: 5/5"
