@@ -11,3 +11,9 @@
  (name gc_extraction_tests)
  (libraries wasm parray zarith)
  (flags (:standard -w -20-27-32-39-50-67)))
+
+(rule
+ (alias runtest)
+ (deps module_vectors.sh)
+ (action
+  (run bash %{dep:module_vectors.sh} %{exe:../../src/wasm_coq_interpreter.exe})))

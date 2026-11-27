@@ -101,7 +101,10 @@ Definition parse_vec_aux {B} {n} (f : byte_parser B n) (k : N)
 
 (* parsing a length-indexed list *)
 Definition parse_vec {B} {n} (f : byte_parser B n) : byte_parser (list B) n :=
-  exact_byte x00 $> nil <|>
+  (* Empty vectors can have a padded u32 length, not only the byte 0x00.
+     Return nil while consuming the length itself: Parseque parsers must
+     consume input, so [parse_vec_aux f 0] cannot be a pure nil parser. *)
+  guardM (fun k => if N.eqb k 0 then Some nil else None) parse_vec_length <|>
   (parse_vec_length >>= (fun k => parse_vec_aux f k)).
 
 Definition parse_16bytes {n} : byte_parser SIMD.v128 n :=

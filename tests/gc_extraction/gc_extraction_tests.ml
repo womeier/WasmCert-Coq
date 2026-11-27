@@ -83,4 +83,26 @@ let () =
   check "empty reference" (decode_reference [] = None);
   check "overlong abstract heap encoding is not an abstract heap type"
     (decode_reference ['\xee'; '\x7f'] = None);
+  (* Exercise the actual extracted whole-module parser, rather than a second
+     decoder.  Every vector-bearing empty section permits a padded zero count. *)
+  let header = ['\x00'; '\x61'; '\x73'; '\x6d'; '\x01'; '\x00'; '\x00'; '\x00'] in
+  let empty_module = run_parse_module header in
+  check "empty module fixture parses" (empty_module <> None);
+  let section id payload =
+    header @ [Char.chr id; Char.chr (List.length payload)] @ payload
+  in
+  List.iter
+    (fun id ->
+      for padding = 0 to 4 do
+        let zero = List.init padding (fun _ -> '\x80') @ ['\x00'] in
+        check "module padded empty vector"
+          (run_parse_module (section id zero) = empty_module)
+      done;
+      check "module overlong zero vector rejected"
+        (run_parse_module (section id ['\x80'; '\x80'; '\x80'; '\x80'; '\x80'; '\x00']) = None);
+      check "module overflowing vector count rejected"
+        (run_parse_module (section id ['\x80'; '\x80'; '\x80'; '\x80'; '\x10']) = None);
+      check "module truncated vector count rejected"
+        (run_parse_module (section id ['\x80']) = None))
+    [1; 2; 3; 4; 5; 6; 7; 9; 10; 11];
   Printf.printf "GC extraction: %d/%d checks passed\n" !checks !checks
