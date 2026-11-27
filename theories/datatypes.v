@@ -3,7 +3,7 @@
     and https://webassembly.github.io/spec/core/exec/index.html **)
 (* (C) J. Pichon, M. Bodin - see LICENSE.txt *)
 
-From Wasm Require Export common numerics bytes memory simd.
+From Wasm Require Export common numerics bytes memory simd address_types.
 From compcert Require common.Memdata.
 From Stdlib Require Import ZArith.
 
@@ -204,7 +204,15 @@ The limits constrain the minimum and optionally the maximum size of a memory. Th
 
 [https://www.w3.org/TR/wasm-core-2/syntax/types.html#memory-types]
 *)
-Definition memory_type := limits.
+Record memory_type : Set := {
+  mt_limits : limits;
+  mt_address_type : address_type;
+}.
+
+Coercion mt_limits : memory_type >-> limits.
+
+Definition memory_type32 (lim: limits) : memory_type :=
+  {| mt_limits := lim; mt_address_type := AT_i32 |}.
 
 
 (** std-doc:
@@ -218,6 +226,7 @@ optionally maximum size. The limits are given in numbers of entries.
 Record table_type : Set := {
   tt_limits : limits;
   tt_elem_type : reference_type;
+  tt_address_type : address_type;
 }.
 
 
@@ -272,13 +281,25 @@ Definition functype_valid (ft: function_type) : bool :=
 
 Definition table_limit_bound : N := (N.sub u32_bound 1%N).
 
+Definition table_limit_bound_for (a: address_type) : N :=
+  match a with
+  | AT_i32 => table_limit_bound
+  | AT_i64 => 18446744073709551615%N
+  end.
+
 Definition tabletype_valid (tt: table_type) : bool :=
-  limit_valid_range tt.(tt_limits) table_limit_bound.
+  limit_valid_range tt.(tt_limits) (table_limit_bound_for tt.(tt_address_type)).
 
 Definition mem_limit_bound : N := 65536%N.
 
+Definition memory_limit_bound_for (a: address_type) : N :=
+  match a with
+  | AT_i32 => mem_limit_bound
+  | AT_i64 => 281474976710656%N
+  end.
+
 Definition memtype_valid (mt: memory_type) : bool :=
-  limit_valid_range mt mem_limit_bound.
+  limit_valid_range mt.(mt_limits) (memory_limit_bound_for mt.(mt_address_type)).
 
 Definition globaltype_valid (gt: global_type) : bool :=
   true.

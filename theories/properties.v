@@ -1622,10 +1622,8 @@ Qed.
 Lemma mem_extension_refl:
     reflexive mem_extension.
 Proof.
-  move => m. unfold table_extension, limits_extension.
-  apply/andP; split => //; last by apply N.leb_refl.
-  apply/andP; split => //.
-  apply/N.leb_spec0; by lias.
+  move => m. unfold mem_extension, memory_type_extension, limits_extension.
+  by rewrite !eq_refl !N.leb_refl.
 Qed.
 
 Lemma all2_mem_extension_same: forall t,
@@ -1713,9 +1711,8 @@ Proof.
   destruct x1, x2, x3.
   unfold table_extension, table_type_extension, limits_extension in *; simpl in *.
   remove_bools_options; simpl in *; subst.
-  do 3 (try (apply/andP; split)); try by lias.
-  - rewrite - H; by lias.
-  - rewrite - H2; by lias.
+  repeat (apply/andP; split); try by (apply/eqP; congruence).
+  all: by lias.
 Qed.
     
 Lemma mem_extension_trans:
@@ -1723,10 +1720,10 @@ Lemma mem_extension_trans:
 Proof.
   move => x1 x2 x3 Hext1 Hext2.
   destruct x1, x2, x3.
-  unfold mem_extension, limits_extension in *; simpl in *.
+  unfold mem_extension, memory_type_extension, limits_extension in *; simpl in *.
   remove_bools_options; simpl in *; subst.
-  do 2 (try (apply/andP; split)); try by lias.
-  rewrite - H1; by lias.
+  repeat (apply/andP; split); try by (apply/eqP; congruence).
+  all: by lias.
 Qed.
     
 Lemma global_extension_trans:
@@ -1771,7 +1768,9 @@ Proof.
     by remove_bools_options; lias.
   - apply all2_spec; first by apply all2_size in H7.
     move => n t1 t2 Hnth1 Hnth2.
-    done.
+    eapply all2_projection in H7; eauto.
+    unfold mem_agree, memory_type_extension in *.
+    by remove_bools_options; apply/eqP.
   - apply reflexive_all2_same; by move => ?; apply/eqP.
 Qed.
 

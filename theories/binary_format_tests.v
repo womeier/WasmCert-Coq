@@ -231,8 +231,8 @@ Definition two_memory_legacy_access := {|
   |} :: nil;
   mod_tables := nil;
   mod_mems :=
-    {| modmem_type := {| lim_min := 1%N; lim_max := None |} |} ::
-    {| modmem_type := {| lim_min := 1%N; lim_max := None |} |} :: nil;
+    {| modmem_type := memory_type32 {| lim_min := 1%N; lim_max := None |} |} ::
+    {| modmem_type := memory_type32 {| lim_min := 1%N; lim_max := None |} |} :: nil;
   mod_globals := nil;
   mod_elems := nil;
   mod_datas := nil;
@@ -363,7 +363,7 @@ Definition module_tableops := {|
   mod_funcs :=
     let e := BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 1))) in
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := cons e nil |} nil;
-  mod_tables := (cons (Build_module_table (Build_table_type (Build_limits 0%N (Some 4%N)) T_funcref)) nil);
+  mod_tables := (cons (Build_module_table (Build_table_type (Build_limits 0%N (Some 4%N)) T_funcref AT_i32)) nil);
   mod_mems := nil;
                                mod_globals := nil;
   mod_elems := (cons (Build_module_element T_funcref (cons (cons (BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 1)))) nil) nil) (ME_active 0%N (cons (BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 1)))) nil))) nil);

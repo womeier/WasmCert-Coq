@@ -107,6 +107,43 @@ let () =
     (M.load_byte memory full (value A.AT_i64 "18446744073709551615") one = None);
   check "full memory cannot grow beyond address width"
     (M.grow memory full (value A.AT_i64 "1") = None);
+  (* These use the actual core type/allocation/growth/import operations,
+     rather than the transitional AddressingMemory/AddressingTable wrappers. *)
+  let core64 : memory_type =
+    { mt_limits = limits "65537" (Some "65538"); mt_address_type = A.AT_i64 } in
+  let core32 : memory_type =
+    { mt_limits = core64.mt_limits; mt_address_type = A.AT_i32 } in
+  check "core memory64 limits above 4 GiB are valid" (memtype_valid core64);
+  check "core memory32 limits above 4 GiB are invalid" (not (memtype_valid core32));
+  check "core memory imports distinguish address widths"
+    (not (import_mem_subtyping core64 core32) &&
+     not (import_mem_subtyping core32 core64));
+  let core_instance = gen_mem_instance memory_instance core64 in
+  check "core instantiation retains memory64 address type"
+    (core_instance.meminst_type.mt_address_type = A.AT_i64);
+  check "core instantiation does not truncate wide memory"
+    (equal (memory.mem_length core_instance.meminst_data) (n "4295032832"));
+  let core_grown = some "core memory64 growth above 4 GiB"
+      (mem_grow0 memory_instance core_instance one) in
+  check "core growth retains memory64 address type"
+    (core_grown.meminst_type.mt_address_type = A.AT_i64);
+  check "core growth respects memory64 maximum"
+    (mem_grow0 memory_instance core_grown one = None);
+  let core_tt64 : table_type =
+    { tt_limits = limits "1" (Some "2"); tt_elem_type = T_funcref;
+      tt_address_type = A.AT_i64 } in
+  let core_tt32 : table_type =
+    { core_tt64 with tt_address_type = A.AT_i32 } in
+  check "core table imports distinguish address widths"
+    (not (import_table_subtyping core_tt64 core_tt32) &&
+     not (import_table_subtyping core_tt32 core_tt64));
+  let core_table = gen_table_instance core_tt64 (VAL_ref_null T_funcref) in
+  let core_table_grown = some "core table64 growth"
+      (growtable core_table one (VAL_ref_func (n "8"))) in
+  check "core table growth retains address type"
+    (core_table_grown.tableinst_type.tt_address_type = A.AT_i64);
+  check "core table64 growth rejects address overflow before allocation"
+    (growtable core_table max64 (VAL_ref_null T_funcref) = None);
   let byte s = Byte.repr (n s) in
   let fill_one data at b = some "memory64 fill"
       (U.fill memory_instance data (value A.AT_i64 at)

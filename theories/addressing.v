@@ -14,15 +14,7 @@ From Stdlib Require Import ZArith NArith Lia Bool.
 
 Module Addressing.
 
-Inductive address_type : Set :=
-| AT_i32
-| AT_i64.
-
-Definition address_bits (a: address_type) : N :=
-  match a with AT_i32 => 32 | AT_i64 => 64 end.
-
-Definition address_bound (a: address_type) : N :=
-  2 ^ address_bits a.
+Include AddressTypes.
 
 Definition address_value_type (a: address_type) : value_type :=
   T_num (match a with AT_i32 => T_i32 | AT_i64 => T_i64 end).
@@ -74,33 +66,35 @@ Definition table_type_valid (tt: table_type) : bool :=
     memory-index changes.  These are not coercions: accidentally losing an
     address width must not be implicit. *)
 Definition memory32 (mt: datatypes.memory_type) : memory_type :=
-  {| memory_address_type := AT_i32; memory_limits := mt |}.
+  {| memory_address_type := mt.(mt_address_type); memory_limits := mt.(mt_limits) |}.
 
 Definition table32 (tt: datatypes.table_type) : table_type :=
-  {| table_address_type := AT_i32;
+  {| table_address_type := tt.(tt_address_type);
      table_limits := tt.(tt_limits);
      table_element_type := tt.(tt_elem_type) |}.
 
 Lemma memory32_valid mt :
   memory_type_valid (memory32 mt) = memtype_valid mt.
 Proof.
-  assert (memory_limit_bound AT_i32 = mem_limit_bound) as Hbound by
-    (vm_compute; reflexivity).
-  unfold memory_type_valid, memory32, memtype_valid.
-  change (limit_valid_range mt (memory_limit_bound AT_i32) =
-          limit_valid_range mt mem_limit_bound).
-  now rewrite Hbound.
+  assert (memory_limit_bound AT_i32 = 65536%N) as H32 by (vm_compute; reflexivity).
+  assert (memory_limit_bound AT_i64 = 281474976710656%N) as H64 by (vm_compute; reflexivity).
+  destruct mt as [lim []]; unfold memory_type_valid, memory32, memtype_valid.
+  - change (limit_valid_range lim (memory_limit_bound AT_i32) = limit_valid_range lim 65536).
+    now rewrite H32.
+  - change (limit_valid_range lim (memory_limit_bound AT_i64) = limit_valid_range lim 281474976710656).
+    now rewrite H64.
 Qed.
 
 Lemma table32_valid tt :
   table_type_valid (table32 tt) = tabletype_valid tt.
 Proof.
-  assert (table_limit_bound AT_i32 = datatypes.table_limit_bound) as Hbound by
-    (vm_compute; reflexivity).
-  unfold table_type_valid, table32, tabletype_valid.
-  change (limit_valid_range (tt_limits tt) (table_limit_bound AT_i32) =
-          limit_valid_range (tt_limits tt) datatypes.table_limit_bound).
-  now rewrite Hbound.
+  assert (table_limit_bound AT_i32 = 4294967295%N) as H32 by (vm_compute; reflexivity).
+  assert (table_limit_bound AT_i64 = 18446744073709551615%N) as H64 by (vm_compute; reflexivity).
+  destruct tt as [lim elem []]; unfold table_type_valid, table32, tabletype_valid.
+  - change (limit_valid_range lim (table_limit_bound AT_i32) = limit_valid_range lim 4294967295).
+    now rewrite H32.
+  - change (limit_valid_range lim (table_limit_bound AT_i64) = limit_valid_range lim 18446744073709551615).
+    now rewrite H64.
 Qed.
 
 Definition limits_valid (lim: limits) (bound: N) : Prop :=

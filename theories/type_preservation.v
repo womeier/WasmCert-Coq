@@ -174,7 +174,7 @@ Lemma ext_mem_typing_extension: forall s s' a tf,
     store_extension s s' ->
     ext_mem_typing s a = Some tf ->
     exists tf', ext_mem_typing s' a = Some tf' /\
-    limits_extension tf tf'.
+    memory_type_extension tf tf'.
 Proof.
   move => s s' a tf Hext Htype.
   unfold ext_mem_typing in *.
@@ -495,10 +495,12 @@ Ltac rewrite_context_agree:=
       Hnth : lookup_N ?C'.(tc_tables) ?n = Some ?t,
       Helemtype: (tt_elem_type ?t) = ?tref |- _ =>
       let Htableagree := fresh "Htableagree" in
-      specialize (context_agree_table_type Hext Hnth) as [tabt_ctxext [Hnth_ctxext Htableagree]]; unfold table_agree in Htableagree; remove_bools_options; subst; try rewrite - Htableagree
+      specialize (context_agree_table_type Hext Hnth) as [tabt_ctxext [Hnth_ctxext Htableagree]];
+      unfold table_agree in *; remove_bools_options; subst
     | Hext : is_true (context_agree ?C ?C'),
       Hnth : lookup_N ?C.(tc_tables) ?n = Some ?t |- _ =>
-      specialize (context_agree_table_type Hext Hnth) as [tabt_ctxext [Hnth_ctxext Htableagree]]; unfold table_agree in *; remove_bools_options; subst
+      specialize (context_agree_table_type Hext Hnth) as [tabt_ctxext [Hnth_ctxext Htableagree]];
+      unfold table_agree in *; remove_bools_options; subst
     | Hext : is_true (context_agree ?C ?C'),
       Hnth : lookup_N ?C.(tc_mems) ?n = Some ?t |- _ =>
       (* Not creating fresh names to make sure this only triggers once -- a bit stupid *)
@@ -533,17 +535,20 @@ Proof.
   (* call_indirect *)
   - rewrite_context_agree.
     econstructor; eauto.
-    + by rewrite - Htableagree.
+    + by congruence.
     + by rewrite_context_agree.
   (* return_call_indirect *)
   - rewrite_context_agree.
     econstructor; eauto.
-    + by rewrite - Htableagree.
+    + by congruence.
     + by rewrite_context_agree.
     + by rewrite_context_agree.
   (* table_copy *)
   - rewrite_context_agree.
-    eapply context_agree_table_type in H as [tabt [Hnth Hagree]]; eauto; unfold table_agree in *; move/eqP in Hagree.
+    eapply context_agree_table_type in H as [tabt [Hnth Hagree]]; eauto.
+    unfold table_agree in Hagree; move/andP in Hagree.
+    destruct Hagree as [Hagree Haddr].
+    move/eqP in Hagree; move/eqP in Haddr.
     econstructor.
     + by apply Hnth.
     + reflexivity.
@@ -552,8 +557,8 @@ Proof.
   (* table init *)
   - rewrite_context_agree.
     econstructor; first by eauto.
-    + by rewrite - Htableagree.
-     + by rewrite_context_agree.
+    + by eauto.
+     + rewrite_context_agree. congruence.
   (* memory copy: both memory types may change independently. *)
   - destruct (context_agree_mem_type Hext H) as [mt_dst [Hdst Hagree_dst]].
     destruct (context_agree_mem_type Hext H0) as [mt_src [Hsrc Hagree_src]].
@@ -1054,7 +1059,7 @@ Proof.
   apply set_nth_In in Hin.
   destruct Hin as [-> | [m [Hneq Hnth]]].
   - unfold tableinst_typing => /=.
-    exists (Build_table_type (Build_limits (N.of_nat (length tableinst_elem) + i)%N (lim_max tt_limits)) tt_elem_type).
+    exists (Build_table_type (Build_limits (N.of_nat (length tableinst_elem) + i)%N (lim_max tt_limits)) tt_elem_type tt_address_type).
     unfold tabletype_valid => /=.
     rewrite Hif3 List.length_app List.repeat_length.
     replace (_ == _) with true; last first.
@@ -1123,10 +1128,9 @@ Proof.
   remove_bools_options.
   apply write_bytes_meminst_preserve_type in HStore as [Htype Hlen].
   apply/andP; split; last by lias.
-  destruct m, mem.
-  unfold limits_extension.
-  simpl in *; subst.
-  by lias.
+  rewrite Htype.
+  unfold memory_type_extension, limits_extension.
+  by rewrite !eq_refl N.leb_refl.
 Qed.
 
 Lemma mem_extension_store_vec: forall m n v marg mem,
@@ -1139,10 +1143,9 @@ Proof.
   remove_bools_options.
   apply write_bytes_meminst_preserve_type in HStore as [Htype Hlen].
   apply/andP; split; last by lias.
-  destruct m, mem.
-  unfold limits_extension.
-  simpl in *; subst.
-  by lias.
+  rewrite Htype.
+  unfold memory_type_extension, limits_extension.
+  by rewrite !eq_refl N.leb_refl.
 Qed.
 
 Lemma mem_extension_store_vec_lane: forall m n v width marg x mem,
@@ -1155,10 +1158,9 @@ Proof.
   remove_bools_options.
   apply write_bytes_meminst_preserve_type in HStore as [Htype Hlen].
   apply/andP; split; last by lias.
-  destruct m, mem.
-  unfold limits_extension.
-  simpl in *; subst.
-  by lias.
+  rewrite Htype.
+  unfold memory_type_extension, limits_extension.
+  by rewrite !eq_refl N.leb_refl.
 Qed.
   
 Lemma mem_extension_grow: forall s m c mem t,
@@ -1170,7 +1172,7 @@ Proof.
   move => s m c mem t Htype HMGrow.
   unfold meminst_typing in Htype; destruct m.
   remove_bools_options.
-  unfold mem_extension, limits_extension => /=.
+  unfold mem_extension, memory_type_extension, limits_extension => /=.
   unfold mem_grow in HMGrow.
   unfold mem_size, mem_length in *.
   simpl in *.

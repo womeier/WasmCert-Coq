@@ -6,8 +6,8 @@ Import ListNotations.
 
 Definition multi_memory_context : t_context :=
   Build_t_context nil nil nil
-    ({| lim_min := 0%N; lim_max := Some 1%N |} ::
-     {| lim_min := 1%N; lim_max := Some 2%N |} :: nil)
+    (memory_type32 {| lim_min := 0%N; lim_max := Some 1%N |} ::
+     memory_type32 {| lim_min := 1%N; lim_max := Some 2%N |} :: nil)
     nil nil nil nil nil None nil.
 
 Lemma size_second_memory_valid :

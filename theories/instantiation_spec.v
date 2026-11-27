@@ -93,7 +93,7 @@ Definition alloc_tab s tty: store_record * tableaddr :=
 Definition alloc_tabs (s : store_record) (ts : list table_type) : store_record * list tableaddr :=
   alloc_Xs alloc_tab s ts.
 
-Definition gen_mem_instance (lim : limits) : meminst :=
+Definition gen_mem_instance (lim : memory_type) : meminst :=
   let len := N.mul page_size lim.(lim_min) in
   {| meminst_data := mem_make len;
     meminst_type := lim;
@@ -109,7 +109,6 @@ Definition add_mem (s : store_record) (m_m : meminst) : store_record := {|
 |}.
 
 Definition alloc_mem (s : store_record) (m_mt : memory_type) : store_record * memaddr :=
-  let '{| lim_min := min; lim_max := maxo |} := m_mt in
   let memaddr := N.of_nat (List.length s.(s_mems)) in
   let meminst := gen_mem_instance m_mt in
   (add_mem s meminst, memaddr).
@@ -274,7 +273,7 @@ Definition alloc_module (s : store_record) (m : module) (imps : list extern_valu
   (inst.(inst_datas) = i_ds) /\
   (inst.(inst_exports) = (map (get_exportinst inst) m.(mod_exports))).
 
-Definition dummy_table : tableinst := {| tableinst_elem := nil; tableinst_type := Build_table_type (Build_limits N0 None) T_funcref |}.
+Definition dummy_table : tableinst := {| tableinst_elem := nil; tableinst_type := Build_table_type (Build_limits N0 None) T_funcref AT_i32 |}.
 
 Definition module_func_typing (c : t_context) (mf : module_func) (tf : function_type) : Prop :=
   let '{| modfunc_type := x; modfunc_locals := t_locs; modfunc_body := b_es |} := mf in
@@ -598,11 +597,12 @@ Definition import_func_subtyping (t1 t2: function_type) : bool :=
   t1 == t2.
 
 Definition import_table_subtyping (t1 t2: table_type) : bool :=
+  (t1.(tt_address_type) == t2.(tt_address_type)) &&
   (t1.(tt_elem_type) == t2.(tt_elem_type)) &&
     limits_subtyping t1.(tt_limits) t2.(tt_limits).
 
 Definition import_mem_subtyping (t1 t2: memory_type) : bool :=
-  limits_subtyping t1 t2.
+  (t1.(mt_address_type) == t2.(mt_address_type)) && limits_subtyping t1 t2.
 
 Definition import_global_subtyping (t1 t2: global_type) : bool :=
   t1 == t2.

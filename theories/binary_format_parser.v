@@ -895,10 +895,11 @@ Definition parse_limits {n} : byte_parser limits n :=
   (exact_byte x01 &> ((fun min max => {| lim_min := min; lim_max := Some max |}) <$> parse_u32_as_N) <*> parse_u32_as_N).
 
 Definition parse_table_type {n} : byte_parser table_type n :=
-  ((fun ety lims => {| tt_limits := lims; tt_elem_type := ety |}) <$> parse_reference_type) <*> parse_limits.
+  ((fun ety lims => {| tt_limits := lims; tt_elem_type := ety;
+                       tt_address_type := AT_i32 |}) <$> parse_reference_type) <*> parse_limits.
 
 Definition parse_memory_type {n} : byte_parser memory_type n :=
-  (fun lim => lim) <$> parse_limits.
+  memory_type32 <$> parse_limits.
 
 Definition parse_mut {n} : byte_parser mutability n :=
   exact_byte x00 $> MUT_const <|>

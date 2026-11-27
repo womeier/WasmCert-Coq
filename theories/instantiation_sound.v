@@ -34,12 +34,21 @@ Proof.
   repeat rewrite length_is_size in Htlen.
   repeat rewrite length_is_size in Hmlen.
   repeat rewrite length_is_size in Hglen.
-  repeat (apply/andP; split) => //; rewrite all2_cat => //; (apply/andP; split; last by apply reflexive_all2_same; move => ?; apply/eqP); apply all2_spec => //; move => n t1 t2 Hnth1 Hnth2.
+  repeat (apply/andP; split) => //; rewrite all2_cat => //;
+    (apply/andP; split; last by apply reflexive_all2_same; move => ?;
+      unfold func_agree, table_agree, mem_agree, global_agree; rewrite !eq_refl);
+    apply all2_spec => //; move => n t1 t2 Hnth1 Hnth2.
   { eapply Forall2_lookup in Hfsub as [t [Hnth Hsub]]; eauto.
     by unfold import_func_subtyping in Hsub; remove_bools_options; simplify_multieq; subst; apply/eqP.
   }
   { eapply Forall2_lookup in Htsub as [t [Hnth Hsub]]; eauto.
-    by unfold import_table_subtyping in Hsub; remove_bools_options; simplify_multieq; subst; apply/eqP.
+    unfold import_table_subtyping, table_agree in *.
+    remove_bools_options; simplify_multieq; subst.
+    apply/andP; split; by apply/eqP; congruence.
+  }
+  { eapply Forall2_lookup in Hmsub as [t [Hnth Hsub]]; eauto.
+    unfold import_mem_subtyping, mem_agree in *.
+    by remove_bools_options; simplify_multieq; subst; apply/eqP.
   }
   { eapply Forall2_lookup in Hgsub as [t [Hnth Hsub]]; eauto.
     by unfold import_global_subtyping in Hsub; remove_bools_options; simplify_multieq; subst; apply/eqP.
@@ -535,10 +544,10 @@ Proof.
         {
           unfold memtype_valid, limit_valid_range in H.
           move/andP in H; destruct H as [H _].
-          unfold mem_limit_bound in H.
           unfold byte_limit, page_size, page_limit.
-          (* 65536 * 65536 *)
-          by lias.
+          unfold memory_limit_bound_for in H.
+          destruct (mt_address_type (modmem_type mm)) in H;
+            unfold mem_limit_bound in H; by lias.
         }
         by lias.
       }

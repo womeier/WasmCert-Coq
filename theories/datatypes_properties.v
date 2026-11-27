@@ -43,6 +43,12 @@ Definition eqnumber_typeP : Equality.axiom number_type_eqb :=
 
 HB.instance Definition number_type_eqMixin := hasDecEq.Build number_type eqnumber_typeP.
 
+Scheme Equality for address_type.
+Definition address_type_eqb v1 v2 : bool := address_type_eq_dec v1 v2.
+Definition eqaddress_typeP : Equality.axiom address_type_eqb :=
+  eq_dec_Equality_axiom address_type_eq_dec.
+HB.instance Definition address_type_eqMixin := hasDecEq.Build address_type eqaddress_typeP.
+
 Scheme Equality for reference_type.
 Definition reference_type_eqb v1 v2 : bool := reference_type_eq_dec v1 v2.
 Definition eqreference_typeP : Equality.axiom reference_type_eqb :=

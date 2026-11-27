@@ -117,7 +117,7 @@ Definition mem_size (m : meminst) : N :=
 
 Definition mem_grow (m : meminst) (len_delta : N) : option meminst :=
   let new_size := N.add (mem_size m) len_delta in
-  if N.leb new_size mem_limit_bound then
+  if N.leb new_size (memory_limit_bound_for m.(meminst_type).(mt_address_type)) then
     match mem_grow (N.mul len_delta page_size) m.(meminst_data) with
     | Some new_mem_data =>
         match m.(meminst_type).(lim_max) with
@@ -126,13 +126,15 @@ Definition mem_grow (m : meminst) (len_delta : N) : option meminst :=
               Some {|
                   meminst_data := new_mem_data;
                   meminst_type :=
-                    Build_limits new_size m.(meminst_type).(lim_max);
+                    Build_memory_type (Build_limits new_size m.(meminst_type).(lim_max))
+                      m.(meminst_type).(mt_address_type);
                 |}
             else None
         | None =>
             Some {|
                 meminst_data := new_mem_data;
-                meminst_type := Build_limits new_size m.(meminst_type).(lim_max);
+                meminst_type := Build_memory_type (Build_limits new_size m.(meminst_type).(lim_max))
+                  m.(meminst_type).(mt_address_type);
               |}
         end
     | None => None
@@ -261,10 +263,11 @@ Definition func_agree (t1 t2: function_type) : bool :=
   t1 == t2.
 
 Definition table_agree (t1 t2: table_type) : bool :=
-  (t1.(tt_elem_type) == t2.(tt_elem_type)).
+  (t1.(tt_elem_type) == t2.(tt_elem_type)) &&
+  (t1.(tt_address_type) == t2.(tt_address_type)).
 
 Definition mem_agree (t1 t2: memory_type) : bool :=
-  true.
+  t1.(mt_address_type) == t2.(mt_address_type).
   
 Definition global_agree (t1 t2: global_type) : bool :=
   t1 == t2.
@@ -1117,13 +1120,14 @@ Definition smem_grow (s: store_record) (inst: moduleinst) (x: memidx) (n: N) : o
 
 Definition growtable (tab: tableinst) (n: N) (tabinit: value_ref) : option tableinst :=
   let len := (N.of_nat (tab_size tab) + n)%N in
-  if N.leb u32_bound len then None
+  if N.leb (address_bound tab.(tableinst_type).(tt_address_type)) len then None
   else
     let: {| tt_limits := lim; tt_elem_type := tabtype |} := tab.(tableinst_type) in
     let lim' := {| lim_min := len; lim_max := lim.(lim_max) |} in
-    if limit_valid_range lim' table_limit_bound then
+    if limit_valid_range lim' (table_limit_bound_for tab.(tableinst_type).(tt_address_type)) then
       let elem' := tab.(tableinst_elem) ++ (List.repeat tabinit (N.to_nat n)) in
-      let tab' := {| tableinst_type := {| tt_limits := lim'; tt_elem_type := tabtype |}; tableinst_elem := elem' |} in
+      let tab' := {| tableinst_type := {| tt_limits := lim'; tt_elem_type := tabtype;
+                        tt_address_type := tab.(tableinst_type).(tt_address_type) |}; tableinst_elem := elem' |} in
       Some tab'
     else
       None.
@@ -1209,7 +1213,12 @@ Definition limits_extension (l1 l2: limits) : bool :=
   (N.leb l1.(lim_min) l2.(lim_min)) &&
     (l1.(lim_max) == l2.(lim_max)).
 
+Definition memory_type_extension (t1 t2: memory_type) : bool :=
+  (t1.(mt_address_type) == t2.(mt_address_type)) &&
+  limits_extension t1 t2.
+
 Definition table_type_extension (t1 t2: table_type) : bool :=
+  (t1.(tt_address_type) == t2.(tt_address_type)) &&
   (t1.(tt_elem_type) == t2.(tt_elem_type)) &&
   (limits_extension t1.(tt_limits) t2.(tt_limits)).
 
@@ -1219,7 +1228,7 @@ Definition table_extension (t1 t2 : tableinst) : bool :=
   (tab_size t1 <= tab_size t2).
 
 Definition mem_extension (m1 m2 : meminst) : bool :=
-  (limits_extension m1.(meminst_type) m2.(meminst_type)) &&
+  (memory_type_extension m1.(meminst_type) m2.(meminst_type)) &&
   (N.leb (mem_length m1) (mem_length m2)).
 
 Definition global_extension (g1 g2: globalinst) : bool :=
@@ -1248,7 +1257,7 @@ Definition context_extension C C' : bool :=
   (C.(tc_types) == C'.(tc_types)) &&
   (C.(tc_funcs) == C'.(tc_funcs)) &&
   (all2 table_type_extension C.(tc_tables) C'.(tc_tables)) &&
-  (all2 limits_extension C.(tc_mems) C'.(tc_mems)) &&
+  (all2 memory_type_extension C.(tc_mems) C'.(tc_mems)) &&
   (C.(tc_globals) == C'.(tc_globals)) &&
   (C.(tc_elems) == C'.(tc_elems)) &&
   (C.(tc_datas) == C'.(tc_datas)) &&

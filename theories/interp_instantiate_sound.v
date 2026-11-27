@@ -62,7 +62,7 @@ Proof.
   }
   (* tables *)
   { apply Forall2_spec => //; first by rewrite List.length_map.
-    move => n mtable [tx ty] Htablenth Hftsnth.
+    move => n mtable [tx ty a] Htablenth Hftsnth.
     eapply all_projection in Htablecheck; eauto.
     simpl in *.
     unfold module_table_typing, module_table_type_checker in *; rewrite Htablecheck => /=.
