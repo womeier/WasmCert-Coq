@@ -210,8 +210,8 @@ Proof.
   destruct m.
   rewrite /module_typing.
   move => [fts [tts [mts [gts [rts [dts
-    [Hmtypes [Hmfuncs [Hmtabs [Hmmems [Hmemcount [Hmglobals
-    [Hmelems [Hmdatas [Hstart [Hmimports [Hmexports Hnames]]]]]]]]]]]]]]]]].
+    [Hmtypes [Hmfuncs [Hmtabs [Hmmems [Hmglobals
+    [Hmelems [Hmdatas [Hstart [Hmimports [Hmexports Hnames]]]]]]]]]]]]]]]].
   destruct Hmglobals as [Hgts Hglobals].
   specialize (module_table_types_complete _ _ _ Hmtabs) as Htts.
   specialize (module_mem_types_complete _ _ _ Hmmems) as Hmts.
@@ -257,7 +257,6 @@ Proof.
   change ((if all (module_func_type_checker Cfull) mod_funcs &&
     all (module_table_type_checker Cfull) mod_tables &&
     all (module_mem_type_checker Cfull) mod_mems &&
-    wasm_2_memory_count_check mod_mems (ext_t_mems impts) &&
     extended_globals_type_checker Cinit mod_globals &&
     all (module_elem_type_checker (const_context_add_globals Cinit
       (map modglob_type mod_globals))) mod_elems &&
@@ -271,7 +270,7 @@ Proof.
          end
     else (None, "invalid module components"%string)) =
       (Some (impts, expts), "ok"%string)).
-  rewrite Hfs Htabs Hmems Hmemcount Hgs Hels Hds Hstart Hnames /= Hexpts.
+  rewrite Hfs Htabs Hmems Hgs Hels Hds Hstart Hnames /= Hexpts.
   reflexivity.
 Qed.
 

@@ -147,6 +147,24 @@ let wasm_assert_rets verbosity rets ret_exps =
   let assert_results = List.map2 (fun x y -> wasm_assert_ret verbosity x y) rets ret_exps in
   List.fold_left (fun a b -> a && b) true assert_results
 
+(* Keep parsing separate from validation/linking. A failure in a later phase
+   must not satisfy assert_malformed (or a parse failure assert_invalid). *)
+let parse_wast_module verbosity moddef =
+  try
+    match moddef.it with
+    | Textual ast_module ->
+      Parse.parse_module verbosity false (Wasm.Encode.encode ast_module)
+    | Encoded (_, bin_module) ->
+      Parse.parse_module verbosity false bin_module
+    | Quoted (_, text_module) ->
+      Parse.parse_module verbosity true text_module
+  with Wasm.Parse_error.Syntax (_, message) -> error message
+
+let require_valid_module m =
+  match Extract.module_type_checker m with
+  | (Some _, _) -> pure ()
+  | (None, _) -> error "Expected a valid module before linking/instantiation"
+
 let load_wast_module verbosity hs s ovar moddef mod_counter =
   begin try
   match moddef.it with 

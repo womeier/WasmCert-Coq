@@ -1,0 +1,178 @@
+(* Exercise the actual extracted definitions, including the selected vector
+   memory backend.  These are API regressions, not Wasm module conformance. *)
+open Extract
+module A = Addressing
+module B = AddressingBinary
+module M = AddressingMemory
+module T = AddressingTable
+module U = AddressingBulk
+module P = AddressingParseque
+
+let n = Big_int_Z.big_int_of_string
+let z = n "0"
+let one = n "1"
+let equal = Big_int_Z.eq_big_int
+let value a s = A.value_of_address a (n s)
+let limits minimum maximum =
+  { lim_min = n minimum; lim_max = Stdlib.Option.map n maximum }
+
+let count = ref 0
+let check name condition =
+  if not condition then failwith ("addressing regression: " ^ name);
+  incr count
+
+let some name = function
+  | Some result -> result
+  | None -> failwith ("addressing regression: " ^ name ^ " unexpectedly failed")
+
+let () =
+  let max64 = n "18446744073709551615" in
+  let bytes = List.init 9 (fun _ -> Char.chr 255) @ [Char.chr 1] in
+  check "decode u64 maximum"
+    (match B.decode_address A.AT_i64 bytes with
+     | Some (v, []) -> equal v max64 | _ -> false);
+  check "actual parser u64 maximum"
+    (match P.run_prefix A.AT_i64 bytes with
+     | Some (v, []) -> equal v max64 | _ -> false);
+  check "actual parser preserves suffix"
+    (P.run_prefix A.AT_i64 (bytes @ [Char.chr 255]) =
+       Some (max64, [Char.chr 255]));
+  check "actual parser rejects excessive length"
+    (P.run_prefix A.AT_i64
+       (List.init 10 (fun _ -> Char.chr 128) @ [Char.chr 0]) = None);
+  check "reject u64 overflow"
+    (B.decode_address A.AT_i64
+       (List.init 9 (fun _ -> Char.chr 128) @ [Char.chr 2]) = None);
+  check "reject excessive LEB length"
+    (B.decode_address A.AT_i64
+       (List.init 10 (fun _ -> Char.chr 128) @ [Char.chr 0]) = None);
+  check "accept legal noncanonical zero"
+    (match B.decode_address A.AT_i64
+       (List.init 9 (fun _ -> Char.chr 128) @ [Char.chr 0]) with
+     | Some (v, []) -> equal v z | _ -> false);
+  let lim = limits "4294967296" (Some "18446744073709551615") in
+  check "wide limits round trip"
+    (B.decode_limits (B.encode_limits A.AT_i64 lim) =
+       Some ((A.AT_i64, lim), []));
+  check "reject shared-memory flag in non-shared codec"
+    (B.decode_limits [Char.chr 6; Char.chr 0; Char.chr 1] = None);
+  check "address addition does not wrap"
+    (A.effective_address A.AT_i64 max64 one one
+       (n "18446744073709551616") = None);
+  check "zero length past end is not in bounds"
+    (not (A.range_valid (n "4294967297") z (n "4294967296")));
+  check "mixed copy length is i32"
+    (A.copy_address_type A.AT_i64 A.AT_i32 = A.AT_i32);
+  let memory = memory_instance.m in
+  let mt = A.{ memory_address_type = AT_i64;
+               memory_limits = limits "1" (Some "2") } in
+  let m = some "memory64 allocation" (M.allocate memory mt) in
+  check "memory64 initial size" (equal (M.size memory m) one);
+  check "memory64 high address bounds failure"
+    (M.load_byte memory m (value A.AT_i64 "4294967296") z = None);
+  check "memory64 rejects i32 operand"
+    (M.load_byte memory m (value A.AT_i32 "0") z = None);
+  check "memory64 reads zero-initialized bytes"
+    (M.load_byte memory m (value A.AT_i64 "0") z =
+       Some wasm_memory_default_byte);
+  let m', old = some "memory64 growth"
+      (M.grow memory m (value A.AT_i64 "1")) in
+  check "memory64 growth size" (equal (M.size memory m') (n "2"));
+  check "memory64 growth result"
+    (A.address_of_value A.AT_i64 old = Some one);
+  check "memory64 growth respects declared maximum"
+    (M.grow memory m' (value A.AT_i64 "1") = None);
+  check "memory64 growth rejects i32 operand"
+    (M.grow memory m' (value A.AT_i32 "0") = None);
+  check "memory64 new page initialized"
+    (M.load_byte memory m' (value A.AT_i64 "65536") z =
+       Some wasm_memory_default_byte);
+  check "large allocation is rejected, not truncated"
+    (M.allocate memory A.{ memory_address_type = AT_i64;
+       memory_limits = limits "65537" None } = None);
+  let byte s = Byte.repr (n s) in
+  let fill_one data at b = some "memory64 fill"
+      (U.fill memory_instance data (value A.AT_i64 at)
+         (value A.AT_i64 "1") (byte b)) in
+  let filled = fill_one (fill_one (fill_one m' "0" "1") "1" "2") "2" "3" in
+  check "memory64 fill writes selected byte"
+    (M.load_byte memory filled (value A.AT_i64 "1") z = Some (byte "2"));
+  check "memory64 fill rejects i32 length"
+    (U.fill memory_instance filled (value A.AT_i64 "0")
+       (value A.AT_i32 "1") (byte "4") = None);
+  let copied = some "overlapping self-copy"
+      (U.copy memory_instance filled filled (value A.AT_i64 "1")
+         (value A.AT_i64 "0") (value A.AT_i64 "3")) in
+  check "overlapping self-copy uses original source"
+    (M.load_byte memory copied (value A.AT_i64 "2") z = Some (byte "2") &&
+     M.load_byte memory copied (value A.AT_i64 "3") z = Some (byte "3"));
+  check "copy source bounds checked before writes"
+    (U.copy memory_instance filled filled (value A.AT_i64 "0")
+       (value A.AT_i64 "131072") (value A.AT_i64 "1") = None);
+  check "zero-length copy at end"
+    (U.copy memory_instance filled filled (value A.AT_i64 "131072")
+       (value A.AT_i64 "131072") (value A.AT_i64 "0") <> None);
+  check "zero-length copy past end traps"
+    (U.copy memory_instance filled filled (value A.AT_i64 "131072")
+       (value A.AT_i64 "131073") (value A.AT_i64 "0") = None);
+  let m32 = some "memory32 allocation"
+      (M.allocate memory A.{ memory_address_type = AT_i32;
+                            memory_limits = limits "1" None }) in
+  let m32 = some "memory32 fill"
+      (U.fill memory_instance m32 (value A.AT_i32 "0")
+         (value A.AT_i32 "1") (byte "7")) in
+  let mixed = some "mixed-width copy"
+      (U.copy memory_instance filled m32 (value A.AT_i64 "5")
+         (value A.AT_i32 "0") (value A.AT_i32 "1")) in
+  check "mixed-width copy result"
+    (M.load_byte memory mixed (value A.AT_i64 "5") z = Some (byte "7"));
+  check "mixed-width copy rejects i64 length"
+    (U.copy memory_instance filled m32 (value A.AT_i64 "5")
+       (value A.AT_i32 "0") (value A.AT_i64 "1") = None);
+  let tt = A.{ table_address_type = AT_i64;
+               table_limits = limits "2" (Some "3");
+               table_element_type = T_funcref } in
+  let t = some "table64 allocation" (T.allocate tt) in
+  check "table64 null initialization"
+    (T.get t (value A.AT_i64 "1") = Some (VAL_ref_null T_funcref));
+  check "table64 high index bounds failure"
+    (T.get t (value A.AT_i64 "18446744073709551615") = None);
+  check "table64 rejects i32 index"
+    (T.get t (value A.AT_i32 "1") = None);
+  let t' = some "table64 set"
+      (T.set t (value A.AT_i64 "1") (VAL_ref_func (n "7"))) in
+  check "table64 get after set"
+    (T.get t' (value A.AT_i64 "1") = Some (VAL_ref_func (n "7")));
+  let t'', old = some "table64 grow"
+      (T.grow t' (value A.AT_i64 "1") (VAL_ref_func (n "8"))) in
+  check "table64 grow result"
+    (A.address_of_value A.AT_i64 old = Some (n "2"));
+  check "table64 growth preserves old elements"
+    (T.get t'' (value A.AT_i64 "1") = Some (VAL_ref_func (n "7")));
+  check "table64 growth initializes new elements"
+    (T.get t'' (value A.AT_i64 "2") = Some (VAL_ref_func (n "8")));
+  check "table64 growth respects declared maximum"
+    (T.grow t'' (value A.AT_i64 "1") (VAL_ref_null T_funcref) = None);
+  let original = Parray.set_gen (Parray.make 4 0) 0 4 (fun i -> i + 1) in
+  let snapshot_copy = Parray.set_gen original 1 3 (Parray.get original) in
+  check "native block generator sees source snapshot"
+    (List.init 4 (Parray.get snapshot_copy) = [1; 1; 2; 3]);
+  check "native block update preserves source version"
+    (List.init 4 (Parray.get original) = [1; 2; 3; 4]);
+  let newer = Parray.set original 0 9 in
+  let rerooted = Parray.set_gen newer 1 2 (Parray.get original) in
+  check "native generator can read another persistent version"
+    (List.init 4 (Parray.get rerooted) = [9; 1; 2; 4]);
+  let failed =
+    try
+      ignore (Parray.set_gen newer 1 2
+        (fun i -> if i = 1 then failwith "generator exception" else 7));
+      false
+    with Failure _ -> true
+  in
+  check "native generator exception leaves destination unchanged"
+    (failed && List.init 4 (Parray.get newer) = [9; 2; 3; 4]);
+  check "native block bounds do not overflow"
+    (List.init 4 (Parray.get (Parray.set_gen newer max_int 2 (fun _ -> 7))) =
+       [9; 2; 3; 4]);
+  Printf.printf "Addressing extracted API regressions: %d/%d passed\n" !count !count

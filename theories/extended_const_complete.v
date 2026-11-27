@@ -428,8 +428,8 @@ Proof.
   destruct m.
   unfold module_typing in Hvalid.
   destruct Hvalid as [fts [tts [mts [gts [rts [dts
-    [Hmtypes [Hmfuncs [Hmtabs [Hmmems [Hmemcount [[Hgts Hglobals]
-    [Hmelems [Hmdatas [Hstart [Hmimports [Hmexports Hnames]]]]]]]]]]]]]]]]].
+    [Hmtypes [Hmfuncs [Hmtabs [Hmmems [[Hgts Hglobals]
+    [Hmelems [Hmdatas [Hstart [Hmimports [Hmexports Hnames]]]]]]]]]]]]]]]].
   match type of Hglobals with extended_globals_typing ?C0 _ => pose Cinit := C0 end.
   change (extended_globals_typing Cinit mod_globals) in Hglobals.
   pose added := (map (fun mf => gen_func_instance mf empty_moduleinst) mod_funcs : list (@funcinst hfc)).

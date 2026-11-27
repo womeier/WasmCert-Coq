@@ -63,6 +63,30 @@ Proof.
     + by lias.
 Qed.
 
+(** Active data initialization retains the selected memory in a well-typed
+    instruction sequence; passive data produces no initialization code. *)
+Lemma get_init_expr_data_typing: forall C i data,
+  lookup_N C.(tc_datas) (N.of_nat i) = Some tt ->
+  module_data_typing C data tt ->
+  be_typing C (get_init_expr_data i data) (Tf [::] [::]).
+Proof.
+  move => C i [init mode] Hdata Htype.
+  destruct mode as [ | midx offset]; simpl in *.
+  - by apply bet_empty.
+  - destruct Htype as [[mt [Hmem [Hoffset Hconst]]] _].
+    eapply bet_composition'; first by apply Hoffset.
+    eapply bet_composition_front with (t2s := [::T_num T_i32; T_num T_i32]).
+    + apply bet_weakening_empty_1 with (ts := [::T_num T_i32]).
+      by apply bet_const_num.
+    + eapply bet_composition_front with
+        (t2s := [::T_num T_i32; T_num T_i32; T_num T_i32]).
+      * apply bet_weakening_empty_1 with (ts := [::T_num T_i32; T_num T_i32]).
+        by apply bet_const_num.
+      * eapply bet_composition_front with (t2s := [::]).
+        -- by eapply bet_memory_init; eauto.
+        -- by eapply bet_data_drop; eauto.
+Qed.
+
 (** Soundness of the module instantiation operation
 The post-instantiation store is a valid extension of the old store,
 and the post-instantiation frame is well-typed within the new store.
@@ -110,7 +134,7 @@ Proof.
   }
 
   destruct m; unfold module_typing in Hmodtype; simpl in *.
-  destruct Hmodtype as [fts [tts [mts [gts [rts [dts [Hmtypes [Hmfunctype [Hmtabletype [Hmmemtype [Hmemcount [Hmglobaltype [Hmelemtype [Hmdatatype [Hstarttype [Hmimptype [Hmexptype Hexpunique]]]]]]]]]]]]]]]]].
+  destruct Hmodtype as [fts [tts [mts [gts [rts [dts [Hmtypes [Hmfunctype [Hmtabletype [Hmmemtype [Hmglobaltype [Hmelemtype [Hmdatatype [Hstarttype [Hmimptype [Hmexptype Hexpunique]]]]]]]]]]]]]]]].
   destruct Hmglobaltype as [Hgts Hprefix].
   assert (List.Forall2 (fun g gt => gt = g.(modglob_type)) mod_globals gts) as Hmglobaltype.
   { rewrite Hgts.
