@@ -77,7 +77,11 @@ Extract Constant SIMD_ops.app_vternop_str => "SIMD_ops.app_vternop_str".
 Extract Constant SIMD_ops.app_vtestop_str => "SIMD_ops.app_vtestop_str".
 Extract Constant SIMD_ops.app_vshiftop_str => "SIMD_ops.app_vshiftop_str".
 
+From Wasm Require Import addressing addressing_binary.
+
 Extraction "extract"
   Utility
   Extraction_instance
+  Addressing
+  AddressingBinary
   .
