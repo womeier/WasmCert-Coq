@@ -90,3 +90,30 @@
     "\00asm\01\00\00\00\01\04\01\60\00\00\03\02\01\00"
     "\0a\0b\01\09\00\12\80\80\80\80\80\00\0b")
   "integer representation too long")
+
+;; Function-size guards must reject both undersized and oversized declarations.
+(assert_malformed
+  (module binary
+    "\00asm\01\00\00\00\01\04\01\60\00\00\03\02\01\00"
+    "\0a\06\01\03\00\12\00\0b")
+  "section size mismatch")
+(assert_malformed
+  (module binary
+    "\00asm\01\00\00\00\01\04\01\60\00\00\03\02\01\00"
+    "\0a\06\01\05\00\12\00\0b")
+  "section size mismatch")
+
+;; A five-byte padded size is valid; a six-byte size is not a u32 encoding.
+(module binary
+  "\00asm\01\00\00\00\01\04\01\60\00\00\03\02\01\00"
+  "\0a\0a\01\84\80\80\80\00\00\12\00\0b")
+(assert_malformed
+  (module binary
+    "\00asm\01\00\00\00\01\04\01\60\00\00\03\02\01\00"
+    "\0a\0b\01\84\80\80\80\80\00\00\12\00\0b")
+  "integer representation too long")
+
+;; The zero local-declaration count may also use a padded u32 encoding.
+(module binary
+  "\00asm\01\00\00\00\01\04\01\60\00\00\03\02\01\00"
+  "\0a\07\01\05\80\00\12\00\0b")

@@ -22,9 +22,11 @@ relaxed-SIMD support are enabled. Generated binaries exercise the actual extract
 `run_parse_module_str`, module validator/instantiator, and context interpreter.
 `tail_call_cases.wast` adds frame/label/operand-stack unwinding, tail calls in a
 start function, a nonzero table index, null and mismatch traps, four malformed
-binary cases, and cross-instance imported tail calls. Both `dune test` and CI run
-the checked-in fixtures without requiring wasm-tools. Binary invalid assertions
-must decode then fail validation; binary malformed assertions must fail decoding.
+instruction immediates, cross-instance imported tail calls, incorrect function
+sizes, and permitted u32 padding in function-size and zero-local-count fields.
+Both `dune test` and CI run the checked-in fixtures without requiring wasm-tools.
+Binary invalid assertions must decode then fail validation; binary malformed
+assertions must fail decoding.
 
 ## Scope and provenance
 

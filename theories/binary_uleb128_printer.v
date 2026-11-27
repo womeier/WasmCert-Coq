@@ -79,11 +79,13 @@ Qed.
 
 (** Keep the existing total printer behavior for out-of-range AST indices.
     The fallback is unreachable for every well-formed u32 index. *)
-Definition binary_of_tailidx (index : N) : list byte :=
+Definition binary_of_u32_verified (index : N) : list byte :=
   match encode_uleb 5 index with
   | Some bytes => bytes
   | None => leb128.encode_unsigned index
   end.
+
+Definition binary_of_tailidx := binary_of_u32_verified.
 
 Theorem binary_of_tailidx_correct : forall index suffix,
     index <= 4294967295 ->
@@ -94,7 +96,7 @@ Proof.
   { cbn [uleb_limit]. lia. }
   destruct (encode_uleb_complete 5 index ltac:(lia) Hlimit)
     as [bytes [Hencode Hprefix]].
-  unfold binary_of_tailidx. rewrite Hencode.
+  unfold binary_of_tailidx, binary_of_u32_verified. rewrite Hencode.
   split; [apply Hprefix | assumption].
 Qed.
 
@@ -106,4 +108,16 @@ Proof.
   intros index suffix Hbound.
   apply decode_u32_correct.
   now apply binary_of_tailidx_correct.
+Qed.
+
+Lemma binary_of_tailidx_length : forall index,
+    index <= 4294967295 ->
+    (1 <= List.length (binary_of_tailidx index) <= 5)%nat.
+Proof.
+  intros index Hbound.
+  pose proof (binary_of_tailidx_correct index nil Hbound) as [Hprefix _].
+  rewrite List.app_nil_r in Hprefix.
+  apply uleb_prefix_consumed in Hprefix as [bytes [Hbytes Hlength]].
+  rewrite List.app_nil_r in Hbytes.
+  now rewrite Hbytes.
 Qed.

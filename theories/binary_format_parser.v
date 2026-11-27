@@ -52,10 +52,7 @@ Definition parse_u8_as_N {n} : byte_parser N n :=
     (assert_sized (extract parse_unsigned n) (fun sz => N.leb sz 2)).
 
 Definition parse_u32_as_N {n} : byte_parser N n :=
-  guardM
-    (fun n => if (N.leb n 4294967295%N) then Some n
-           else None)
-  (assert_sized (extract parse_unsigned n) (fun sz => N.leb sz 5)).
+  parse_bounded_u32.
 
 Definition assert_u32 {n} (k: N) : byte_parser N n :=
   guardM
@@ -95,13 +92,16 @@ Fixpoint parse_vec_aux_positive {B} {n} (f: byte_parser B n) (p: positive) :
 Definition parse_vec_aux {B} {n} (f : byte_parser B n) (k : N)
   : byte_parser (list B) n:=  
   match k with
-  | 0%N => fail (* nil *)
+  | 0%N => fail (* Empty vectors are handled by their length parser. *)
   | Npos p => parse_vec_aux_positive f p
   end.
 
 (* parsing a length-indexed list *)
 Definition parse_vec {B} {n} (f : byte_parser B n) : byte_parser (list B) n :=
   exact_byte x00 $> nil <|>
+  (* A padded zero count still consumes its length bytes. Returning the empty
+     vector here preserves Parseque's strict-consumption invariant. *)
+  guardM (fun k => if N.eqb k 0 then Some nil else None) parse_vec_length <|>
   (parse_vec_length >>= (fun k => parse_vec_aux f k)).
 
 Definition parse_16bytes {n} : byte_parser SIMD.v128 n :=

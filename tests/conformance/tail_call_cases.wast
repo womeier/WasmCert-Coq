@@ -35,3 +35,14 @@
 (assert_malformed
   (module binary "\00\61\73\6d\01\00\00\00\01\04\01\60\00\00\03\02\01\00\0a\0b\01\09\00\12\80\80\80\80\80\00\0b")
   "integer representation too long")
+(assert_malformed
+  (module binary "\00\61\73\6d\01\00\00\00\01\04\01\60\00\00\03\02\01\00\0a\06\01\03\00\12\00\0b")
+  "section size mismatch")
+(assert_malformed
+  (module binary "\00\61\73\6d\01\00\00\00\01\04\01\60\00\00\03\02\01\00\0a\06\01\05\00\12\00\0b")
+  "section size mismatch")
+(module binary "\00\61\73\6d\01\00\00\00\01\04\01\60\00\00\03\02\01\00\0a\0a\01\84\80\80\80\00\00\12\00\0b")
+(assert_malformed
+  (module binary "\00\61\73\6d\01\00\00\00\01\04\01\60\00\00\03\02\01\00\0a\0b\01\84\80\80\80\80\00\00\12\00\0b")
+  "integer representation too long")
+(module binary "\00\61\73\6d\01\00\00\00\01\04\01\60\00\00\03\02\01\00\0a\07\01\05\80\00\12\00\0b")

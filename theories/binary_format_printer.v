@@ -647,7 +647,7 @@ Definition binary_of_code_func (tlocs: list value_type) (e: expr) : list byte :=
 Definition binary_of_code (mf : module_func) : list byte :=
   let func_bin := binary_of_code_func mf.(modfunc_locals) mf.(modfunc_body) in
   let func_len := List.length func_bin in
-  leb128.encode_unsigned (bin_of_nat func_len) ++
+  binary_of_u32_verified (N.of_nat func_len) ++
   func_bin.
 
 Definition binary_of_codesec (fs : list module_func) : list byte :=
