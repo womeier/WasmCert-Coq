@@ -268,3 +268,278 @@ Proof.
     (fun bytes idx => signed_leb bytes (Z.of_N idx))).
   exact parse_heap_typeidx_prefix_sound.
 Qed.
+
+Definition unsigned_terminal bs n :=
+  exists b, bs = b :: nil /\ (Byte.to_N b < 128)%N /\ n = Byte.to_N b.
+
+Definition signed_terminal bs z :=
+  exists b, bs = b :: nil /\
+    (((Byte.to_N b < 64)%N /\ z = Z.of_N (Byte.to_N b)) \/
+     ((64 <= Byte.to_N b < 128)%N /\
+       z = (Z.of_N (Byte.to_N b) - 128)%Z)).
+
+Definition unsigned_nonterminal bs n :=
+  exists b tail rest,
+    bs = b :: tail /\ (128 <= Byte.to_N b)%N /\
+    unsigned_leb tail rest /\ n = ((Byte.to_N b - 128) + 128 * rest)%N.
+
+Definition signed_nonterminal bs z :=
+  exists b tail rest,
+    bs = b :: tail /\ (128 <= Byte.to_N b)%N /\
+    signed_leb tail rest /\
+    z = (Z.of_N (Byte.to_N b) - 128 + 128 * rest)%Z.
+
+Lemma parse_unsigned_end_terminal_sound n :
+  parser_sound (@parse_unsigned_end (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+    unsigned_terminal.
+Proof.
+  unfold parse_unsigned_end.
+  eapply parser_sound_guardM with (P := fun bs b => bs = b :: nil).
+  - apply parser_sound_anyTok.
+  - intros bs b v E F. subst bs.
+    exists b. split; [reflexivity |].
+    destruct b; simpl in F; try discriminate; inversion F; subst;
+      split; vm_compute; congruence.
+Qed.
+
+Lemma parse_signed_end_terminal_sound n :
+  parser_sound (@parse_signed_end (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+    signed_terminal.
+Proof.
+  unfold parse_signed_end.
+  eapply parser_sound_guardM with (P := fun bs b => bs = b :: nil).
+  - apply parser_sound_anyTok.
+  - intros bs b v E F. subst bs.
+    exists b. split; [reflexivity |].
+    destruct b; simpl in F; try discriminate; inversion F; subst;
+      first [left; split; vm_compute; congruence |
+             right; split; [split; vm_compute; congruence | reflexivity]].
+Qed.
+
+Lemma parse_unsigned_end_complete n :
+  parser_complete
+    (@parse_unsigned_end (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+    unsigned_terminal.
+Proof.
+  unfold parse_unsigned_end.
+  eapply parser_complete_guardM with (P := fun bs b => bs = b :: nil).
+  - apply parser_complete_anyTok.
+  - intros bs v [b [E [B V]]].
+    exists b. split; [exact E |].
+    subst v. destruct b; vm_compute in *; congruence.
+Qed.
+
+Lemma parse_unsigned_ctd_complete n :
+  parser_complete
+    (@parse_unsigned_ctd (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+    unsigned_continuation.
+Proof.
+  unfold parse_unsigned_ctd.
+  eapply parser_complete_guardM with (P := fun bs b => bs = b :: nil).
+  - apply parser_complete_anyTok.
+  - intros bs v [b [E [B V]]].
+    exists b. split; [exact E |].
+    subst v. destruct b; vm_compute in *; congruence.
+Qed.
+
+Lemma parse_signed_end_complete n :
+  parser_complete
+    (@parse_signed_end (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+    signed_terminal.
+Proof.
+  unfold parse_signed_end.
+  eapply parser_complete_guardM with (P := fun bs b => bs = b :: nil).
+  - apply parser_complete_anyTok.
+  - intros bs v [b [E [[B V]|[B V]]]];
+      exists b; split; try exact E;
+      subst v; destruct b; vm_compute in *; intuition congruence.
+Qed.
+
+Lemma parse_signed_ctd_complete n :
+  parser_complete
+    (@parse_signed_ctd (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+    signed_continuation.
+Proof.
+  unfold parse_signed_ctd.
+  eapply parser_complete_guardM with (P := fun bs b => bs = b :: nil).
+  - apply parser_complete_anyTok.
+  - intros bs v [b [E [B V]]].
+    exists b. split; [exact E |].
+    subst v. destruct b; vm_compute in *; congruence.
+Qed.
+
+Lemma unsigned_option_step_complete n rec :
+  (forall k (lt : k < n),
+    parser_complete (_unsigned k (call rec lt)) unsigned_leb) ->
+  parser_complete (_unsigned n (unsigned_option_step n rec)) unsigned_leb.
+Proof.
+  intro Rec.
+  assert (Right : parser_complete
+    (((fun lsb rest => N.add lsb (N.mul 128 rest)) <$> parse_unsigned_ctd) <*>
+      Induction.map _unsigned n rec) unsigned_nonterminal).
+  {
+    eapply parser_complete_app with
+      (P := fun bs f => exists lsb,
+        unsigned_continuation bs lsb /\
+        f = (fun rest => N.add lsb (N.mul 128 rest)))
+      (Q := unsigned_leb).
+    - eapply parser_complete_map.
+      + apply parse_unsigned_ctd_complete.
+      + intros bs f [lsb [H E]]. exists lsb. auto.
+    - intros k lt. simpl. apply Rec.
+    - intros bs v [b [tail [rest [E [B [Tail V]]]]]].
+      exists (b :: nil), tail,
+        (fun rest => N.add (Byte.to_N b - 128) (N.mul 128 rest)), rest.
+      split; [exact E |]. split.
+      + exists (Byte.to_N b - 128)%N. split; [|reflexivity].
+        exists b. auto.
+      + split; assumption.
+  }
+  intros m bound input prefix suffix a E P.
+  inversion P as [b B|b tail rest B Tail]; subst.
+  - eapply (parser_complete_alt_left _ _ _ (parse_unsigned_end_complete n));
+      [exact E |].
+    exists b. auto.
+  - eapply (parser_complete_alt_right _ _ _ unsigned_nonterminal
+      (parse_unsigned_end_terminal_sound n) Right).
+    + intros xs ys t1 t2 x y [c [Ex [Low V]]]
+        [d [ds [z [Ey [High Rest]]]]] Eq.
+      subst xs ys. inversion Eq; subst d. lia.
+    + exact E.
+    + exists b, tail, rest. auto.
+Qed.
+
+Theorem parse_unsigned_complete n :
+  parser_complete (@parse_unsigned (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+    unsigned_leb.
+Proof.
+  change (parser_complete
+    (_unsigned n (Fix unsigned_option unsigned_option_step n)) unsigned_leb).
+  apply (fix_invariant unsigned_option_step
+    (fun k u => parser_complete (_unsigned k u) unsigned_leb)).
+  exact unsigned_option_step_complete.
+Qed.
+
+Lemma signed_option_step_complete n rec :
+  (forall k (lt : k < n),
+    parser_complete (_signed k (call rec lt)) signed_leb) ->
+  parser_complete (_signed n (signed_option_step n rec)) signed_leb.
+Proof.
+  intro Rec.
+  assert (Right : parser_complete
+    (((fun lsb rest => Z.add lsb (Z.mul 128 rest)) <$> parse_signed_ctd) <*>
+      Induction.map _signed n rec) signed_nonterminal).
+  {
+    eapply parser_complete_app with
+      (P := fun bs f => exists lsb,
+        signed_continuation bs lsb /\
+        f = (fun rest => Z.add lsb (Z.mul 128 rest)))
+      (Q := signed_leb).
+    - eapply parser_complete_map.
+      + apply parse_signed_ctd_complete.
+      + intros bs f [lsb [H E]]. exists lsb. auto.
+    - intros k lt. simpl. apply Rec.
+    - intros bs v [b [tail [rest [E [B [Tail V]]]]]].
+      exists (b :: nil), tail,
+        (fun rest => Z.add (Z.of_N (Byte.to_N b) - 128) (Z.mul 128 rest)), rest.
+      split; [exact E |]. split.
+      + exists (Z.of_N (Byte.to_N b) - 128)%Z. split; [|reflexivity].
+        exists b. auto.
+      + split; assumption.
+  }
+  intros m bound input prefix suffix a E P.
+  inversion P as [b B|b B|b tail rest B Tail]; subst.
+  - eapply (parser_complete_alt_left _ _ _ (parse_signed_end_complete n));
+      [exact E |].
+    exists b. split; [reflexivity | left; auto].
+  - eapply (parser_complete_alt_left _ _ _ (parse_signed_end_complete n));
+      [exact E |].
+    exists b. split; [reflexivity | right; auto].
+  - eapply (parser_complete_alt_right _ _ _ signed_nonterminal
+      (parse_signed_end_terminal_sound n) Right).
+    + intros xs ys t1 t2 x y [c [Ex [[Low V]|[Low V]]]]
+        [d [ds [z [Ey [High Rest]]]]] Eq;
+        subst xs ys; inversion Eq; subst d; lia.
+    + exact E.
+    + exists b, tail, rest. auto.
+Qed.
+
+Theorem parse_signed_complete n :
+  parser_complete (@parse_signed (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+    signed_leb.
+Proof.
+  change (parser_complete
+    (_signed n (Fix signed_option signed_option_step n)) signed_leb).
+  apply (fix_invariant signed_option_step
+    (fun k s => parser_complete (_signed k s) signed_leb)).
+  exact signed_option_step_complete.
+Qed.
+
+Theorem parse_s33_prefix_complete n :
+  parser_complete (@parse_s33 (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+    (fun bs z => signed_leb bs z /\
+      (-4294967296 <= z <= 4294967295)%Z /\ length bs <= 5).
+Proof.
+  unfold parse_s33.
+  eapply parser_complete_guardM with
+    (P := fun bs z => signed_leb bs z /\ length bs <= 5).
+  - apply parser_complete_assert_sized.
+    + eapply parser_complete_weaken.
+      * apply parser_complete_extract. exact parse_signed_complete.
+      * intros bs z [P _]. exact P.
+    + intros bs z [_ L]. apply N.leb_le. lia.
+  - intros bs z [P [Range L]].
+    exists z. split; [auto |].
+    assert (Lower : Z.leb (-4294967296) z = true) by (apply Z.leb_le; lia).
+    assert (Upper : Z.leb z 4294967295 = true) by (apply Z.leb_le; lia).
+    now rewrite Lower, Upper.
+Qed.
+
+Theorem parse_heap_typeidx_prefix_complete n :
+  parser_complete
+    (@parse_heap_typeidx (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+    (fun bs x => signed_leb bs (Z.of_N x) /\
+      (x <= 4294967295)%N /\ length bs <= 5).
+Proof.
+  unfold parse_heap_typeidx.
+  eapply parser_complete_guardM with
+    (P := fun bs z => signed_leb bs z /\
+      (-4294967296 <= z <= 4294967295)%Z /\ length bs <= 5).
+  - apply parse_s33_prefix_complete.
+  - intros bs x [P [Range L]].
+    exists (Z.of_N x). split.
+    + apply N2Z.inj_le in Range.
+      pose proof (N2Z.is_nonneg x).
+      repeat split; auto; lia.
+    + assert (Nonnegative : Z.leb 0 (Z.of_N x) = true).
+      { apply Z.leb_le. apply N2Z.is_nonneg. }
+      now rewrite Nonnegative, N2Z.id.
+Qed.
+
+Theorem run_heap_typeidx_leb_complete bs x :
+  signed_leb bs (Z.of_N x) ->
+  (x <= 4294967295)%N ->
+  length bs <= 5 ->
+  run_parse_heap_typeidx bs = Some x.
+Proof.
+  intros Encoding Range Width.
+  unfold run_parse_heap_typeidx.
+  apply (@run_parser_complete N (fun _ => parse_heap_typeidx)
+    (fun bytes idx => signed_leb bytes (Z.of_N idx) /\
+      (idx <= 4294967295)%N /\ length bytes <= 5)).
+  - exact parse_heap_typeidx_prefix_complete.
+  - auto.
+Qed.
+
+Theorem run_heap_typeidx_leb_correct bs x :
+  run_parse_heap_typeidx bs = Some x <->
+  signed_leb bs (Z.of_N x) /\
+    (x <= 4294967295)%N /\ length bs <= 5.
+Proof.
+  split.
+  - intro R. split; [now apply run_heap_typeidx_leb_sound |].
+    apply binary_format_parser_properties.run_heap_typeidx_guards in R.
+    destruct R as [Range Width]. split; [exact Range | lia].
+  - intros [Encoding [Range Width]].
+    now apply run_heap_typeidx_leb_complete.
+Qed.
