@@ -175,6 +175,11 @@ Inductive reduce_simple : seq administrative_instruction -> seq administrative_i
         es <> [::AI_trap] ->
         lfill lh [::AI_trap] = es ->
         reduce_simple es [::AI_trap]
+  | rs_ref_as_non_null_null : forall t,
+    reduce_simple [:: $V (VAL_ref (VAL_ref_null t)); AI_basic BI_ref_as_non_null] [::AI_trap]
+  | rs_ref_as_non_null : forall ref,
+    (forall t, ref <> VAL_ref_null t) ->
+    reduce_simple [:: $V (VAL_ref ref); AI_basic BI_ref_as_non_null] [::$V (VAL_ref ref)]
 .
 
 Inductive reduce : host_state -> store_record -> frame -> list administrative_instruction ->

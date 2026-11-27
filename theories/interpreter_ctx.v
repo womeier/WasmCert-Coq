@@ -444,6 +444,8 @@ Ltac resolve_invalid_value_aux_expanded :=
 
 Ltac resolve_invalid_value :=
   repeat (resolve_invalid_value_aux_expanded; match goal with
+  | Href : is_true (is_ref_t ?t) |- _ =>
+      is_var t; destruct t; simpl in Href => //
   | Hvaltype : is_true (values_typing _ (rev (_ :: _)) _),
     Hsub: (Tf (_ ++ [::_]) _ <ti: _) |- _ =>
       specialize (operand_subtyping_suffix1 Hvaltype Hsub) as Hopsub; clear Hsub; simpl in * => //=
@@ -605,7 +607,8 @@ Proof.
       (* BI_call x *) x |
       (* BI_call_indirect x y *) x y  |
       (* BI_return_call x *) x |
-      (* BI_return_call_indirect x y *) x y ] |
+      (* BI_return_call_indirect x y *) x y |
+      (* BI_ref_as_non_null *) ] |
       (* AI_trap *) |
       (* AI_ref a *) a |
       (* AI_ref_extern a *) a |
@@ -1800,6 +1803,24 @@ the condition that all values should live in the operand stack. *)
         replace ($VN VAL_int32 v) with ($V (VAL_num (VAL_int32 v))); last done.
         by eapply r_return_call_indirect_failure, r_call_indirect_failure_bound; subst.
         
+    (* AI_basic BI_ref_as_non_null *)
+    - destruct vs0 as [|v vs0]; first by no_args.
+      assert_value_ref v.
+      destruct v as [t | a | a].
+      + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        by apply r_simple, rs_ref_as_non_null_null.
+      + apply <<hs, (s, (fc, lcs) :: ccs',
+                    (VAL_ref (VAL_ref_func a) :: vs0, es0), None), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        replace (AI_ref a) with ($V (VAL_ref (VAL_ref_func a))) => //.
+        by apply r_simple, rs_ref_as_non_null.
+      + apply <<hs, (s, (fc, lcs) :: ccs',
+                    (VAL_ref (VAL_ref_extern a) :: vs0, es0), None), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        replace (AI_ref_extern a) with ($V (VAL_ref (VAL_ref_extern a))) => //.
+        by apply r_simple, rs_ref_as_non_null.
+
     (* AI_trap *)
     - destruct ((vs0 == nil) && (es0 == nil)) eqn:Hscnil; move/andP in Hscnil.
       + destruct Hscnil as [Heq1 Heq2]; move/eqP in Heq1; move/eqP in Heq2; subst.

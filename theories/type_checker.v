@@ -113,6 +113,13 @@ Definition type_update_drop (ct : checker_type) : option checker_type :=
       Some <<ts', ct.(CT_unr)>>
   end.
 
+Definition type_update_ref_as_non_null (ct : checker_type) : option checker_type :=
+  match ct.(CT_type) with
+  | nil =>
+      if ct.(CT_unr) then Some <<[::T_bot], true>> else None
+  | t :: _ => if is_ref_t t then Some ct else None
+  end.
+
 (** With subtyping in Wasm 2.0, br_table now needs to find the common subtype to be consumed. **)
 
 Fixpoint common_lab_h (iss : seq tableidx) (lab_c : seq (seq value_type)) (ts : seq value_type) : option (seq value_type) :=
@@ -162,6 +169,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       | BI_const_vec v => type_update ts [::] [::T_vec (typeof_vec v)]
       | BI_ref_null t => type_update ts [::]  [::T_ref t]
       | BI_ref_is_null => type_update_ref_is_null ts
+      | BI_ref_as_non_null => type_update_ref_as_non_null ts
       | BI_ref_func x =>
           match lookup_N C.(tc_funcs) x with
           | Some _ =>

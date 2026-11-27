@@ -383,6 +383,11 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   be_typing C es (Tf t1s t2s) ->
   (Tf t1s t2s) <ti: (Tf t1s' t2s') ->
   be_typing C es (Tf t1s' t2s')
+(* Erased compatibility rule: nullability refinement will become explicit
+   when the shared reference type representation is extended. *)
+| bet_ref_as_non_null : forall C t,
+  is_ref_t t ->
+  be_typing C [::BI_ref_as_non_null] (Tf [::t] [::t])
 .
 
 Definition expr_typing (C: t_context) (bes: list basic_instruction) (ts: result_type) : Prop :=

@@ -230,10 +230,14 @@ Definition parse_ref_is_null {n} : byte_parser basic_instruction n :=
 Definition parse_ref_func {n} : byte_parser basic_instruction n :=
   exact_byte xd2 &> (BI_ref_func <$> parse_funcidx).
 
+Definition parse_ref_as_non_null {n} : byte_parser basic_instruction n :=
+  exact_byte xd4 $> BI_ref_as_non_null.
+
 Definition parse_reference_instruction {n} : byte_parser basic_instruction n :=
   parse_ref_null <|>
   parse_ref_is_null <|>
-  parse_ref_func.
+  parse_ref_func <|>
+  parse_ref_as_non_null.
 
 
 (* Variable instructions *)

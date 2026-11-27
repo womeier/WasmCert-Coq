@@ -576,6 +576,7 @@ Instructions in this group affect the flow of control.
   | BI_call_indirect : tableidx -> typeidx -> basic_instruction
   | BI_return_call : funcidx -> basic_instruction                                          
   | BI_return_call_indirect : tableidx -> typeidx -> basic_instruction                                          
+  | BI_ref_as_non_null
   .
 
 

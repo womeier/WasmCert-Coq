@@ -14,6 +14,14 @@ Proof. vm_compute. reflexivity. Qed.
 Lemma test_nop : check_toks (x01 :: nil) parse_be = Running.Singleton BI_nop.
 Proof. vm_compute. reflexivity. Qed.
 
+Lemma test_ref_as_non_null :
+  run_parse_bes (xd4 :: nil) = Some (BI_ref_as_non_null :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma print_ref_as_non_null :
+  binary_of_expr (BI_ref_as_non_null :: nil) = xd4 :: x0b :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
 (** An example program. **)
 Definition test :=
   BI_if (BT_valtype None) (BI_testop T_i64 TO_eqz :: nil) (BI_testop T_i64 TO_eqz :: nil).

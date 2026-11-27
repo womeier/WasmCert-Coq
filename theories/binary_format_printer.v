@@ -228,6 +228,7 @@ Fixpoint binary_of_be (be : basic_instruction) : list byte :=
   | BI_ref_null t => xd0 :: binary_of_reference_type t :: nil
   | BI_ref_is_null => xd1 :: nil
   | BI_ref_func x => xd2 :: binary_of_idx x
+  | BI_ref_as_non_null => [::xd4]
                         
   | BI_drop => x1a :: nil
   | BI_select None => x1b :: nil
