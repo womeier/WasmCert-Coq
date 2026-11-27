@@ -1,8 +1,6 @@
 (** Address-aware memory operations over the existing, verified [Memory]
     interface.  No host allocation or integer conversion is trusted here.
 
-    The existing list/vector implementations can refuse growth above 4 GiB,
-    which is a permitted growth failure but is not full memory64 capacity.
     [allocate] checks the interface's capped allocation result, so a large
     request can never silently instantiate a truncated memory.
 

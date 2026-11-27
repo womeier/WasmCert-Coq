@@ -87,9 +87,26 @@ let () =
   check "memory64 new page initialized"
     (M.load_byte memory m' (value A.AT_i64 "65536") z =
        Some wasm_memory_default_byte);
-  check "large allocation is rejected, not truncated"
-    (M.allocate memory A.{ memory_address_type = AT_i64;
-       memory_limits = limits "65537" None } = None);
+  let large = some "memory64 sparse allocation above 4 GiB"
+      (M.allocate memory A.{ memory_address_type = AT_i64;
+       memory_limits = limits "65537" None }) in
+  check "large allocation is exact, not truncated"
+    (equal (M.size memory large) (n "65537"));
+  check "large allocation reads above 4 GiB"
+    (M.load_byte memory large (value A.AT_i64 "4294967296") z =
+       Some wasm_memory_default_byte);
+  let full = some "memory64 full-address-space allocation"
+      (M.allocate memory A.{ memory_address_type = AT_i64;
+       memory_limits = limits "281474976710656" None }) in
+  check "full allocation has 2^48 pages"
+    (equal (M.size memory full) (n "281474976710656"));
+  check "full allocation reads last u64 byte"
+    (M.load_byte memory full (value A.AT_i64 "18446744073709551615") z =
+       Some wasm_memory_default_byte);
+  check "full allocation rejects wrapping effective address"
+    (M.load_byte memory full (value A.AT_i64 "18446744073709551615") one = None);
+  check "full memory cannot grow beyond address width"
+    (M.grow memory full (value A.AT_i64 "1") = None);
   let byte s = Byte.repr (n s) in
   let fill_one data at b = some "memory64 fill"
       (U.fill memory_instance data (value A.AT_i64 at)

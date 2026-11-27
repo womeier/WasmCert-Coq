@@ -10,6 +10,21 @@
   (libraries wasmcert_extracted parray zarith))
 
 (rule
+ (target memory_capacity_binary.wast)
+ (deps memory_capacity_binary.py)
+ (action
+  (with-stdout-to %{target}
+   (run python3 %{dep:memory_capacity_binary.py}))))
+
+(rule
+ (alias runtest)
+ (deps memory_capacity_binary.wast ../run_wast.sh)
+ (action
+  (setenv EXE %{exe:../src/wasm_coq_interpreter.exe}
+   (setenv JOBS 1
+    (run bash %{dep:../run_wast.sh} . memory_capacity_binary)))))
+
+(rule
  (alias runtest)
  (deps run_wast_test.sh ../run_wast.sh)
  (action (run bash %{dep:run_wast_test.sh} %{dep:../run_wast.sh})))

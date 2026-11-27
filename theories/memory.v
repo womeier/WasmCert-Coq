@@ -17,7 +17,10 @@ Section Memory.
   (* Some constants regarding Wasm memory *)
   Definition page_size : N := 65536%N.
 
-  Definition page_limit : N := 65536%N.
+  (* Storage capacity covers the full memory64 address space.  Per-memory
+     address-width limits are a validation/execution concern, not a property
+     of the backend shared by all memories in a store. *)
+  Definition page_limit : N := 281474976710656%N.
 
   Definition byte_limit : N := N.mul page_size page_limit.
 
