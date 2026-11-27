@@ -175,7 +175,22 @@ let load_wast_module verbosity hs s ovar moddef mod_counter =
   | Encoded (modnamestr, bin_module) -> 
     let* m = Parse.parse_module verbosity false bin_module in
     let modname = if modnamestr = "" then ("default_module_" ^ (string_of_int mod_counter)) else modnamestr in
+    let* varname = begin match ovar with
+    | Some v ->
+      let (_, varmap) = hs in
+      begin match StringMap.find_opt v.it varmap with
+      | Some _ -> error ("Module variable name " ^ v.it ^ " already exists")
+      | None -> pure v.it
+      end
+    | None -> pure ""
+    end in
     let* (hs', s', inst_res) = Execute.instantiate_host verbosity hs s modname m in
+    let hs' =
+      if varname != "" then
+        let (exts, varmap) = hs' in
+        (exts, StringMap.add varname modname varmap)
+      else hs'
+    in
       debug_info verbosity stage (fun _ -> "Successfully instantiated module " ^ modname ^ ".\n");
       pure (hs', s', inst_res, mod_counter+1, modname)
   | Quoted (modnamestr, text_module) -> 

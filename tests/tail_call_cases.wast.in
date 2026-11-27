@@ -35,10 +35,10 @@
 (assert_trap (invoke "indirect" (i32.const 3)) "undefined element")
 
 ;; Imported tail calls must enter the callee's instance, not reuse the caller's.
-(module
+(module $tail-provider
   (global i32 (i32.const 42))
   (func (export "target") (result i32) (global.get 0)))
-(register "tail-provider")
+(register "tail-provider" $tail-provider)
 (module
   (import "tail-provider" "target" (func $target (result i32)))
   (global i32 (i32.const 7))

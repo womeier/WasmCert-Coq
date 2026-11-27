@@ -7,8 +7,8 @@
 (assert_trap (invoke "indirect" (i32.const 1)) "indirect call type mismatch")
 (assert_trap (invoke "indirect" (i32.const 2)) "uninitialized element")
 (assert_trap (invoke "indirect" (i32.const 3)) "undefined element")
-(module binary "\00\61\73\6d\01\00\00\00\01\05\01\60\00\01\7f\03\02\01\00\06\06\01\7f\00\41\2a\0b\07\0a\01\06\74\61\72\67\65\74\00\00\0a\06\01\04\00\23\00\0b")
-(register "tail-provider")
+(module $tail-provider binary "\00\61\73\6d\01\00\00\00\01\05\01\60\00\01\7f\03\02\01\00\06\06\01\7f\00\41\2a\0b\07\0a\01\06\74\61\72\67\65\74\00\00\0a\06\01\04\00\23\00\0b\00\15\04\6e\61\6d\65\00\0e\0d\74\61\69\6c\2d\70\72\6f\76\69\64\65\72")
+(register "tail-provider" $tail-provider)
 (module binary "\00\61\73\6d\01\00\00\00\01\05\01\60\00\01\7f\02\18\01\0d\74\61\69\6c\2d\70\72\6f\76\69\64\65\72\06\74\61\72\67\65\74\00\00\03\02\01\00\06\06\01\7f\00\41\07\0b\07\12\01\0e\63\72\6f\73\73\2d\69\6e\73\74\61\6e\63\65\00\01\0a\06\01\04\00\12\00\0b\00\10\04\6e\61\6d\65\01\09\01\00\06\74\61\72\67\65\74")
 (assert_return (invoke "cross-instance") (i32.const 42))
 (assert_invalid
