@@ -354,6 +354,12 @@ Definition interp_alloc_module (s : store_record) (m : module) (imps : list exte
   let '(s', i_ds) := alloc_datas s5 m.(mod_datas) in
   (s', inst).
 
+Definition module_init_frame (s : store_record) (m : module) (v_imps : list extern_value) : frame :=
+  Build_frame nil
+    (Build_moduleinst nil
+      (ext_funcs v_imps ++ iota_N (length s.(s_funcs)) (length m.(mod_funcs)))
+      nil nil (ext_globals v_imps) nil nil nil).
+
 (* Use a monad for error reporting at some point? *)
 Definition interp_instantiate (hs: host_state) (s : store_record) (m : module) (v_imps : list extern_value) : option (host_state * store_record * frame * list basic_instruction) * string :=
   match module_type_checker m with
@@ -362,18 +368,7 @@ Definition interp_instantiate (hs: host_state) (s : store_record) (m : module) (
       match those (map (external_type_checker s) v_imps) with
       | Some t_imps =>
           if all2 import_subtyping t_imps t_imps_mod then
-            let inst_init :=
-              {|
-                inst_types := nil;
-                inst_funcs := (ext_funcs v_imps) ++ (map N.of_nat (iota (length (s_funcs s)) (length (mod_funcs m))));
-                inst_tables := nil;
-                inst_mems := nil;
-                inst_globals := ext_globals v_imps;
-                inst_elems := nil;
-                inst_datas := nil;
-                inst_exports := nil;
-              |} in
-            let f_init := Build_frame nil inst_init in
+            let f_init := module_init_frame s m v_imps in
             match interp_global_chain s f_init m.(mod_globals) with
             | None => (None, "Error in evaluating global initialisers")
             | Some (s_init, f_init_final, g_inits) =>
