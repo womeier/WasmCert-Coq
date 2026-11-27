@@ -69,6 +69,29 @@ Lemma return_call_trailing_bytes :
     run_parse_be (x12 :: x00 :: x00 :: nil) = None.
 Proof. vm_compute. reflexivity. Qed.
 
+Lemma return_call_indirect_u32_max_roundtrip :
+    run_parse_be
+      (binary_of_be (BI_return_call_indirect 4294967295%N 4294967295%N)) =
+      Some (BI_return_call_indirect 4294967295%N 4294967295%N).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma return_call_indirect_padded_indices :
+    run_parse_be
+      (x13 :: x80 :: x80 :: x80 :: x80 :: x00 ::
+       x81 :: x80 :: x80 :: x80 :: x00 :: nil) =
+      Some (BI_return_call_indirect 1%N 0%N).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma return_call_indirect_type_overflow :
+    run_parse_be
+      (x13 :: xff :: xff :: xff :: xff :: x10 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma return_call_indirect_table_overflow :
+    run_parse_be
+      (x13 :: x00 :: xff :: xff :: xff :: xff :: x10 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
 (** An example program. **)
 Definition test :=
   BI_if (BT_valtype None) (BI_testop T_i64 TO_eqz :: nil) (BI_testop T_i64 TO_eqz :: nil).

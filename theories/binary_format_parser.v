@@ -3,7 +3,7 @@
    gallais.github.io/pdf/agdarsec18.pdf
 *)
 
-From Wasm Require Import datatypes_properties typing leb128 utf8.
+From Wasm Require Import datatypes_properties typing leb128 utf8 binary_uleb128.
 From compcert Require Import Integers.
 From parseque Require Import Parseque.
 From Stdlib Require Import Strings.Byte ZArith.
@@ -214,11 +214,15 @@ Definition parse_call_indirect {n} : byte_parser basic_instruction n :=
   (((fun typ tab => BI_call_indirect tab typ) <$> parse_typeidx) <*> parse_tableidx).
 
 Definition parse_return_call {n} : byte_parser basic_instruction n :=
-  exact_byte x12 &> (extract_funcidx BI_return_call <$> parse_funcidx).
+  exact_byte x12 &> (BI_return_call <$> parse_bounded_u32).
 
 Definition parse_return_call_indirect {n} : byte_parser basic_instruction n :=
   exact_byte x13 &>
-  (((fun typ tab => BI_return_call_indirect tab typ) <$> parse_typeidx) <*> parse_tableidx).
+  ((fun '(typ, tab) => BI_return_call_indirect tab typ) <$>
+    parse_bounded_u32_pair).
+
+Definition parse_tail_call {n} : byte_parser basic_instruction n :=
+  parse_return_call <|> parse_return_call_indirect.
 
 (* Reference instructions *)
 Definition parse_ref_null {n}: byte_parser basic_instruction n :=
@@ -846,6 +850,7 @@ Definition language : [ Language ] := Fix Language (fun k rec =>
   let parse_if :=
     (fun '(x, (y, z)) => BI_if x y z) <$> (exact_byte x04 &> parse_if_body) in
   let parse_be :=
+    parse_tail_call <|>
     parse_unreachable <|>
     parse_nop <|>
     parse_block <|>
@@ -857,8 +862,6 @@ Definition language : [ Language ] := Fix Language (fun k rec =>
     parse_return <|>
     parse_call <|>
     parse_call_indirect <|>
-    parse_return_call <|>
-    parse_return_call_indirect <|>
     parse_reference_instruction <|>
     parse_parametric_instruction <|>
     parse_variable_instruction <|>
