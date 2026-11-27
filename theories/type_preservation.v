@@ -360,6 +360,15 @@ Proof.
   }
   destruct Hoption4 as [tds [Hthosed Hdeq]]; rewrite Hthosed.
   rewrite -eqseq_all in Hdeq; move/eqP in Hdeq; subst.
+  (* Tags are immutable and retain their exact parameter types. *)
+  eapply those_map_impl in Hoption5; last first.
+  { move => x y Hlookup.
+    instantiate (3 := lookup_N (s_tags s')).
+    exists y; split; first by eapply store_extension_lookup_tag; eauto.
+    by apply eq_refl.
+  }
+  destruct Hoption5 as [jts [Hthosej Hjeq]]; rewrite Hthosej.
+  rewrite -eqseq_all in Hjeq; move/eqP in Hjeq; subst.
   eexists; split; first by eauto.
   unfold context_extension => /=; repeat rewrite eq_refl => /=.
   by rewrite Htr Hmr.

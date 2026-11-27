@@ -91,7 +91,8 @@ Definition module_func_type_checker (c : t_context) (m : module_func) : bool :=
       tc_locals := List.app c.(tc_locals) (List.app tn t_locs);
       tc_labels := tm :: c.(tc_labels);
       tc_return := Some tm;
-      tc_refs := c.(tc_refs)
+      tc_refs := c.(tc_refs);
+      tc_tags := c.(tc_tags)
     |} in
     type_checker.b_e_type_checker c' b_es (Tf [::] tm) && (default_vals t_locs != None)
   end.
@@ -187,7 +188,8 @@ Definition module_type_checker (m : module) : option ((list extern_type) * (list
       tc_locals := nil;
       tc_labels := nil;
       tc_return := None;
-      tc_refs := xs
+      tc_refs := xs;
+      tc_tags := map (gen_tag_instance tfs) tags
             |} in
     let c' := {|
       tc_types := nil;
@@ -200,7 +202,8 @@ Definition module_type_checker (m : module) : option ((list extern_type) * (list
       tc_locals := nil;
       tc_labels := nil;
       tc_return := None;
-      tc_refs := c.(tc_refs)
+      tc_refs := c.(tc_refs);
+      tc_tags := nil
     |} in
     if seq.all (module_func_type_checker c) fs &&
        seq.all (module_table_type_checker c) ts &&

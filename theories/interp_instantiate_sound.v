@@ -12,7 +12,22 @@ Set SsrOldRewriteGoalsOrder.
 Section Host.
 
 Context `{ho: host}.
-  
+
+Lemma module_tag_type_checker_spec types x :
+  module_tag_type_checker types x = true <->
+  exists ps, lookup_N types x = Some (Tf ps nil).
+Proof.
+  unfold module_tag_type_checker.
+  destruct (lookup_N types x) as [[ps results]|] eqn:Hlookup.
+  - destruct results; split; intro H.
+    + by exists ps.
+    + reflexivity.
+    + discriminate.
+    + by destruct H as [ps' H]; discriminate.
+  - split; intro H; [discriminate|].
+    by destruct H as [ps H]; discriminate.
+Qed.
+
 Lemma module_type_checker_sound: forall m t_imps t_exps str,
   module_type_checker m = (Some (t_imps, t_exps), str) ->
   module_typing m t_imps t_exps.
@@ -176,10 +191,7 @@ Proof.
   { apply Forall_spec.
     move => n x Hnth.
     eapply all_projection in Htags; eauto.
-    unfold module_tag_type_checker in Htags.
-    destruct (lookup_N mod_types x) as [[ps results]|] eqn:Hlookup => //.
-    destruct results => //.
-    by exists ps.
+    by apply module_tag_type_checker_spec.
   }
 Qed.
 

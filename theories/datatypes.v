@@ -807,6 +807,7 @@ Record t_context : Set := {
   tc_labels : list result_type;
   tc_return : option result_type;
   tc_refs : list funcidx;
+  tc_tags : list result_type;
 }.
 
 Inductive result : Type :=

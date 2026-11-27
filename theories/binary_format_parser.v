@@ -1278,8 +1278,8 @@ Definition parse_module_sections_after {n} {A} (f: byte_parser A n) : byte_parse
                mod_datas := datas;
                mod_start := ostart;
                mod_imports := imports;
-                mod_exports := exports
-                ; mod_tags := option_to_list otags
+                mod_exports := exports;
+                mod_tags := option_to_list otags
                |}
              else None
            else None

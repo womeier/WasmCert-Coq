@@ -22,7 +22,7 @@ Section Operations.
 Definition lookup_N {T: Type} (l: list T) (n: N) : option T :=
   List.nth_error l (N.to_nat n).
 
-Definition empty_t_context := Build_t_context nil nil nil nil nil nil nil nil nil None nil.
+Definition empty_t_context := Build_t_context nil nil nil nil nil nil nil nil nil None nil nil.
 
 (** read `len` bytes from `m` starting at `start_idx` *)
 Definition read_bytes (m : meminst) (start_idx : N) (len : nat) : option bytes :=
@@ -240,6 +240,7 @@ Definition global_agree (t1 t2: global_type) : bool :=
   t1 == t2.
           
 Definition context_agree (C C': t_context) : bool :=
+  (C.(tc_tags) == C'.(tc_tags)) &&
   (C.(tc_types) == C'.(tc_types)) &&
   (all2 func_agree C.(tc_funcs) C'.(tc_funcs)) &&
   (all2 table_agree C.(tc_tables) C'.(tc_tables)) &&
@@ -1230,6 +1231,7 @@ Definition component_extension {T: Type} (ext_rel: T -> T -> bool) (l1 l2: list 
    the table/memory grow instructions modify the corresponding types.
 *)
 Definition context_extension C C' : bool :=
+  (C.(tc_tags) == C'.(tc_tags)) &&
   (C.(tc_types) == C'.(tc_types)) &&
   (C.(tc_funcs) == C'.(tc_funcs)) &&
   (all2 table_type_extension C.(tc_tables) C'.(tc_tables)) &&

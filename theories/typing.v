@@ -141,7 +141,8 @@ Definition upd_local_label_return C loc lab ret :=
     loc
     lab
     ret
-    (tc_refs C).
+    (tc_refs C)
+    (tc_tags C).
 
 Definition upd_refs C refs :=
 {|
@@ -155,7 +156,8 @@ Definition upd_refs C refs :=
   tc_locals := tc_locals C;
   tc_labels := tc_labels C;
   tc_return := tc_return C;
-  tc_refs := refs
+  tc_refs := refs;
+  tc_tags := tc_tags C
 |}.
 
 Definition upd_local C loc :=
@@ -461,7 +463,7 @@ Definition exportinst_typing (s: store_record) (expi: exportinst) : option ok :=
 This definition is currently computable -- hopefully it remains so in the future; otherwise we need to make it back to a Prop/Bool.
  **)
 Definition inst_typing (s : store_record) (inst : moduleinst) : option t_context :=
-  let '{| inst_types := ts; inst_funcs := fs; inst_tables := tbs; inst_mems := ms; inst_globals := gs; inst_elems := es; inst_datas := ds; inst_exports := exps |} := inst in
+  let '{| inst_types := ts; inst_funcs := fs; inst_tables := tbs; inst_mems := ms; inst_globals := gs; inst_elems := es; inst_datas := ds; inst_exports := exps; inst_tags := js |} := inst in
   if (all functype_valid ts) then
     match those (map (ext_func_typing s) fs) with
     | Some tfs =>
@@ -480,8 +482,12 @@ Definition inst_typing (s : store_record) (inst : moduleinst) : option t_context
                                                 | Some di => datainst_typing s di
                                                 | None => None
                                                 end) ds) with
-                        | Some tds =>
-                            Some (Build_t_context ts tfs tts tms tgs tes tds nil nil None (iota_N 0 (length fs)))
+                         | Some tds =>
+                             match those (map (lookup_N s.(s_tags)) js) with
+                             | Some jts =>
+                                 Some (Build_t_context ts tfs tts tms tgs tes tds nil nil None (iota_N 0 (length fs)) jts)
+                             | None => None
+                             end
                         | None => None
                         end
                     | None => None

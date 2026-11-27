@@ -932,10 +932,10 @@ Proof.
     unfold ext_global_typing in Hoption5.
     remove_bools_options; simpl in *.
     unfold lookup_N in *.
-    rewrite Hoption1 in Hoption8.
-    injection Hoption8 as <-.
-    rewrite Hoption0 in Hoption5.
-    by injection Hoption5 as <-.
+    repeat match goal with
+    | H1: ?e = ?x, H2: ?e = ?y |- _ => rewrite H1 in H2
+    | H: Some ?x = Some ?y |- _ => injection H; intros; subst; clear H
+    end; done.
   }
 Qed.
 

@@ -531,6 +531,7 @@ Definition module_typing (m : module) (impts : list extern_type) (expts : list e
     tc_labels := nil;
     tc_return := None;
     tc_refs := xs;
+    tc_tags := map (gen_tag_instance tfs) tags;
   |} in
   let c' := {|
     tc_types := nil;
@@ -544,6 +545,7 @@ Definition module_typing (m : module) (impts : list extern_type) (expts : list e
     tc_labels := nil;
     tc_return := None;
     tc_refs := xs;
+    tc_tags := nil;
   |} in
   List.Forall functype_valid tfs /\
   List.Forall2 (module_func_typing c) fs fts /\

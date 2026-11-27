@@ -19,12 +19,12 @@ Section Host.
 Context `{ho: host}.
 
 (* Replacing the imported types by subtypes preserves the typing of a program *)
-Lemma bet_import_subtyping: forall ts fts tts mts gts ets dts locs labs ret refs imps1 imps2 bes tf,
+Lemma bet_import_subtyping: forall ts fts tts mts gts ets dts locs labs ret refs tags imps1 imps2 bes tf,
     List.Forall2 import_subtyping imps2 imps1 ->
-    be_typing (Build_t_context ts (ext_t_funcs imps1 ++ fts) (ext_t_tables imps1 ++ tts) (ext_t_mems imps1 ++ mts) (ext_t_globals imps1 ++ gts) ets dts locs labs ret refs) bes tf ->
-    be_typing (Build_t_context ts (ext_t_funcs imps2 ++ fts) (ext_t_tables imps2 ++ tts) (ext_t_mems imps2 ++ mts) (ext_t_globals imps2 ++ gts) ets dts locs labs ret refs) bes tf.
+    be_typing (Build_t_context ts (ext_t_funcs imps1 ++ fts) (ext_t_tables imps1 ++ tts) (ext_t_mems imps1 ++ mts) (ext_t_globals imps1 ++ gts) ets dts locs labs ret refs tags) bes tf ->
+    be_typing (Build_t_context ts (ext_t_funcs imps2 ++ fts) (ext_t_tables imps2 ++ tts) (ext_t_mems imps2 ++ mts) (ext_t_globals imps2 ++ gts) ets dts locs labs ret refs tags) bes tf.
 Proof.
-  move => ts fts tts mts gts ets dts locs labs ret refs imps1 imps2 bes tf Hall2 Hbet.
+  move => ts fts tts mts gts ets dts locs labs ret refs tags imps1 imps2 bes tf Hall2 Hbet.
   eapply context_agree_be_typing; eauto.
   unfold context_agree => /=.
   repeat rewrite eq_refl => /=.
@@ -123,7 +123,7 @@ Proof.
   destruct m; unfold module_typing in Hmodtype; simpl in *.
    destruct Hmodtype as [fts [tts [mts [gts [rts [dts [Hmtypes [Hmfunctype [Hmtabletype [Hmmemtype [Hmemcount [Hmglobaltype [Hmelemtype [Hmdatatype [Hstarttype [Hmimptype [Hmexptype [Hexpunique Htags]]]]]]]]]]]]]]]]]].
 
-  remember (Build_t_context mod_types (ext_t_funcs t_imps ++ fts) (ext_t_tables t_imps ++ tts) (ext_t_mems t_imps ++ mts) (ext_t_globals t_imps ++ gts) rts dts nil nil None (iota_N 0 (length inst.(inst_funcs)))) as C.
+  remember (Build_t_context mod_types (ext_t_funcs t_imps ++ fts) (ext_t_tables t_imps ++ tts) (ext_t_mems t_imps ++ mts) (ext_t_globals t_imps ++ gts) rts dts nil nil None (iota_N 0 (length inst.(inst_funcs))) (map (gen_tag_instance mod_types) mod_tags)) as C.
 
   assert (inst_typing s' f.(f_inst) = Some C) as HIT.
   {
@@ -418,8 +418,23 @@ Proof.
       }
     }
 
+    assert (those (map (lookup_N (s_tags s6)) inst_tags) =
+            Some (map (gen_tag_instance inst_types) mod_tags)) as Hjit.
+    { subst inst_tags.
+      apply those_spec.
+      { by rewrite List.length_map iota_N_length List.length_map. }
+      move => n ps Hnth.
+      rewrite nth_error_map' iota_N_lookup => /=;
+        last by apply nth_error_Some_length in Hnth;
+          rewrite List.length_map in Hnth; lias.
+      rewrite Hconjl9.
+      unfold lookup_N; rewrite Nnat.Nat2N.id List.nth_error_app2;
+        last by lias.
+      replace (_ + n - _)%coq_nat with n by lias.
+      by rewrite Hnth.
+    }
     replace (all functype_valid inst_types) with true; last by symmetry; apply Forall_all.
-    rewrite Hfit Htit Hmit Hgit Heit Hdit.
+    rewrite Hfit Htit Hmit Hgit Heit Hdit Hjit.
     reflexivity.
   }
 
