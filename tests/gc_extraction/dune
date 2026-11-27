@@ -1,0 +1,13 @@
+; Exercise the same extracted definitions as the interpreter's Utility.GC.
+; Copying the generated module avoids changing the interpreter's module layout.
+(copy_files ../../src/extract.ml)
+(copy_files ../../src/extract.mli)
+(copy_files ../../src/SIMD_ops.ml)
+(copy_files ../../src/SIMD_ops.mli)
+(copy_files ../../src/utils.ml)
+(copy_files ../../src/utils.mli)
+
+(test
+ (name gc_extraction_tests)
+ (libraries wasm parray zarith)
+ (flags (:standard -w -20-27-32-39-50-67)))

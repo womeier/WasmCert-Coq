@@ -6,6 +6,7 @@ From Wasm Require Import numerics memory_vec binary_format_parser text_format_pa
 From ExtLib Require Import Structures.Monad IdentityMonad.
 
 From Wasm Require Import memory_vec binary_format_parser text_format_parser.
+From Wasm Require Import gc_numerics gc_binary gc_types.
 
 (* see common.v *)
 Set SsrOldRewriteGoalsOrder.
@@ -59,6 +60,22 @@ Module Monadic_host (PH: Parametric_host).
 End Monadic_host.
   
 Module Utility.
+
+  (** Reusable GC primitives.  These exports do not enable GC instructions
+      in the existing module validator or interpreter. *)
+  Module GC.
+    Definition ref_i31 := ref_i31.
+    Definition i31_get := i31_get.
+    Definition i31_get_nullable := i31_get_nullable.
+    Definition pack_field := pack_field.
+    Definition unpack_field := unpack_field.
+    Definition heap_subtyping := abstract_heap_subtyping.
+    Definition reference_subtyping := abstract_reference_subtyping.
+    Definition encode_reference := encode_abstract_reference.
+    Definition decode_reference := decode_abstract_reference.
+    Definition encode_packed := encode_packed_type.
+    Definition decode_packed := decode_packed_type.
+  End GC.
   
   Definition vali32_of_Z (z: Z) : value :=
     VAL_num (VAL_int32 (Wasm_int.int_of_Z i32m z)).
