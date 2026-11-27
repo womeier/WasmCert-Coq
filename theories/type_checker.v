@@ -170,6 +170,10 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       | BI_ref_null t => type_update ts [::]  [::T_ref (Ref_type true t)]
       | BI_ref_is_null => type_update_ref_is_null ts
       | BI_ref_as_non_null => type_update_ref_as_non_null ts
+      (* Parsing and dispatch are available, but accepting these instructions
+         requires closed indexed function reference typing. Never substitute
+         abstract funcref validation or a dynamic signature-checking trap. *)
+      | BI_call_ref _ | BI_return_call_ref _ => None
       | BI_ref_func x =>
           match lookup_N C.(tc_funcs) x with
           | Some _ =>

@@ -31,6 +31,13 @@ cases = [
     ("numeric_operand", "4100d4", 123, "instantiation error:"),
     ("missing_operand", "d4", 123, "instantiation error:"),
     ("unreachable", "00d41a4107", 0, "Execution returned a trap"),
+    # Genuine invalid operands: these must reach validation, not fail decoding.
+    # Positive typed-call validation still depends on closed indexed types.
+    ("numeric_call_ref", "41001400", 123, "instantiation error:"),
+    ("numeric_return_call_ref", "41001500", 123, "instantiation error:"),
+    ("missing_call_ref_operand", "1400", 123, "instantiation error:"),
+    ("truncated_call_ref_index", "1480", 123, "error in parsing module"),
+    ("overflow_call_ref_index", "148080808010", 123, "error in parsing module"),
 ]
 
 exe = str(pathlib.Path(sys.argv[1]).resolve())

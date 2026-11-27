@@ -220,6 +220,12 @@ Definition parse_return_call_indirect {n} : byte_parser basic_instruction n :=
   exact_byte x13 &>
   (((fun typ tab => BI_return_call_indirect tab typ) <$> parse_typeidx) <*> parse_tableidx).
 
+Definition parse_call_ref {n} : byte_parser basic_instruction n :=
+  exact_byte x14 &> (BI_call_ref <$> parse_typeidx).
+
+Definition parse_return_call_ref {n} : byte_parser basic_instruction n :=
+  exact_byte x15 &> (BI_return_call_ref <$> parse_typeidx).
+
 (* Reference instructions *)
 Definition parse_ref_null {n}: byte_parser basic_instruction n :=
   exact_byte xd0 &> ((fun t => BI_ref_null (ref_heap t)) <$> parse_reference_type).
@@ -863,6 +869,8 @@ Definition language : [ Language ] := Fix Language (fun k rec =>
     parse_call_indirect <|>
     parse_return_call <|>
     parse_return_call_indirect <|>
+    parse_call_ref <|>
+    parse_return_call_ref <|>
     parse_reference_instruction <|>
     parse_parametric_instruction <|>
     parse_variable_instruction <|>
