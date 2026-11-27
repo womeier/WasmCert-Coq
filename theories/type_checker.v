@@ -174,6 +174,14 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
          requires closed indexed function reference typing. Never substitute
          abstract funcref validation or a dynamic signature-checking trap. *)
       | BI_call_ref _ | BI_return_call_ref _ => None
+      | BI_br_on_non_null x =>
+          match lookup_N C.(tc_labels) x with
+          | Some label_types =>
+              if (label_types != nil) && is_ref_t (head T_bot label_types)
+              then type_update ts label_types (behead label_types)
+              else None
+          | None => None
+          end
       | BI_ref_func x =>
           match lookup_N C.(tc_funcs) x with
           | Some _ =>

@@ -38,6 +38,13 @@ cases = [
     ("missing_call_ref_operand", "1400", 123, "instantiation error:"),
     ("truncated_call_ref_index", "1480", 123, "error in parsing module"),
     ("overflow_call_ref_index", "148080808010", 123, "error in parsing module"),
+    ("branch_function", "0270d200d600d0700bd1", 0, "i32.const 0"),
+    ("branch_null_fallthrough", "0270d070d600d0700bd1", 0, "i32.const 1"),
+    ("branch_external_null", "026fd06fd600d06f0bd1", 0, "i32.const 1"),
+    ("branch_missing_ref_result", "0240d070d6000b4107", 123, "instantiation error:"),
+    ("branch_numeric_result", "027fd070d60041070b", 123, "instantiation error:"),
+    ("branch_numeric_operand", "02704100d600d0700bd1", 123, "instantiation error:"),
+    ("branch_invalid_label", "d070d6014107", 123, "instantiation error:"),
 ]
 
 exe = str(pathlib.Path(sys.argv[1]).resolve())

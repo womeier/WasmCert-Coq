@@ -180,6 +180,12 @@ Inductive reduce_simple : seq administrative_instruction -> seq administrative_i
   | rs_ref_as_non_null : forall ref,
     (forall t, ref <> VAL_ref_null t) ->
     reduce_simple [:: $V (VAL_ref ref); AI_basic BI_ref_as_non_null] [::$V (VAL_ref ref)]
+  | rs_br_on_non_null_null : forall x h,
+    reduce_simple [::$V (VAL_ref (VAL_ref_null h)); AI_basic (BI_br_on_non_null x)] [::]
+  | rs_br_on_non_null : forall x ref,
+    (forall h, ref <> VAL_ref_null h) ->
+    reduce_simple [::$V (VAL_ref ref); AI_basic (BI_br_on_non_null x)]
+      [::$V (VAL_ref ref); AI_basic (BI_br x)]
 .
 
 Inductive reduce : host_state -> store_record -> frame -> list administrative_instruction ->

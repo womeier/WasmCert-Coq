@@ -599,6 +599,7 @@ Instructions in this group affect the flow of control.
   | BI_ref_as_non_null
   | BI_call_ref : typeidx -> basic_instruction
   | BI_return_call_ref : typeidx -> basic_instruction
+  | BI_br_on_non_null : labelidx -> basic_instruction
   .
 
 

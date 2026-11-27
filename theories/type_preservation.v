@@ -139,7 +139,18 @@ Proof.
     + invert_e_typing.
       by resolve_e_typing.
     + by apply v_to_e_const.
+  - rewrite size_cat /= addn1 subn1 drop_size_cat in Hsub.
+    rewrite size_cat /= addn1 subn1 take_size_cat in Hprincipal.
+    instantiate (1 := extr).
+    instantiate (1 := nil) => /=.
+    Transparent instr_subtyping.
+    unfold instr_subtyping.
+    exists nil, nil, (extr ++ [::ts_value]), extr.
+    repeat split => //=; by resolve_subtyping.
+  Unshelve.
+  all: try by resolve_subtyping.
 Qed.
+Opaque instr_subtyping.
 
 (* Various properties preserved by a store extension *)
 Lemma ext_func_typing_extension: forall s s' a tf,

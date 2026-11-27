@@ -1551,6 +1551,18 @@ Proof.
       eapply bet_subtyping; first by eapply bet_return_call_indirect with (t1s := r0) (t2s := r); eauto.
       by eauto.
     + by eapply type_update_ref_as_non_null_bet; eauto.
+    + destruct r as [|t labels] => //=.
+      simpl in *.
+      apply nth_error_map in Hoption as [source_labels [Hnth Hrev]].
+      apply (f_equal rev) in Hrev.
+      rewrite revK rev_cons -cats1 in Hrev.
+      subst source_labels.
+      eapply type_update_agree_subtyping in Hupdate; eauto.
+      destruct Hupdate as [tn [Hagree' Hsub]].
+      rewrite rev_cons -cats1 in Hsub.
+      exists tn; split => //.
+      eapply bet_subtyping; first by eapply bet_br_on_non_null; eauto.
+      exact Hsub.
 Qed.
       
 Lemma tc_to_bet_list: forall C cts bes tm cts',

@@ -74,6 +74,13 @@ Lemma parse_reference_call_single_byte (tail : bool) (b : Byte.byte) :
     else None.
 Proof. destruct tail, b; vm_compute; reflexivity. Qed.
 
+Lemma parse_br_on_non_null_single_byte (b : Byte.byte) :
+  run_parse_bes (xd6 :: b :: nil) =
+    if N.ltb (Byte.to_N b) 128%N then
+      Some (BI_br_on_non_null (Byte.to_N b) :: nil)
+    else None.
+Proof. destruct b; vm_compute; reflexivity. Qed.
+
 (** An example program. **)
 Definition test :=
   BI_if (BT_valtype None) (BI_testop T_i64 TO_eqz :: nil) (BI_testop T_i64 TO_eqz :: nil).
