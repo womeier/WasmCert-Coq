@@ -35,14 +35,17 @@ end
 
 module Runner = Extraction_instance (No_host)
 
-let storage_module result_type memories tables instruction : module0 =
+let storage_program result_type memories tables instructions : module0 =
   { mod_types = [Tf ([], [T_num result_type])];
     mod_funcs = [{ modfunc_type = z; modfunc_locals = [];
-                   modfunc_body = [instruction] }];
+                   modfunc_body = instructions }];
     mod_tables = tables;
     mod_mems = memories;
     mod_globals = []; mod_elems = []; mod_datas = []; mod_start = None;
     mod_imports = []; mod_exports = [] }
+
+let storage_module result_type memories tables instruction =
+  storage_program result_type memories tables [instruction]
 
 let execute_storage_module module_ =
   let host_state = Obj.repr () in
@@ -204,6 +207,38 @@ let () =
       (storage_module T_i32 [] [core_tt64] (BI_table_size z)) []
   in
   check "core validator rejects i32 result for table64.size" (bad_table_size = None);
+  let delta64 s = BI_const_num (value A.AT_i64 s) in
+  check "actual core memory64.grow returns previous size as i64"
+    (execute_storage_module
+       (storage_program T_i64 [core64] []
+          [delta64 "1"; BI_memory_grow z]) =
+       [Utility.vali64_of_Z (n "65537")]);
+  check "actual core memory64.grow updates size above 4 GiB"
+    (execute_storage_module
+       (storage_program T_i64 [core64] []
+          [delta64 "1"; BI_memory_grow z; BI_drop; BI_memory_size z]) =
+       [Utility.vali64_of_Z (n "65538")]);
+  check "actual core memory64.grow failure returns i64 minus one"
+    (execute_storage_module
+       (storage_program T_i64 [core64] []
+          [delta64 "2"; BI_memory_grow z]) =
+       [Utility.vali64_of_Z (n "-1")]);
+  check "actual core memory64.grow does not narrow a large delta"
+    (execute_storage_module
+       (storage_program T_i64 [core64] []
+          [delta64 "4294967296"; BI_memory_grow z]) =
+       [Utility.vali64_of_Z (n "-1")]);
+  check "actual core memory64.grow zero at full capacity is exact"
+    (execute_storage_module
+       (storage_program T_i64 [full_core64] []
+          [delta64 "0"; BI_memory_grow z]) =
+       [Utility.vali64_of_Z (n "281474976710656")]);
+  let bad_delta, _ =
+    Runner.interp_instantiate_wrapper (Obj.repr ()) Runner.empty_store_record
+      (storage_program T_i64 [core64] []
+         [BI_const_num (value A.AT_i32 "1"); BI_memory_grow z]) []
+  in
+  check "core validator rejects i32 delta for memory64.grow" (bad_delta = None);
   let byte s = Byte.repr (n s) in
   let fill_one data at b = some "memory64 fill"
       (U.fill memory_instance data (value A.AT_i64 at)

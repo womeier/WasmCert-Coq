@@ -356,7 +356,9 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   be_typing C [::BI_memory_size x] (Tf [::] [::Addressing.address_value_type mem.(mt_address_type)])
 | bet_memory_grow : forall C x mem,
   lookup_N (tc_mems C) x = Some mem ->
-  be_typing C [::BI_memory_grow x] (Tf [::T_num T_i32] [::T_num T_i32])
+  be_typing C [::BI_memory_grow x]
+    (Tf [::Addressing.address_value_type mem.(mt_address_type)]
+        [::Addressing.address_value_type mem.(mt_address_type)])
 | bet_memory_fill : forall C x mem,
   lookup_N (tc_mems C) x = Some mem ->
   be_typing C [::BI_memory_fill x] (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::])

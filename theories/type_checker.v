@@ -455,8 +455,9 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           end
       | BI_memory_grow x =>
           match lookup_N C.(tc_mems) x with
-          | Some _ =>
-              type_update ts [::(T_num T_i32)] [::(T_num T_i32)]
+          | Some mt =>
+              type_update ts [::Addressing.address_value_type mt.(mt_address_type)]
+                [::Addressing.address_value_type mt.(mt_address_type)]
           | None => None
           end
       | BI_memory_fill x =>

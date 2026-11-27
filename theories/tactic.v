@@ -250,8 +250,21 @@ Ltac simplify_multieq :=
 
 Ltac resolve_e_typing :=
   repeat lazymatch goal with
+    | |- context [Addressing.grow_failure ?a] =>
+        unfold Addressing.grow_failure
     | |- context [T_num (typeof_num (Addressing.value_of_address ?a ?n))] =>
         rewrite value_of_address_type
+    | Hit: inst_typing ?s ?inst = Some ?C,
+      Hindex: lookup_N (inst_mems ?inst) ?x = Some ?a,
+      Hdata: lookup_N (s_mems ?s) ?a = Some ?mem,
+      Hcontext: lookup_N (tc_mems ?C) ?x = Some ?mt |-
+        context [mt_address_type (meminst_type ?mem)] =>
+        let Hmemory := fresh "Hmemory" in
+        let Hmemtype := fresh "Hmemtype" in
+        assert (Hmemory: smem s inst x = Some mem) by
+          (unfold smem; rewrite Hindex Hdata; reflexivity);
+        pose proof (smem_type_context Hit Hcontext Hmemory) as Hmemtype;
+        progress rewrite Hmemtype
     (* This is usually required and should be applied at highest priority *)
     | H: is_true (?ts1 <ts: ?ts2) |-
         e_typing _ _ _ (Tf ?ts1 ?ts2) =>

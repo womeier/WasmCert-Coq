@@ -18,6 +18,27 @@ Lemma value_of_address_type a n :
     Addressing.address_value_type a.
 Proof. destruct a; reflexivity. Qed.
 
+Lemma address_of_value_typing `{BlockUpdateMemory} `{host_function_class} s a v n :
+  Addressing.address_of_value a v = Some n ->
+  value_typing s (VAL_num v) (Addressing.address_value_type a).
+Proof.
+  destruct a, v; simpl; intros Hdecode; try discriminate; reflexivity.
+Qed.
+
+Lemma value_typing_address_exists `{BlockUpdateMemory} `{host_function_class} s a v :
+  value_typing s (VAL_num v) (Addressing.address_value_type a) ->
+  exists n, Addressing.address_of_value a v = Some n.
+Proof.
+  destruct a, v; simpl; intros Htyping; try discriminate; eauto.
+Qed.
+
+Lemma address_type_decode_exists a v :
+  Addressing.address_value_type a = T_num (typeof_num v) ->
+  exists n, Addressing.address_of_value a v = Some n.
+Proof.
+  destruct a, v; simpl; intros Htyping; try discriminate; eauto.
+Qed.
+
 (** List operations **)
 
 (* Friction between seq and List *)
@@ -2302,6 +2323,20 @@ Proof.
   eapply those_lookup_inv in Hoption1; eauto.
   apply nth_error_map in Hoption1 as [a [??]].
   by exists a.
+Qed.
+
+Lemma smem_type_context s inst C x mt mem :
+  inst_typing s inst = Some C ->
+  lookup_N C.(tc_mems) x = Some mt ->
+  smem s inst x = Some mem ->
+  mem.(meminst_type) = mt.
+Proof.
+  move => Hinst Hlookup Hmem.
+  destruct (inst_typing_mem_lookup_inv Hinst Hlookup) as [a [Htype Hindex]].
+  unfold smem in Hmem. rewrite Hindex in Hmem.
+  unfold ext_mem_typing in Htype.
+  destruct (lookup_N (s_mems s) a) eqn:Hdata => //.
+  inversion Hmem; inversion Htype. congruence.
 Qed.
 
 Lemma inst_typing_global_lookup_inv: forall s inst C n t,

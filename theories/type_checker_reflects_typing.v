@@ -1347,7 +1347,12 @@ Proof.
       * eapply bet_memory_size. eassumption.
       * by resolve_subtyping.
     (* Memory_grow *)
-    + by resolve_tc_be_typing.
+    + apply bet_weakening.
+      eapply bet_subtyping.
+      * eapply bet_memory_grow. eassumption.
+      * unfold Addressing.address_value_type in *.
+        resolve_subtyping.
+        by apply instr_subtyping_eq.
     (* Memory_fill *)
     + by resolve_tc_be_typing.
     (* Memory_copy *)

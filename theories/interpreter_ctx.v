@@ -461,7 +461,7 @@ end).
 
 
 Ltac discriminate_value_type :=
-  resolve_invalid_typing; resolve_invalid_value.
+  resolve_invalid_typing; unfold Addressing.address_value_type in *; resolve_invalid_value.
 
 (* Directly destructs the top value of stack and automatically resolve the ill-typed cases. *)
 Ltac assert_value_num v :=
@@ -1336,16 +1336,45 @@ the condition that all values should live in the operand stack. *)
 
     (* AI_basic BI_memory_grow *)
     - destruct vs0 as [|v vs0]; first by no_args.
-      assert_i32 v.
-      destruct (smem_grow s fc.(FC_frame).(f_inst) x ($nou32 v)) as [[s' sz] | ] eqn:Hsmem.
-      (* Some mem'' *)
-      + apply <<hs, (s', (fc, lcs) :: ccs', (VAL_num (VAL_int32 ($u32oz (Z.of_N sz))) :: vs0, es0), None), d>> => //.
-        resolve_reduce_ctx vs0 es0.
-        by subst; eapply r_memory_grow_success; eauto.
-      (* None *)
-      + apply <<hs, (s, (fc, lcs) :: ccs', (VAL_num (VAL_int32 int32_minus_one) :: vs0, es0), None), d>> => //.
-        resolve_reduce_ctx vs0 es0.
-        by subst; eapply r_memory_grow_failure; eauto.
+      assert_value_num v.
+      destruct (smem s fc.(FC_frame).(f_inst) x) as [mem|] eqn:Hmemory.
+      + destruct (Addressing.address_of_value mem.(meminst_type).(mt_address_type) v)
+          as [count|] eqn:Haddress.
+        * destruct (smem_grow s fc.(FC_frame).(f_inst) x count) as [[s' sz]|] eqn:Hsmem.
+          { apply <<hs, (s', (fc, lcs) :: ccs',
+              (VAL_num (Addressing.value_of_address mem.(meminst_type).(mt_address_type) sz)
+                :: vs0, es0), None), d>> => //.
+            resolve_reduce_ctx vs0 es0.
+            by eapply r_memory_grow_success; eauto.
+          }
+          { apply <<hs, (s, (fc, lcs) :: ccs',
+              (VAL_num (Addressing.grow_failure mem.(meminst_type).(mt_address_type))
+                :: vs0, es0), None), d>> => //.
+            resolve_reduce_ctx vs0 es0.
+            by eapply r_memory_grow_failure; eauto.
+          }
+        * resolve_invalid_typing.
+          unfold_frame_type Hftype.
+          match goal with
+          | Hit: inst_typing s _ = Some ?C,
+            Hlookup: lookup_N (tc_mems ?C) x = Some ?mt |- _ =>
+              pose proof (smem_type_context Hit Hlookup Hmemory) as Hmt;
+              subst mt
+          end.
+          destruct (mt_address_type (meminst_type mem)); destruct v;
+            cbn [Addressing.address_of_value] in Haddress; try discriminate;
+            unfold Addressing.address_value_type in *;
+            resolve_invalid_value.
+      + resolve_invalid_typing.
+        unfold_frame_type Hftype.
+        match goal with
+        | Hit: inst_typing s _ = Some ?C,
+          Hlookup: lookup_N (tc_mems ?C) x = Some ?mt |- _ =>
+            destruct (inst_typing_mem_lookup_inv Hit Hlookup) as [a [Htype Hindex]];
+            unfold smem in Hmemory; rewrite Hindex in Hmemory;
+            unfold ext_mem_typing in Htype;
+            destruct (lookup_N (s_mems s) a); discriminate
+        end.
 
     (* AI_basic BI_memory_fill *)
     - destruct vs0 as [|v3 [|v2 [|v1 vs0]]]; try by no_args.

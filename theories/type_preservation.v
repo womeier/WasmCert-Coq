@@ -568,6 +568,10 @@ Proof.
   - destruct (context_agree_mem_type Hext H) as [mt [Hnth Hagree]].
     unfold mem_agree in Hagree; move/eqP in Hagree.
     rewrite Hagree. by eapply bet_memory_size.
+  (* memory grow *)
+  - destruct (context_agree_mem_type Hext H) as [mt [Hnth Hagree]].
+    unfold mem_agree in Hagree; move/eqP in Hagree.
+    rewrite Hagree. by eapply bet_memory_grow.
   (* memory copy: both memory types may change independently. *)
   - destruct (context_agree_mem_type Hext H) as [mt_dst [Hdst Hagree_dst]].
     destruct (context_agree_mem_type Hext H0) as [mt_src [Hsrc Hagree_src]].

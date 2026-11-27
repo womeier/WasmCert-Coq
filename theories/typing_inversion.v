@@ -284,7 +284,8 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
         lookup_N (tc_mems C) x = Some mt
   | BI_memory_grow x =>
       exists mt,
-      tf = (Tf [::T_num T_i32] [::T_num T_i32]) /\
+      tf = (Tf [::Addressing.address_value_type mt.(mt_address_type)]
+               [::Addressing.address_value_type mt.(mt_address_type)]) /\
         lookup_N (tc_mems C) x = Some mt
   | BI_memory_fill x =>
       exists mt,

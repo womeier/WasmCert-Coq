@@ -554,13 +554,19 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
     reduce hs s f [::AI_basic (BI_memory_size x)] hs s f
       [::$VN (Addressing.value_of_address m.(meminst_type).(mt_address_type) n)]
 | r_memory_grow_success :
-  forall x s f s' sz c hs,
-    smem_grow s f.(f_inst) x (Wasm_int.N_of_uint i32m c) = Some (s', sz) ->
-    reduce hs s f [::$VN (VAL_int32 c); AI_basic (BI_memory_grow x)] hs s' f [::$VN (VAL_int32 (Wasm_int.int_of_Z i32m (Z.of_N sz)))]
+  forall x s f mem s' sz v c hs,
+    smem s f.(f_inst) x = Some mem ->
+    Addressing.address_of_value mem.(meminst_type).(mt_address_type) v = Some c ->
+    smem_grow s f.(f_inst) x c = Some (s', sz) ->
+    reduce hs s f [::$VN v; AI_basic (BI_memory_grow x)] hs s' f
+      [::$VN (Addressing.value_of_address mem.(meminst_type).(mt_address_type) sz)]
 | r_memory_grow_failure :
-  forall x s f c hs,
-    smem_grow s f.(f_inst) x (Wasm_int.N_of_uint i32m c) = None ->
-    reduce hs s f [::$VN (VAL_int32 c); AI_basic (BI_memory_grow x)] hs s f [::$VN (VAL_int32 int32_minus_one)]
+  forall x s f mem v c hs,
+    smem s f.(f_inst) x = Some mem ->
+    Addressing.address_of_value mem.(meminst_type).(mt_address_type) v = Some c ->
+    smem_grow s f.(f_inst) x c = None ->
+    reduce hs s f [::$VN v; AI_basic (BI_memory_grow x)] hs s f
+      [::$VN (Addressing.grow_failure mem.(meminst_type).(mt_address_type))]
 | r_memory_fill_bound:
   forall x s f mem d n v hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
