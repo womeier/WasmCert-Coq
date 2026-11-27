@@ -4,6 +4,36 @@ From Wasm Require Import operations exception_handling exception_binary.
 Import ListNotations EH EHBinary.
 Open Scope N_scope.
 
+Definition nonnull_exn :=
+  {| exception_nullable := false; exception_heap := HT_exn |}.
+Definition nullable_exn :=
+  {| exception_nullable := true; exception_heap := HT_exn |}.
+Definition nonnull_noexn :=
+  {| exception_nullable := false; exception_heap := HT_noexn |}.
+Definition nullable_noexn :=
+  {| exception_nullable := true; exception_heap := HT_noexn |}.
+
+Example exception_nullability_widening :
+  exception_reference_matches nonnull_exn nullable_exn = true /\
+  exception_reference_matches nullable_exn nonnull_exn = false.
+Proof. vm_compute; auto. Qed.
+
+Example exception_heap_bottom :
+  exception_reference_matches nonnull_noexn nonnull_exn = true /\
+  exception_reference_matches nullable_noexn nullable_exn = true /\
+  exception_reference_matches nullable_exn nullable_noexn = false.
+Proof. vm_compute; auto. Qed.
+
+Example bottom_heap_does_not_erase_nullability :
+  exception_reference_matches nullable_noexn nonnull_exn = false.
+Proof. reflexivity. Qed.
+
+Example null_is_not_nonnull_exn :
+  reference_shape_typing None nonnull_exn = false /\
+  reference_shape_typing None nullable_noexn = true /\
+  reference_shape_typing (Some 0) nullable_noexn = false.
+Proof. vm_compute; auto. Qed.
+
 Definition sample_exception : exception nat :=
   {| exception_tag := 7%N; exception_fields := [11; 22]%nat |}.
 
@@ -112,6 +142,59 @@ Example allocate_exception :
   alloc_exception [sample_exception] sample_exception =
   ([sample_exception; sample_exception], 1%N).
 Proof. vm_compute; reflexivity. Qed.
+
+Example throw_tag_consumes_parameters_in_order :
+  throw_tag [7] [[]; []; []; []; []; []; []; [T_num T_i32; T_num T_i64]]
+    [] 0 [9; 11; 22]%nat =
+  Some {| throw_store := [sample_exception];
+          throw_stack := [9]%nat; throw_address := 0%N |}.
+Proof. vm_compute; reflexivity. Qed.
+
+Example throw_tag_zero_parameters_preserves_stack :
+  throw_tag [0] [[]] [sample_exception] 0 [9]%nat =
+  Some {| throw_store :=
+            [sample_exception; {| exception_tag := 0%N; exception_fields := [] |}];
+          throw_stack := [9]%nat; throw_address := 1%N |}.
+Proof. vm_compute; reflexivity. Qed.
+
+Example throw_tag_underflow_rejected :
+  @throw_tag nat [0] [[T_num T_i32]] [] 0 [] = None.
+Proof. vm_compute; reflexivity. Qed.
+
+Example throw_tag_unknown_index_rejected :
+  @throw_tag nat [] [[]] [] 0 [] = None.
+Proof. vm_compute; reflexivity. Qed.
+
+Example throw_tag_dangling_address_rejected :
+  @throw_tag nat [1] [[]] [] 0 [] = None.
+Proof. vm_compute; reflexivity. Qed.
+
+Example read_exception_reference_shorthands :
+  read_exception_reference [x69; xff] = Some (nullable_exn, [xff]) /\
+  read_exception_reference [x74; xff] = Some (nullable_noexn, [xff]).
+Proof. vm_compute; auto. Qed.
+
+Example read_explicit_exception_references :
+  read_exception_reference [x63; x69] = Some (nullable_exn, []) /\
+  read_exception_reference [x64; x69] = Some (nonnull_exn, []) /\
+  read_exception_reference [x63; x74] = Some (nullable_noexn, []) /\
+  read_exception_reference [x64; x74] = Some (nonnull_noexn, []).
+Proof. vm_compute; auto. Qed.
+
+Example exception_reference_printer :
+  binary_of_exception_reference nullable_exn = [x63; x69] /\
+  binary_of_exception_reference nonnull_noexn = [x64; x74].
+Proof. vm_compute; auto. Qed.
+
+Example reference_subset_does_not_parse_other_hierarchies :
+  read_exception_reference [x70] = None /\
+  read_exception_reference [x64; x6e] = None.
+Proof. vm_compute; auto. Qed.
+
+Example truncated_reference_rejected :
+  read_exception_reference [x63] = None /\
+  read_exception_reference [x64] = None.
+Proof. vm_compute; auto. Qed.
 
 Example read_unsigned_zero : read_u32 [x00; xff] = Some (0%N, [xff]).
 Proof. vm_compute; reflexivity. Qed.

@@ -18,6 +18,80 @@ Definition tagidx := u32.
 Definition tagaddr := addr.
 Definition exnaddr := addr.
 
+(** The exception-only fragment of the heap/reference lattice. This does not
+    extend the global [reference_type], which currently has neither heap types
+    nor nullability. Shared-reference integration must embed these two heaps
+    as a separate hierarchy (not beneath any/eq/func/extern).
+
+    [reference_shape_typing] classifies abstract exception-reference shapes,
+    not store well-formedness: a non-null address additionally needs an
+    allocated exception in the full store typing relation. *)
+Inductive exception_heap_type : Set := HT_exn | HT_noexn.
+
+Record exception_reference_type : Set := {
+  exception_nullable : bool;
+  exception_heap : exception_heap_type
+}.
+
+Definition exception_heap_matches (h1 h2 : exception_heap_type) : bool :=
+  match h1, h2 with
+  | HT_noexn, _ => true
+  | HT_exn, HT_exn => true
+  | HT_exn, HT_noexn => false
+  end.
+
+Definition exception_reference_matches
+    (t1 t2 : exception_reference_type) : bool :=
+  (negb t1.(exception_nullable) || t2.(exception_nullable)) &&
+  exception_heap_matches t1.(exception_heap) t2.(exception_heap).
+
+Definition reference_shape_typing (r : option exnaddr)
+    (t : exception_reference_type) : bool :=
+  match r with
+  | None => t.(exception_nullable)
+  | Some _ =>
+      match t.(exception_heap) with
+      | HT_exn => true
+      | HT_noexn => false
+      end
+  end.
+
+Lemma exception_reference_matches_spec t1 t2 :
+  exception_reference_matches t1 t2 = true <->
+  forall r, reference_shape_typing r t1 = true ->
+            reference_shape_typing r t2 = true.
+Proof.
+  destruct t1 as [n1 h1], t2 as [n2 h2].
+  destruct n1, h1, n2, h2; simpl; split; intro H;
+    try discriminate; try reflexivity.
+  all: try solve [intros [a|] Htype; simpl in *; congruence].
+  all: try solve [specialize (H None eq_refl); discriminate].
+  all: try solve [specialize (H (Some 0%N) eq_refl); discriminate].
+Qed.
+
+Lemma exception_reference_matches_refl t :
+  exception_reference_matches t t = true.
+Proof. apply exception_reference_matches_spec; auto. Qed.
+
+Lemma exception_reference_matches_trans t1 t2 t3 :
+  exception_reference_matches t1 t2 = true ->
+  exception_reference_matches t2 t3 = true ->
+  exception_reference_matches t1 t3 = true.
+Proof.
+  rewrite !exception_reference_matches_spec; eauto.
+Qed.
+
+Lemma nonnullable_noexn_uninhabited r :
+  reference_shape_typing r
+    {| exception_nullable := false; exception_heap := HT_noexn |} = false.
+Proof. destruct r; reflexivity. Qed.
+
+Lemma nullable_noexn_only_null r :
+  reference_shape_typing r
+    {| exception_nullable := true; exception_heap := HT_noexn |} = true <->
+  r = None.
+Proof. destruct r; simpl; split; congruence. Qed.
+
 (** A tag has parameters but no results. This conversion rejects function
     types with results, rather than silently discarding them. *)
 Definition tag_parameters (tf : function_type) : option result_type :=
@@ -359,6 +433,86 @@ Lemma alloc_exception_new s e :
 Proof.
   unfold alloc_exception, lookup_N; simpl.
   rewrite Nat2N.id; apply nth_error_None; lia.
+Qed.
+
+(** [throw] consumes the tag's parameters in specification stack order and
+    allocates a fresh exception. [None] signals an ill-formed input state,
+    not a Wasm trap: validation/progress must rule out these cases when this
+    component is connected to the interpreter. *)
+Record throw_state : Type := {
+  throw_store : list exception;
+  throw_stack : list V;
+  throw_address : exnaddr
+}.
+
+Definition throw_tag (tags : list tagaddr) (tagtypes : list result_type)
+    (s : list exception) (x : tagidx) (stack : list V)
+    : option throw_state :=
+  match lookup_N tags x with
+  | Some tag =>
+      match lookup_N tagtypes tag with
+      | Some ps =>
+          if Nat.leb (length ps) (length stack) then
+            let split := (length stack - length ps)%nat in
+            let e := {| exception_tag := tag;
+                        exception_fields := skipn split stack |} in
+            Some {| throw_store := s ++ [e];
+                    throw_stack := firstn split stack;
+                    throw_address := N.of_nat (length s) |}
+          else None
+      | None => None
+      end
+  | None => None
+  end.
+
+Inductive throws_tag (tags : list tagaddr) (tagtypes : list result_type)
+    (s : list exception) (x : tagidx) : list V -> throw_state -> Prop :=
+| Throw_tag_step tag ps prefix fields :
+    lookup_N tags x = Some tag ->
+    lookup_N tagtypes tag = Some ps ->
+    length fields = length ps ->
+    throws_tag tags tagtypes s x (prefix ++ fields)
+      {| throw_store :=
+           s ++ [{| exception_tag := tag; exception_fields := fields |}];
+         throw_stack := prefix;
+         throw_address := N.of_nat (length s) |}.
+
+Theorem throw_tag_correct tags tagtypes s x stack out :
+  throw_tag tags tagtypes s x stack = Some out <->
+  throws_tag tags tagtypes s x stack out.
+Proof.
+  split.
+  - unfold throw_tag.
+    destruct (lookup_N tags x) as [tag|] eqn:Ht; [|discriminate].
+    destruct (lookup_N tagtypes tag) as [ps|] eqn:Hp; [|discriminate].
+    destruct (Nat.leb (length ps) (length stack)) eqn:Hlen; [|discriminate].
+    intro H; inversion H; subst.
+    rewrite <- (firstn_skipn (length stack - length ps) stack) at 1.
+    econstructor; [exact Ht|exact Hp|].
+    rewrite length_skipn; apply Nat.leb_le in Hlen; lia.
+  - intro H; destruct H.
+    unfold throw_tag; rewrite H, H0, length_app, <- H1.
+    assert (Hlen : Nat.leb (length fields) (length prefix + length fields) = true).
+    { apply Nat.leb_le; lia. }
+    rewrite Hlen.
+    replace (length prefix + length fields - length fields)%nat
+      with (length prefix) by lia.
+    rewrite firstn_app, firstn_all, Nat.sub_diag, skipn_app,
+      skipn_all, Nat.sub_diag; simpl.
+    rewrite app_nil_r; reflexivity.
+Qed.
+
+Lemma throw_tag_allocated tags tagtypes s x stack out :
+  throws_tag tags tagtypes s x stack out ->
+  exists tag fields,
+    lookup_N tags x = Some tag /\
+    lookup_N out.(throw_store) out.(throw_address) =
+      Some {| exception_tag := tag; exception_fields := fields |} /\
+    stack = out.(throw_stack) ++ fields.
+Proof.
+  intro H; destruct H; exists tag, fields; simpl.
+  split; [assumption|]; split; [|reflexivity].
+  apply alloc_exception_fresh.
 Qed.
 
 End Runtime.

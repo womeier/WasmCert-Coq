@@ -12,6 +12,107 @@ Import ListNotations.
 Module EHBinary.
 Import EH.
 
+(** Exception-only fragment of Babsheaptype/Breftype, pinned to
+    WebAssembly/spec 04931610158e1ae1c69a3abf49e73984c0d4ddaf,
+    specification/wasm-3.0/5.2-binary.types.spectec.
+    These are NOT generic heap/reference parsers. *)
+Definition binary_of_exception_heap (h : exception_heap_type) : Byte.byte :=
+  match h with HT_exn => x69 | HT_noexn => x74 end.
+
+Definition read_exception_heap (bs : list Byte.byte)
+    : option (exception_heap_type * list Byte.byte) :=
+  match bs with
+  | x69 :: rest => Some (HT_exn, rest)
+  | x74 :: rest => Some (HT_noexn, rest)
+  | _ => None
+  end.
+
+Lemma read_exception_heap_spec bs h rest :
+  read_exception_heap bs = Some (h, rest) <->
+  bs = binary_of_exception_heap h :: rest.
+Proof.
+  split.
+  - destruct bs as [|b tail]; [discriminate|].
+    destruct b; simpl; intro H; try discriminate;
+      inversion H; subst; reflexivity.
+  - intro H; subst; destruct h; reflexivity.
+Qed.
+
+Definition read_reference_body (nullable : bool) (bs : list Byte.byte)
+    : option (exception_reference_type * list Byte.byte) :=
+  match read_exception_heap bs with
+  | Some (h, rest) =>
+      Some ({| exception_nullable := nullable; exception_heap := h |}, rest)
+  | None => None
+  end.
+
+Definition read_exception_reference (bs : list Byte.byte)
+    : option (exception_reference_type * list Byte.byte) :=
+  match bs with
+  | x63 :: tail => read_reference_body true tail
+  | x64 :: tail => read_reference_body false tail
+  | x69 :: tail =>
+      Some ({| exception_nullable := true; exception_heap := HT_exn |}, tail)
+  | x74 :: tail =>
+      Some ({| exception_nullable := true; exception_heap := HT_noexn |}, tail)
+  | _ => None
+  end.
+
+Inductive exception_reference_binary :
+    list Byte.byte -> exception_reference_type -> list Byte.byte -> Prop :=
+| Binary_reference_explicit (nullable : bool) h rest :
+    exception_reference_binary
+      ((if nullable then x63 else x64) :: binary_of_exception_heap h :: rest)
+      {| exception_nullable := nullable; exception_heap := h |} rest
+| Binary_reference_short h rest :
+    exception_reference_binary (binary_of_exception_heap h :: rest)
+      {| exception_nullable := true; exception_heap := h |} rest.
+
+Lemma read_reference_body_spec nullable bs t rest :
+  read_reference_body nullable bs = Some (t, rest) <->
+  exists h, bs = binary_of_exception_heap h :: rest /\
+    t = {| exception_nullable := nullable; exception_heap := h |}.
+Proof.
+  unfold read_reference_body; split.
+  - destruct (read_exception_heap bs) as [[h tail]|] eqn:Hh; [|discriminate].
+    intro H; inversion H; subst; exists h; split; [|reflexivity].
+    apply read_exception_heap_spec; assumption.
+  - intros [h [Hbs Ht]]; subst.
+    destruct h; reflexivity.
+Qed.
+
+Theorem read_exception_reference_correct bs t rest :
+  read_exception_reference bs = Some (t, rest) <->
+  exception_reference_binary bs t rest.
+Proof.
+  split.
+  - destruct bs as [|b tail]; [discriminate|].
+    destruct b; simpl; try discriminate.
+    + rewrite read_reference_body_spec.
+      intros [h [Hbs Ht]]; subst.
+      exact (Binary_reference_explicit true h rest).
+    + rewrite read_reference_body_spec.
+      intros [h [Hbs Ht]]; subst.
+      exact (Binary_reference_explicit false h rest).
+    + intro H; inversion H; subst; apply (Binary_reference_short HT_exn).
+    + intro H; inversion H; subst; apply (Binary_reference_short HT_noexn).
+  - intro H; destruct H.
+    + destruct nullable, h; reflexivity.
+    + destruct h; reflexivity.
+Qed.
+
+Definition binary_of_exception_reference (t : exception_reference_type)
+    : list Byte.byte :=
+  [if t.(exception_nullable) then x63 else x64;
+   binary_of_exception_heap t.(exception_heap)].
+
+Theorem exception_reference_roundtrip t rest :
+  read_exception_reference (binary_of_exception_reference t ++ rest) =
+  Some (t, rest).
+Proof.
+  destruct t as [nullable h]; destruct nullable, h; reflexivity.
+Qed.
+
 Definition final_bound (remaining : nat) : N :=
   match remaining with
   | O => 16
