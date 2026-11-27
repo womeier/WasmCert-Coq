@@ -3,7 +3,7 @@
    gallais.github.io/pdf/agdarsec18.pdf
 *)
 
-From Wasm Require Import datatypes_properties typing leb128 utf8.
+From Wasm Require Import datatypes_properties typing leb128 binary_codec utf8.
 From compcert Require Import Integers.
 From parseque Require Import Parseque.
 From Stdlib Require Import Strings.Byte ZArith.
@@ -46,16 +46,10 @@ Definition exact_byte (b : byte) {n} : byte_parser byte n :=
     anyTok.
 
 Definition parse_u8_as_N {n} : byte_parser N n :=
-  guardM
-    (fun n => if (N.leb n 255%N) then Some n
-           else None)
-    (assert_sized (extract parse_unsigned n) (fun sz => N.leb sz 2)).
+  parse_uint 8 2 n.
 
 Definition parse_u32_as_N {n} : byte_parser N n :=
-  guardM
-    (fun n => if (N.leb n 4294967295%N) then Some n
-           else None)
-  (assert_sized (extract parse_unsigned n) (fun sz => N.leb sz 5)).
+  parse_uint 32 5 n.
 
 Definition assert_u32 {n} (k: N) : byte_parser N n :=
   guardM
@@ -101,7 +95,7 @@ Definition parse_vec_aux {B} {n} (f : byte_parser B n) (k : N)
 
 (* parsing a length-indexed list *)
 Definition parse_vec {B} {n} (f : byte_parser B n) : byte_parser (list B) n :=
-  exact_byte x00 $> nil <|>
+  assert_u32 0 $> nil <|>
   (parse_vec_length >>= (fun k => parse_vec_aux f k)).
 
 Definition parse_16bytes {n} : byte_parser SIMD.v128 n :=

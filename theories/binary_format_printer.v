@@ -1,7 +1,7 @@
 (** Wasm AST to binary.
 Breaks non-determinism ties; see binary_format_spec.v for the spec. *)
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
-From Wasm Require Import datatypes_properties numerics common list_extra leb128 operations.
+From Wasm Require Import datatypes_properties numerics common list_extra leb128 binary_codec operations.
 From compcert Require Integers.
 From Stdlib Require Import ZArith Strings.Byte.
 
@@ -39,10 +39,11 @@ Definition binary_of_N (n: N) : list byte :=
   leb128.encode_unsigned n.
 
 Definition binary_of_u32 (n: u32) : list byte :=
-  binary_of_N n.
+  if N.ltb n u32_bound then encode_uleb 5 n
+  else binary_of_N n.
 
 Definition binary_of_u32_nat (n : nat) : list byte :=
-  leb128.encode_unsigned (N.of_nat n).
+  binary_of_u32 (N.of_nat n).
 
 (* All idx are currently the same underlying type *)
 Definition binary_of_idx n := binary_of_u32 n.

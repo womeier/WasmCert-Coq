@@ -64,8 +64,7 @@ Lemma indexed_scalar_simd_round_trips :
 Proof. vm_compute. reflexivity. Qed.
 
 Lemma indexed_memarg_encoding :
-  (* The shared LEB encoder emits a legal padded encoding of flags 64. *)
-  binary_of_memarg indexed_memarg = xc0 :: x00 :: x80 :: x01 :: xd2 :: x09 :: nil.
+  binary_of_memarg indexed_memarg = x40 :: x80 :: x01 :: xd2 :: x09 :: nil.
 Proof. vm_compute. reflexivity. Qed.
 
 Lemma explicit_zero_memory_index_accepted :
@@ -218,6 +217,12 @@ Definition empty_module := {|
 |}.
 
 Lemma empty_module_round_trip : run_parse_module (binary_of_module empty_module) = Some empty_module.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma padded_zero_vector_length_accepted :
+  run_parse_module
+    (x00 :: x61 :: x73 :: x6d :: x01 :: x00 :: x00 :: x00 ::
+     x05 :: x02 :: x80 :: x00 :: nil) = Some empty_module.
 Proof. vm_compute. reflexivity. Qed.
 
 Definition two_memory_legacy_access := {|
