@@ -991,8 +991,8 @@ Definition load_vec_lane (m: meminst) (n: N) (v: value_vec) (width: vwidth) (mar
     end
   else None.
 
-Definition smem_store (s: store_record) (inst: moduleinst) (n: N) (off: static_offset) (v: value_num) (t: number_type) : option store_record :=
-  match lookup_N inst.(inst_mems) 0%N with
+Definition smem_store (s: store_record) (inst: moduleinst) (x: memidx) (n: N) (off: static_offset) (v: value_num) (t: number_type) : option store_record :=
+  match lookup_N inst.(inst_mems) x with
   | Some addr =>
       match lookup_N s.(s_mems) addr with
       | Some mem =>
@@ -1006,8 +1006,8 @@ Definition smem_store (s: store_record) (inst: moduleinst) (n: N) (off: static_o
   | None => None
   end.
 
-Definition smem_store_packed (s: store_record) (inst: moduleinst) (n: N) (off: static_offset) (v: value_num) (tp: packed_type) : option store_record :=
-  match lookup_N inst.(inst_mems) 0%N with
+Definition smem_store_packed (s: store_record) (inst: moduleinst) (x: memidx) (n: N) (off: static_offset) (v: value_num) (tp: packed_type) : option store_record :=
+  match lookup_N inst.(inst_mems) x with
   | Some addr =>
       match lookup_N s.(s_mems) addr with
       | Some mem =>
@@ -1041,7 +1041,7 @@ Definition store_vec_lane (m: meminst) (n: N) (v: value_vec) (width: vwidth) (ma
   else None.
 
 Definition smem_store_vec (s: store_record) (inst: moduleinst) (n: N) (v: value_vec) (marg: memarg) : option store_record :=
-  match lookup_N inst.(inst_mems) 0%N with
+  match lookup_N inst.(inst_mems) marg.(memarg_memory) with
   | Some addr =>
       match lookup_N s.(s_mems) addr with
       | Some mem =>
@@ -1056,7 +1056,7 @@ Definition smem_store_vec (s: store_record) (inst: moduleinst) (n: N) (v: value_
   end.
 
 Definition smem_store_vec_lane (s: store_record) (inst: moduleinst) (n: N) (v: value_vec) (width: vwidth) (marg: memarg) (x: laneidx) : option store_record :=
-  match lookup_N inst.(inst_mems) 0%N with
+  match lookup_N inst.(inst_mems) marg.(memarg_memory) with
   | Some addr =>
       match lookup_N s.(s_mems) addr with
       | Some mem =>

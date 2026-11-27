@@ -74,3 +74,26 @@ The multi-memory directory provides the corresponding replacement files.
 - Full build/test and full supported/proposal conformance after implementation;
   account for every crash, failure and missing summary. Text-dependent proposal
   execution is blocked by the deferred external frontend, not counted as passed.
+
+## Verified implementation increments
+
+- `e1ca3f0`: explicit `memory.size`/`memory.grow` indices in syntax,
+  declarative/executable validation, semantics, the proof-carrying interpreter,
+  binary codecs and affected proofs. Full `dune build -j 1` and
+  `dune test -j 1` passed. Concrete tests cover nonzero/multibyte/maximal indices,
+  truncated/overflowing encodings and validation bounds. This does not yet
+  enable multi-memory modules or establish general codec theorems.
+
+## Suspected specification assertion error (reported, not worked around)
+
+Source: WebAssembly/spec tag `wasm-3.0`, commit
+`d7aada502455b3d9176ca4cbe48be4724d511d2a`,
+`document/core/exec/instructions.rst`, `exec-memory.copy`, steps 18e and 18g.
+Those steps assert `d+1 < 2^32` and `s+1 < 2^32` from the earlier memory bound.
+For a legal 4-GiB memory with `d=s=2^32-1` and `n=1`, both bounds pass and
+`d <= s` selects the forward case, but both increments equal `2^32`.
+The expected mathematical bound is non-strict. Confidence is high that the
+strict assertion is false; runtime impact is not established: modular wrapping
+may make the following zero-length recursion harmless. This is not a basis for
+silently changing the operational rules or weakening proofs. Reported to the
+parent/user and on the draft PR; no unauthorized upstream issue was filed.

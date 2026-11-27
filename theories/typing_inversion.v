@@ -251,32 +251,32 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
   | BI_load t tp_sx marg =>
       exists mt,
       tf = (Tf [::T_num T_i32] [::T_num t]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
+        lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
         load_store_t_bounds marg.(memarg_align) (option_projl tp_sx) t
   | BI_load_vec lvarg marg =>
       exists mt,
       tf = (Tf [::T_num T_i32] [::T_vec T_v128]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
+        lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
         load_vec_bounds lvarg marg
   | BI_load_vec_lane width marg x =>
       exists mt,
       tf = (Tf [::T_num T_i32; T_vec T_v128] [::T_vec T_v128]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
+        lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
         load_store_vec_lane_bounds width marg x
   | BI_store t tp marg =>
       exists mt,
       tf = (Tf [::T_num T_i32; T_num t] [::]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
+        lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
         load_store_t_bounds marg.(memarg_align) tp t
   | BI_store_vec marg =>
       exists mt,
       tf = (Tf [::T_num T_i32; T_vec T_v128] [::]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
+        lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
         load_vec_bounds LVA_none marg
   | BI_store_vec_lane width marg x =>
       exists mt,
       tf = (Tf [::T_num T_i32; T_vec T_v128] [::]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
+        lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
         load_store_vec_lane_bounds width marg x
   | BI_memory_size x =>
       exists mt,

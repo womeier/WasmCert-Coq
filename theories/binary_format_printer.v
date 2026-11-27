@@ -73,7 +73,12 @@ Definition binary_of_vec {A} (f : A -> list byte) (es : list A) : list byte :=
   (binary_of_u32_nat (List.length es)) ++ (List.concat (List.map f es)).
 
 Definition binary_of_memarg (marg: memarg) : list byte :=
-  binary_of_u32_nat marg.(memarg_align) ++ binary_of_u32_nat marg.(memarg_offset).
+  (if N.eqb marg.(memarg_memory) 0 then
+     binary_of_u32 marg.(memarg_align)
+   else
+     binary_of_u32 (N.add marg.(memarg_align) 64) ++
+       binary_of_memidx marg.(memarg_memory)) ++
+    binary_of_u32 marg.(memarg_offset).
 
 Definition binary_of_i32 (x : i32) : list byte :=
   leb128.encode_signed (Wasm_int.Int32.signed x).
@@ -174,7 +179,27 @@ Definition binary_of_replace_vec (sh: vshape) (x: laneidx) :=
   ) :: binary_of_N x.
   
 Definition binary_of_load_vec (lvarg: load_vec_arg) (marg: memarg) :=
-  xfd :: x0c :: (List.repeat x00 16).
+  let opcode :=
+    match lvarg with
+    | LVA_none => Some x00
+    | LVA_extend (8%N, 8%N) SX_S => Some x01
+    | LVA_extend (8%N, 8%N) SX_U => Some x02
+    | LVA_extend (16%N, 4%N) SX_S => Some x03
+    | LVA_extend (16%N, 4%N) SX_U => Some x04
+    | LVA_extend (32%N, 2%N) SX_S => Some x05
+    | LVA_extend (32%N, 2%N) SX_U => Some x06
+    | LVA_splat 8%N => Some x07
+    | LVA_splat 16%N => Some x08
+    | LVA_splat 32%N => Some x09
+    | LVA_splat 64%N => Some x0a
+    | LVA_zero 32%N => Some x5c
+    | LVA_zero 64%N => Some x5d
+    | _ => None (* unrepresentable load shape *)
+    end in
+  match opcode with
+  | Some op => xfd :: op :: binary_of_memarg marg
+  | None => dummy
+  end.
 
 Definition binary_of_load_vec_lane (w: vwidth) (marg: memarg) (x: laneidx) :=
   xfd :: 

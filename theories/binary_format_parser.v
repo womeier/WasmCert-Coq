@@ -317,11 +317,13 @@ Definition parse_static_offset {n} : byte_parser N n :=
   parse_u32_as_N.
 
 Definition parse_memarg {n} : byte_parser memarg n :=
-  (fun ao =>
-     match ao with
-     | (a, o) => {| memarg_offset := o; memarg_align := a |}
-     end) <$>
-    (parse_alignment_exponent <&> parse_static_offset).
+  parse_alignment_exponent >>= (fun a =>
+    if N.ltb a 64 then
+      (fun o => Build_memarg o a 0%N) <$> parse_static_offset
+    else if N.ltb a 128 then
+      (fun '(x, o) => Build_memarg o (N.sub a 64) x) <$>
+        (parse_memidx <&> parse_static_offset)
+    else fail).
 
 Definition parse_i32_load {n} : byte_parser basic_instruction n :=
   exact_byte x28 &> ((BI_load T_i32 None) <$> parse_memarg).

@@ -29,3 +29,27 @@ Lemma grow_unknown_memory_invalid :
   b_e_type_checker multi_memory_context (BI_memory_grow 2%N :: nil)
     (Tf (T_num T_i32 :: nil) (T_num T_i32 :: nil)) = false.
 Proof. vm_compute. reflexivity. Qed.
+
+Lemma load_second_memory_valid :
+  b_e_type_checker multi_memory_context
+    [BI_load T_i32 None (Build_memarg 0%N 2%N 1%N)]
+    (Tf [T_num T_i32] [T_num T_i32]) = true.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma store_unknown_memory_invalid :
+  b_e_type_checker multi_memory_context
+    [BI_store T_i32 None (Build_memarg 0%N 2%N 2%N)]
+    (Tf [T_num T_i32; T_num T_i32] []) = false.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma simd_load_second_memory_valid :
+  b_e_type_checker multi_memory_context
+    [BI_load_vec LVA_none (Build_memarg 0%N 4%N 1%N)]
+    (Tf [T_num T_i32] [T_vec T_v128]) = true.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma simd_store_unknown_memory_invalid :
+  b_e_type_checker multi_memory_context
+    [BI_store_vec_lane 32%N (Build_memarg 0%N 2%N 2%N) 0%N]
+    (Tf [T_num T_i32; T_vec T_v128] []) = false.
+Proof. vm_compute. reflexivity. Qed.

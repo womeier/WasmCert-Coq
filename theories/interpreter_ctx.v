@@ -1181,7 +1181,7 @@ the condition that all values should live in the operand stack. *)
     - destruct vs0 as [|v vs0]; first by no_args.
       assert_i32 v.
       (* VAL_int32 v :: ves' *)
-      destruct (smem s fc.(FC_frame).(f_inst) N0) as [mem_s_j|] eqn:?.
+      destruct (smem s fc.(FC_frame).(f_inst) marg.(memarg_memory)) as [mem_s_j|] eqn:?.
       (* Some mem_s_j *)
       { destruct ops as [[tp sx] | ].
         (* Some (tp, sx) *)
@@ -1218,7 +1218,7 @@ the condition that all values should live in the operand stack. *)
     - destruct vs0 as [|v vs0]; first by no_args.
       assert_i32 v.
       (* VAL_int32 v :: ves' *)
-      destruct (smem s fc.(FC_frame).(f_inst) N0) as [mem_s_j|] eqn:?.
+      destruct (smem s fc.(FC_frame).(f_inst) marg.(memarg_memory)) as [mem_s_j|] eqn:?.
       (* Some mem_s_j *)
       { destruct (load_vec mem_s_j ($nou32 v) lvarg marg) as [v' | ] eqn:Hload_vec.
         - apply <<hs, (s, (fc, lcs) :: ccs', (VAL_vec v' :: vs0, es0), None), d>> => //.
@@ -1243,7 +1243,7 @@ the condition that all values should live in the operand stack. *)
       assert_i32 v1.
       assert_value_vec v2.
       (* VAL_int32 v :: ves' *)
-      destruct (smem s fc.(FC_frame).(f_inst) N0) as [mem_s_j|] eqn:?.
+      destruct (smem s fc.(FC_frame).(f_inst) marg.(memarg_memory)) as [mem_s_j|] eqn:?.
       (* Some mem_s_j *)
       { destruct (load_vec_lane mem_s_j ($nou32 v1) v2 width marg x) as [v' | ] eqn:Hload_vec_lane.
         - apply <<hs, (s, (fc, lcs) :: ccs', (VAL_vec v' :: vs0, es0), None), d>> => //.
@@ -1270,7 +1270,7 @@ the condition that all values should live in the operand stack. *)
       destruct (typeof_num v2 == t) eqn:Heq; move/eqP in Heq; last by discriminate_value_type; apply num_subtyping in H; inversion H; subst.
       destruct op as [tp | ].
       (* packed *)
-      + destruct (smem_store_packed s fc.(FC_frame).(f_inst) ($nou32 v1) marg.(memarg_offset) v2 tp) as [s' | ] eqn:Hsmem.
+      + destruct (smem_store_packed s fc.(FC_frame).(f_inst) marg.(memarg_memory) ($nou32 v1) marg.(memarg_offset) v2 tp) as [s' | ] eqn:Hsmem.
         * apply <<hs, (s', (fc, lcs) :: ccs', (vs0, es0), None), d>> => //.
           resolve_reduce_ctx vs0 es0.
           by eapply r_store_packed_success; subst; eauto.
@@ -1279,7 +1279,7 @@ the condition that all values should live in the operand stack. *)
           resolve_reduce_ctx vs0 es0.
           by eapply r_store_packed_failure; subst; eauto.
       (* None *)
-      + destruct (smem_store s fc.(FC_frame).(f_inst) ($nou32 v1) marg.(memarg_offset) v2 t) as [s' | ] eqn:Hsmem.
+      + destruct (smem_store s fc.(FC_frame).(f_inst) marg.(memarg_memory) ($nou32 v1) marg.(memarg_offset) v2 t) as [s' | ] eqn:Hsmem.
         * apply <<hs, (s', (fc, lcs) :: ccs', (vs0, es0), None), d>> => //.
           resolve_reduce_ctx vs0 es0.
           by eapply r_store_success; subst; eauto.
@@ -1370,7 +1370,7 @@ the condition that all values should live in the operand stack. *)
                              $VN (VAL_int32 v2);
                              $VN (VAL_int32 ($u32oz (Z.sub ($zou32 v3) 1%Z)));
                             AI_basic (BI_memory_fill)] ++ es0),
-                          Some (AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0)))), d>> => //.
+                          Some (AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 N0)))), d>> => //.
             resolve_reduce_ctx vs0 es0.
             by eapply r_memory_fill_step; eauto; lias.
           }
@@ -1417,8 +1417,8 @@ the condition that all values should live in the operand stack. *)
           (* copy -- forward *)
           { apply <<hs, (s, (fc, lcs) :: ccs',
                           ((VAL_num (VAL_int32 src)) :: (VAL_num (VAL_int32 dst)) :: vs0,
-                            [::(AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0))); $VN (VAL_int32 ($u32oz (Z.add ($zou32 dst) 1))); $VN (VAL_int32 ($u32oz (Z.add ($zou32 src) 1%Z))); $VN (VAL_int32 ($u32oz (Z.sub ($zou32 n) 1))); AI_basic (BI_memory_copy)] ++ es0),
-                          Some (AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0)))), d>> => //.
+                            [::(AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 N0))); $VN (VAL_int32 ($u32oz (Z.add ($zou32 dst) 1))); $VN (VAL_int32 ($u32oz (Z.add ($zou32 src) 1%Z))); $VN (VAL_int32 ($u32oz (Z.sub ($zou32 n) 1))); AI_basic (BI_memory_copy)] ++ es0),
+                          Some (AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0 N0)))), d>> => //.
             resolve_reduce_ctx vs0 es0.
             by eapply r_memory_copy_forward; eauto; simpl in *; lias.
           }
@@ -1427,8 +1427,8 @@ the condition that all values should live in the operand stack. *)
                           ((VAL_num (VAL_int32 ($u32oz (Z.add ($zou32 src) (Z.sub ($zou32 n) 1))))) ::
                              (VAL_num (VAL_int32 ($u32oz (Z.add ($zou32 dst) (Z.sub ($zou32 n) 1))))) ::
                              vs0,
-                            [::(AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0))); $VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 ($u32oz (Z.sub ($zou32 n) 1%Z))); AI_basic (BI_memory_copy)] ++ es0),
-                          Some (AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0)))), d>> => //.
+                            [::(AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 N0))); $VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 ($u32oz (Z.sub ($zou32 n) 1%Z))); AI_basic (BI_memory_copy)] ++ es0),
+                          Some (AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0 N0)))), d>> => //.
             resolve_reduce_ctx vs0 es0.
             eapply r_memory_copy_backward; eauto; simpl in *; try by lias.
           }
@@ -1484,7 +1484,7 @@ the condition that all values should live in the operand stack. *)
                                  $VN (VAL_int32 ($u32oz (Z.sub ($zou32 n) 1)));
                                  AI_basic (BI_memory_init x)
                                 ] ++ es0),
-                              Some (AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0)))), d>> => //.
+                              Some (AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 N0)))), d>> => //.
                 resolve_reduce_ctx vs0 es0.
                 by eapply r_memory_init_step; eauto; simpl in *; lias.
               }

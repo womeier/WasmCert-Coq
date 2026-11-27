@@ -8,3 +8,17 @@
  (alias runtest)
  (deps run_wast_test.sh ../run_wast.sh)
  (action (run bash %{dep:run_wast_test.sh} %{dep:../run_wast.sh})))
+
+(rule
+ (target multi_memory_binary.wast)
+ (deps multi_memory_binary.py)
+ (action
+  (with-stdout-to %{target}
+   (run python3 %{dep:multi_memory_binary.py}))))
+
+(rule
+ (alias runtest)
+ (deps multi_memory_binary.wast)
+ (action
+  (run %{exe:../src/wasm_coq_interpreter.exe} --wast
+   %{dep:multi_memory_binary.wast})))

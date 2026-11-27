@@ -477,7 +477,8 @@ Inductive load_vec_arg :=
 
 Record memarg : Set :=
   { memarg_offset : u32;
-    memarg_align: u32
+    memarg_align: u32;
+    memarg_memory: memidx
   }.
   
 Inductive basic_instruction : Type := (* be *)

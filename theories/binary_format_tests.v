@@ -37,6 +37,50 @@ Lemma memory_grow_rejects_overflow_index :
   run_parse_bes (x40 :: xff :: xff :: xff :: xff :: x10 :: nil) = None.
 Proof. vm_compute. reflexivity. Qed.
 
+Definition indexed_memarg := Build_memarg 1234%N 0%N 128%N.
+
+Definition indexed_memory_instructions :=
+  BI_load T_i32 None indexed_memarg ::
+  BI_load T_i64 (Some (Tp_i32, SX_U)) indexed_memarg ::
+  BI_store T_f64 None indexed_memarg ::
+  BI_store T_i32 (Some Tp_i8) indexed_memarg ::
+  List.map (fun lv => BI_load_vec lv indexed_memarg)
+    (LVA_none ::
+     LVA_extend (8%N, 8%N) SX_S :: LVA_extend (8%N, 8%N) SX_U ::
+     LVA_extend (16%N, 4%N) SX_S :: LVA_extend (16%N, 4%N) SX_U ::
+     LVA_extend (32%N, 2%N) SX_S :: LVA_extend (32%N, 2%N) SX_U ::
+     LVA_splat 8%N :: LVA_splat 16%N ::
+     LVA_splat 32%N :: LVA_splat 64%N ::
+     LVA_zero 32%N :: LVA_zero 64%N :: nil) ++
+  BI_store_vec indexed_memarg ::
+  List.concat (List.map (fun width =>
+    BI_load_vec_lane width indexed_memarg 0%N ::
+    BI_store_vec_lane width indexed_memarg 0%N :: nil)
+    (8%N :: 16%N :: 32%N :: 64%N :: nil)).
+
+Lemma indexed_scalar_simd_round_trips :
+  List.map (fun be => run_parse_bes (binary_of_be be)) indexed_memory_instructions =
+    List.map (fun be => Some (be :: nil)) indexed_memory_instructions.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma indexed_memarg_encoding :
+  (* The shared LEB encoder emits a legal padded encoding of flags 64. *)
+  binary_of_memarg indexed_memarg = xc0 :: x00 :: x80 :: x01 :: xd2 :: x09 :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma explicit_zero_memory_index_accepted :
+  run_parse_bes (x28 :: x40 :: x00 :: x00 :: nil) =
+    Some (BI_load T_i32 None (Build_memarg 0%N 0%N 0%N) :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memarg_rejects_reserved_flags :
+  run_parse_bes (x28 :: x80 :: x01 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memarg_rejects_truncated_memory_index :
+  run_parse_bes (x28 :: x40 :: x80 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
 (** An example program. **)
 Definition test :=
   BI_if (BT_valtype None) (BI_testop T_i64 TO_eqz :: nil) (BI_testop T_i64 TO_eqz :: nil).

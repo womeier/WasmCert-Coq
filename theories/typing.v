@@ -328,27 +328,27 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   lookup_N (tc_elems C) x = Some t ->
   be_typing C [::BI_elem_drop x] (Tf [::] [::])
 | bet_load : forall C m_arg tp_sx t mem,
-  lookup_N (tc_mems C) 0%N = Some mem ->
+  lookup_N (tc_mems C) m_arg.(memarg_memory) = Some mem ->
   load_store_t_bounds m_arg.(memarg_align) (option_projl tp_sx) t ->
   be_typing C [::BI_load t tp_sx m_arg] (Tf [::T_num T_i32] [::T_num t])
 | bet_load_vec : forall C lv_arg m_arg mem,
-  lookup_N (tc_mems C) 0%N = Some mem ->
+  lookup_N (tc_mems C) m_arg.(memarg_memory) = Some mem ->
   load_vec_bounds lv_arg m_arg ->
   be_typing C [::BI_load_vec lv_arg m_arg] (Tf [::T_num T_i32] [::T_vec T_v128])
 | bet_load_vec_lane : forall C width m_arg x mem,
-  lookup_N (tc_mems C) 0%N = Some mem ->
+  lookup_N (tc_mems C) m_arg.(memarg_memory) = Some mem ->
   load_store_vec_lane_bounds width m_arg x ->
   be_typing C [::BI_load_vec_lane width m_arg x] (Tf [::T_num T_i32; T_vec T_v128] [::T_vec T_v128])
 | bet_store : forall C m_arg tp t mem,
-  lookup_N (tc_mems C) 0%N = Some mem ->
+  lookup_N (tc_mems C) m_arg.(memarg_memory) = Some mem ->
   load_store_t_bounds m_arg.(memarg_align) tp t ->
   be_typing C [::BI_store t tp m_arg] (Tf [::T_num T_i32; T_num t] [::])
 | bet_store_vec : forall C m_arg mem,
-  lookup_N (tc_mems C) 0%N = Some mem ->
+  lookup_N (tc_mems C) m_arg.(memarg_memory) = Some mem ->
   store_vec_bounds m_arg ->
   be_typing C [::BI_store_vec m_arg] (Tf [::T_num T_i32; T_vec T_v128] [::])
 | bet_store_vec_lane : forall C width m_arg x mem,
-  lookup_N (tc_mems C) 0%N = Some mem ->
+  lookup_N (tc_mems C) m_arg.(memarg_memory) = Some mem ->
   load_store_vec_lane_bounds width m_arg x ->
   be_typing C [::BI_store_vec_lane width m_arg x] (Tf [::T_num T_i32; T_vec T_v128] [::])
 | bet_memory_size : forall C x mem,
