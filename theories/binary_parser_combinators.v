@@ -161,3 +161,23 @@ Proof.
   apply prefix_bind; [assumption|].
   intros h. now apply prefix_map.
 Qed.
+
+Lemma prefix_rand : forall A B (p: byte_parser_family A)
+  (q: byte_parser_family B) f g,
+  prefix_semantics p f ->
+  prefix_semantics q g ->
+  prefix_semantics
+    (fun n => Combinators.rand (p n) (Combinators.box (q n)))
+    (fun input => match f input with
+                  | Some (_, rest) => g rest
+                  | None => None
+                  end).
+Proof.
+  intros A B p q f g Hp Hq n input Hbound.
+  unfold Combinators.rand.
+  pose proof (prefix_map _ _ _ _ (@snd A B)
+    (prefix_and A B p q f g Hp Hq) n input Hbound) as Hsem.
+  rewrite Hsem.
+  destruct (f input) as [[a rest]|]; [|reflexivity].
+  destruct (g rest) as [[b tail]|]; reflexivity.
+Qed.
