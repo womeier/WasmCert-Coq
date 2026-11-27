@@ -250,6 +250,8 @@ Ltac simplify_multieq :=
 
 Ltac resolve_e_typing :=
   repeat lazymatch goal with
+    | |- context [T_num (typeof_num (Addressing.value_of_address ?a ?n))] =>
+        rewrite value_of_address_type
     (* This is usually required and should be applied at highest priority *)
     | H: is_true (?ts1 <ts: ?ts2) |-
         e_typing _ _ _ (Tf ?ts1 ?ts2) =>

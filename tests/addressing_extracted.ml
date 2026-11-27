@@ -25,6 +25,46 @@ let some name = function
   | Some result -> result
   | None -> failwith ("addressing regression: " ^ name ^ " unexpectedly failed")
 
+module No_host : Parametric_host = struct
+  type host_function = unit
+  let host_function_eq_dec _ _ = true
+  let hfc = host_function_eq_dec
+  type host_state_type = unit
+  let host_apply_pure hs _ _ _ _ = hs, None
+end
+
+module Runner = Extraction_instance (No_host)
+
+let storage_module result_type memories tables instruction : module0 =
+  { mod_types = [Tf ([], [T_num result_type])];
+    mod_funcs = [{ modfunc_type = z; modfunc_locals = [];
+                   modfunc_body = [instruction] }];
+    mod_tables = tables;
+    mod_mems = memories;
+    mod_globals = []; mod_elems = []; mod_datas = []; mod_start = None;
+    mod_imports = []; mod_exports = [] }
+
+let execute_storage_module module_ =
+  let host_state = Obj.repr () in
+  let instantiated, message =
+    Runner.interp_instantiate_wrapper host_state Runner.empty_store_record module_ []
+  in
+  let store, (frame, _) = match instantiated with
+    | Some cfg -> cfg
+    | None -> failwith ("core storage module instantiation: " ^ message)
+  in
+  let cfg = Runner.interp_cfg_of_wasm (store, (frame, [AI_invoke z])) in
+  let rec step fuel hs cfg depth =
+    if fuel = 0 then failwith "core storage module did not terminate";
+    match Runner.run_one_step hs cfg depth with
+    | RSC_normal (hs', cfg', depth') -> step (fuel - 1) hs' cfg' depth'
+    | RSC_value (_, _, values) -> values
+    | RSC_trap _ -> failwith "core storage module unexpectedly trapped"
+    | RSC_invalid -> failwith "core storage module became invalid"
+    | RSC_error -> failwith "core storage module execution error"
+  in
+  step 100 host_state cfg (n "100")
+
 let () =
   let max64 = n "18446744073709551615" in
   let bytes = List.init 9 (fun _ -> Char.chr 255) @ [Char.chr 1] in
@@ -144,6 +184,26 @@ let () =
     (core_table_grown.tableinst_type.tt_address_type = A.AT_i64);
   check "core table64 growth rejects address overflow before allocation"
     (growtable core_table max64 (VAL_ref_null T_funcref) = None);
+  let full_core64 : memory_type =
+    { mt_limits = limits "281474976710656" None; mt_address_type = A.AT_i64 } in
+  check "actual core interpreter memory64.size returns i64 without narrowing"
+    (execute_storage_module
+       (storage_module T_i64 [full_core64] [] (BI_memory_size z)) =
+       [Utility.vali64_of_Z (n "281474976710656")]);
+  check "actual core interpreter table64.size returns i64"
+    (execute_storage_module
+       (storage_module T_i64 [] [core_tt64] (BI_table_size z)) =
+       [Utility.vali64_of_Z one]);
+  let bad_size, _ =
+    Runner.interp_instantiate_wrapper (Obj.repr ()) Runner.empty_store_record
+      (storage_module T_i32 [core64] [] (BI_memory_size z)) []
+  in
+  check "core validator rejects i32 result for memory64.size" (bad_size = None);
+  let bad_table_size, _ =
+    Runner.interp_instantiate_wrapper (Obj.repr ()) Runner.empty_store_record
+      (storage_module T_i32 [] [core_tt64] (BI_table_size z)) []
+  in
+  check "core validator rejects i32 result for table64.size" (bad_table_size = None);
   let byte s = Byte.repr (n s) in
   let fill_one data at b = some "memory64 fill"
       (U.fill memory_instance data (value A.AT_i64 at)

@@ -543,6 +543,11 @@ Proof.
     + by congruence.
     + by rewrite_context_agree.
     + by rewrite_context_agree.
+  (* table size: context agreement preserves the address width. *)
+  - destruct (context_agree_table_type Hext H) as [tabt [Hnth Hagree]].
+    unfold table_agree in Hagree; move/andP in Hagree.
+    destruct Hagree as [_ Haddr]. move/eqP in Haddr.
+    rewrite Haddr. by eapply bet_table_size.
   (* table_copy *)
   - rewrite_context_agree.
     eapply context_agree_table_type in H as [tabt [Hnth Hagree]]; eauto.
@@ -559,6 +564,10 @@ Proof.
     econstructor; first by eauto.
     + by eauto.
      + rewrite_context_agree. congruence.
+  (* memory copy: both memory types may change independently. *)
+  - destruct (context_agree_mem_type Hext H) as [mt [Hnth Hagree]].
+    unfold mem_agree in Hagree; move/eqP in Hagree.
+    rewrite Hagree. by eapply bet_memory_size.
   (* memory copy: both memory types may change independently. *)
   - destruct (context_agree_mem_type Hext H) as [mt_dst [Hdst Hagree_dst]].
     destruct (context_agree_mem_type Hext H0) as [mt_src [Hsrc Hagree_src]].

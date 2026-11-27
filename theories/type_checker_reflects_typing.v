@@ -1312,7 +1312,10 @@ Proof.
     (* Table_set *)
     + by resolve_tc_be_typing.
     (* Table_size *)
-    + by resolve_tc_be_typing.
+    + apply bet_weakening_empty_1.
+      eapply bet_subtyping.
+      * eapply bet_table_size. eassumption.
+      * by resolve_subtyping.
     (* Table_grow *)
     + by resolve_tc_be_typing.
     (* Table_fill *)
@@ -1339,7 +1342,10 @@ Proof.
     (* Store_vec_lane *)
     + by resolve_tc_be_typing.
     (* Memory_size *)
-    + by resolve_tc_be_typing.
+    + apply bet_weakening_empty_1.
+      eapply bet_subtyping.
+      * eapply bet_memory_size. eassumption.
+      * by resolve_subtyping.
     (* Memory_grow *)
     + by resolve_tc_be_typing.
     (* Memory_fill *)

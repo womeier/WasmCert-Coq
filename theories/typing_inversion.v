@@ -219,7 +219,7 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
         tabt.(tt_elem_type) = t
   | BI_table_size x =>
       exists tabt,
-      tf = (Tf [::] [::T_num T_i32]) /\
+      tf = (Tf [::] [::Addressing.address_value_type tabt.(tt_address_type)]) /\
         lookup_N (tc_tables C) x = Some tabt
   | BI_table_grow x =>
       exists tabt t,
@@ -280,7 +280,7 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
         load_store_vec_lane_bounds width marg x
   | BI_memory_size x =>
       exists mt,
-      tf = (Tf [::] [::T_num T_i32]) /\
+      tf = (Tf [::] [::Addressing.address_value_type mt.(mt_address_type)]) /\
         lookup_N (tc_mems C) x = Some mt
   | BI_memory_grow x =>
       exists mt,

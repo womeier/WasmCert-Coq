@@ -304,7 +304,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   be_typing C [::BI_table_set x] (Tf [::T_num T_i32; T_ref t] [::])
 | bet_table_size : forall C x tabtype,
   lookup_N (tc_tables C) x = Some tabtype ->
-  be_typing C [::BI_table_size x] (Tf [::] [::T_num T_i32])
+  be_typing C [::BI_table_size x] (Tf [::] [::Addressing.address_value_type tabtype.(tt_address_type)])
 | bet_table_grow : forall C x tabtype t,
   lookup_N (tc_tables C) x = Some tabtype ->
   tabtype.(tt_elem_type) = t ->
@@ -353,7 +353,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   be_typing C [::BI_store_vec_lane width m_arg x] (Tf [::T_num T_i32; T_vec T_v128] [::])
 | bet_memory_size : forall C x mem,
   lookup_N (tc_mems C) x = Some mem ->
-  be_typing C [::BI_memory_size x] (Tf [::] [::T_num T_i32])
+  be_typing C [::BI_memory_size x] (Tf [::] [::Addressing.address_value_type mem.(mt_address_type)])
 | bet_memory_grow : forall C x mem,
   lookup_N (tc_mems C) x = Some mem ->
   be_typing C [::BI_memory_grow x] (Tf [::T_num T_i32] [::T_num T_i32])

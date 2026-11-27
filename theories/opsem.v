@@ -329,7 +329,8 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
   forall x tab sz s f hs,
     stab s f.(f_inst) x = Some tab ->
     tab_size tab = sz ->
-    reduce hs s f [:: AI_basic (BI_table_size x)] hs s f [::$VN (VAL_int32 (Wasm_int.int_of_Z i32m (Z.of_nat sz)))]
+    reduce hs s f [:: AI_basic (BI_table_size x)] hs s f
+      [::$VN (Addressing.value_of_address tab.(tableinst_type).(tt_address_type) (N.of_nat sz))]
 | r_table_grow_success :
   forall x n sz tabinit s f s' hs,
     stab_grow s f.(f_inst) x (Wasm_int.N_of_uint i32m n) tabinit = Some (s', sz) ->
@@ -550,7 +551,8 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
   forall x f m n s hs,
     smem s f.(f_inst) x = Some m ->
     mem_size m = n ->
-    reduce hs s f [::AI_basic (BI_memory_size x)] hs s f [::$VN (VAL_int32 (Wasm_int.int_of_Z i32m (Z.of_N n)))]
+    reduce hs s f [::AI_basic (BI_memory_size x)] hs s f
+      [::$VN (Addressing.value_of_address m.(meminst_type).(mt_address_type) n)]
 | r_memory_grow_success :
   forall x s f s' sz c hs,
     smem_grow s f.(f_inst) x (Wasm_int.N_of_uint i32m c) = Some (s', sz) ->

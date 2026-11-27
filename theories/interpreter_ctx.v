@@ -947,7 +947,9 @@ the condition that all values should live in the operand stack. *)
     (* AI_basic (BI_table_size x) *)
     - destruct (stab s fc.(FC_frame).(f_inst) x) as [tab|] eqn:Hstab.
       (* Some xx *)
-      + apply <<hs, (s, (fc, lcs) :: ccs', ((VAL_num (VAL_int32 ($u32oz (Z.of_nat (tab_size tab))))) :: vs0, es0), None), d>> => //.
+      + apply <<hs, (s, (fc, lcs) :: ccs',
+          (VAL_num (Addressing.value_of_address tab.(tableinst_type).(tt_address_type)
+            (N.of_nat (tab_size tab))) :: vs0, es0), None), d>> => //.
         resolve_reduce_ctx vs0 es0.
         by eapply r_table_size; eauto.
       (* None *)
@@ -1315,7 +1317,9 @@ the condition that all values should live in the operand stack. *)
     (* AI_basic BI_memory_size *)
     - destruct (smem s fc.(FC_frame).(f_inst) x) as [s_mem_s_j|] eqn:?.
       (* Some j *)
-      + apply <<hs, (s, (fc, lcs) :: ccs', (VAL_num (VAL_int32 ($u32oz (Z.of_N (mem_size (s_mem_s_j))))) :: vs0, es0), None), d>> => //.
+      + apply <<hs, (s, (fc, lcs) :: ccs',
+          (VAL_num (Addressing.value_of_address s_mem_s_j.(meminst_type).(mt_address_type)
+            (mem_size s_mem_s_j)) :: vs0, es0), None), d>> => //.
         resolve_reduce_ctx vs0 es0.
         by subst; eapply r_memory_size; eauto.
       (* None *)

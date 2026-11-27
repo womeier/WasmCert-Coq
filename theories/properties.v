@@ -13,6 +13,11 @@ Unset Printing Implicit Defensive.
 
 (** * Basic Lemmas **)
 
+Lemma value_of_address_type a n :
+  T_num (typeof_num (Addressing.value_of_address a n)) =
+    Addressing.address_value_type a.
+Proof. destruct a; reflexivity. Qed.
+
 (** List operations **)
 
 (* Friction between seq and List *)

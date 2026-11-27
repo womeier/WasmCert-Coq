@@ -3,7 +3,7 @@
 
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From compcert Require Floats.
-From Wasm Require Export common memory datatypes_properties list_extra simd_execute.
+From Wasm Require Export common memory datatypes_properties list_extra simd_execute addressing.
 From Stdlib Require Import ZArith.
 
 (* see common.v *)
