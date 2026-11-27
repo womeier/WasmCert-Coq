@@ -132,4 +132,19 @@ let () =
       ['\x80'], None;
       ['\x00'; '\x00'], None;
       [], None ];
+  List.iter
+    (fun x ->
+      let x = BigZ.of_string x in
+      match encode_typeidx x with
+      | None -> check "heap index printer unexpectedly rejected" false
+      | Some bytes ->
+          check "heap index actual printer/parser roundtrip"
+            (match decode_typeidx bytes with
+             | Some y -> BigZ.equal x y
+             | None -> false);
+          check "heap index printer five-byte limit" (List.length bytes <= 5))
+    ["0"; "63"; "64"; "127"; "128"; "8191"; "8192"; "16383"; "16384";
+     "1048575"; "1048576"; "2147483647"; "2147483648"; "4294967295"];
+  check "heap index printer rejects overflow"
+    (encode_typeidx (BigZ.of_string "4294967296") = None);
   Printf.printf "GC extraction: %d/%d checks passed\n" !checks !checks

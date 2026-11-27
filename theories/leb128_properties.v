@@ -543,3 +543,52 @@ Proof.
   - intros [Encoding [Range Width]].
     now apply run_heap_typeidx_leb_complete.
 Qed.
+
+Theorem parse_s32_prefix_complete n :
+  parser_complete (@parse_s32 (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+    (fun bs v => signed_leb bs (Wasm_int.Int32.signed v) /\ length bs <= 5).
+Proof.
+  unfold parse_s32.
+  eapply parser_complete_guardM with
+    (P := fun bs z => signed_leb bs z /\ length bs <= 5).
+  - apply parser_complete_assert_sized.
+    + eapply parser_complete_weaken.
+      * apply parser_complete_extract. exact parse_signed_complete.
+      * intros bs z [P _]. exact P.
+    + intros bs z [_ L]. apply N.leb_le. lia.
+  - intros bs v [P L].
+    exists (Wasm_int.Int32.signed v). split; [auto |].
+    pose proof (Wasm_int.Int32.signed_range v) as Range.
+    change (-2147483648 <= Wasm_int.Int32.signed v <= 2147483647)%Z in Range.
+    assert (Lower : Z.leb (-2147483648) (Wasm_int.Int32.signed v) = true)
+      by (apply Z.leb_le; lia).
+    assert (Upper : Z.leb (Wasm_int.Int32.signed v) 2147483647 = true)
+      by (apply Z.leb_le; lia).
+    rewrite Lower, Upper. simpl.
+    now rewrite Wasm_int.Int32.repr_signed.
+Qed.
+
+Theorem parse_s64_prefix_complete n :
+  parser_complete (@parse_s64 (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+    (fun bs v => signed_leb bs (Wasm_int.Int64.signed v) /\ length bs <= 10).
+Proof.
+  unfold parse_s64.
+  eapply parser_complete_guardM with
+    (P := fun bs z => signed_leb bs z /\ length bs <= 10).
+  - apply parser_complete_assert_sized.
+    + eapply parser_complete_weaken.
+      * apply parser_complete_extract. exact parse_signed_complete.
+      * intros bs z [P _]. exact P.
+    + intros bs z [_ L]. apply N.leb_le. lia.
+  - intros bs v [P L].
+    exists (Wasm_int.Int64.signed v). split; [auto |].
+    pose proof (Wasm_int.Int64.signed_range v) as Range.
+    change (-9223372036854775808 <= Wasm_int.Int64.signed v <=
+      9223372036854775807)%Z in Range.
+    assert (Lower : Z.leb (-9223372036854775808) (Wasm_int.Int64.signed v) = true)
+      by (apply Z.leb_le; lia).
+    assert (Upper : Z.leb (Wasm_int.Int64.signed v) 9223372036854775807 = true)
+      by (apply Z.leb_le; lia).
+    rewrite Lower, Upper. simpl.
+    now rewrite Wasm_int.Int64.repr_signed.
+Qed.

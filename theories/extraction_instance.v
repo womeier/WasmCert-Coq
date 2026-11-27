@@ -7,6 +7,7 @@ From ExtLib Require Import Structures.Monad IdentityMonad.
 
 From Wasm Require Import memory_vec binary_format_parser text_format_parser.
 From Wasm Require Import gc_numerics gc_binary gc_types.
+From Wasm Require Import binary_format_printer.
 
 (* see common.v *)
 Set SsrOldRewriteGoalsOrder.
@@ -76,6 +77,7 @@ Module Utility.
     Definition encode_packed := encode_packed_type.
     Definition decode_packed := decode_packed_type.
     Definition decode_typeidx := run_parse_heap_typeidx.
+    Definition encode_typeidx := binary_of_heap_typeidx.
   End GC.
   
   Definition vali32_of_Z (z: Z) : value :=

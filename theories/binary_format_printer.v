@@ -50,6 +50,13 @@ Definition binary_of_idx n := binary_of_u32 n.
 Definition binary_of_typeidx (t : typeidx) : list byte :=
   binary_of_idx t.
 
+(** Unlike ordinary typeidx immediates, a type index occurring as a heap
+    type uses a signed 33-bit encoding.  Reject indices outside u32. *)
+Definition binary_of_heap_typeidx (t : typeidx) : option (list byte) :=
+  if N.leb t 4294967295
+  then Some (leb128.encode_signed (Z.of_N t))
+  else None.
+
 Definition binary_of_funcidx (t : funcidx) : list byte :=
   binary_of_idx t.
 
