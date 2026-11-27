@@ -3,7 +3,7 @@ set -euo pipefail
 
 folder="${1:-./wast_testsuite}"
 filter="${2:-}"
-jobs="${JOBS:-$(nproc)}"
+jobs="${JOBS:-2}"
 
 shopt -s nullglob
 
@@ -20,10 +20,10 @@ fi
 
 exe="${EXE:-_build/default/src/wasm_coq_interpreter.exe}"
 if [[ ! -x "$exe" ]]; then
-  dune build
+  dune build -j "$jobs"
 fi
 
-results_dir=$(mktemp -d)
+results_dir=$(mktemp -d "${TMPDIR:-/tmp/opencode}/wasmcert-wast.XXXXXXXX")
 lockfile="$results_dir/.lock"
 : > "$lockfile"
 trap 'rm -rf "$results_dir"' EXIT
@@ -52,9 +52,10 @@ run_one() {
   cleaned=$(printf '%s' "$output" | tr -d '\r' | sed 's/\x1b\[[0-9;]*m//g')
 
   # Determine outcome and per-file result line.
-  local summary
+  local summary failed=0
   if (( rc != 0 )); then
     summary="CRASH: $base"
+    failed=1
     echo "0 0" > "$results_dir/$base"
   else
     local result_line
@@ -62,12 +63,17 @@ run_one() {
       if [[ "$result_line" =~ Result:\ ([0-9]+)/([0-9]+) ]]; then
         echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}" > "$results_dir/$base"
         summary="DONE: $base — $result_line"
+        if (( BASH_REMATCH[1] != BASH_REMATCH[2] )); then
+          failed=1
+        fi
       else
         summary="PARSE ERROR: $base — could not parse result line"
+        failed=1
         echo "0 0" > "$results_dir/$base"
       fi
     else
       summary="NO RESULT: $base"
+      failed=1
       echo "0 0" > "$results_dir/$base"
     fi
   fi
@@ -80,12 +86,14 @@ run_one() {
     echo "----- $summary -----"
     echo
   } 9>"$lockfile"
+  return "$failed"
 }
 export -f run_one
 
 echo "Running ${#files[@]} .wast files with $jobs parallel jobs..."
 
-printf '%s\n' "${files[@]}" | xargs -P "$jobs" -I {} bash -c 'run_one "$@"' _ {} "$exe" "$results_dir" "$lockfile"
+worker_status=0
+printf '%s\n' "${files[@]}" | xargs -P "$jobs" -I {} bash -c 'run_one "$@"' _ {} "$exe" "$results_dir" "$lockfile" || worker_status=$?
 
 # Aggregate results
 total_passed=0
@@ -107,5 +115,10 @@ echo "Total Passed: $total_passed/$total_tests ($percentage%)"
 
 if (( total_passed < total_tests )); then
   echo "FAILED: $((total_tests - total_passed)) test(s) did not pass."
+  exit 1
+fi
+
+if (( worker_status != 0 )); then
+  echo "FAILED: one or more files crashed, lacked a valid summary, or failed tests." >&2
   exit 1
 fi
