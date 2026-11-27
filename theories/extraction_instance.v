@@ -78,6 +78,9 @@ Module Utility.
     Definition decode_packed := decode_packed_type.
     Definition decode_typeidx := run_parse_heap_typeidx.
     Definition encode_typeidx := binary_of_heap_typeidx.
+    Definition encode_immediate_typeidx := binary_of_typeidx.
+    Definition decode_immediate_typeidx (bs : list Byte.byte) : option typeidx :=
+      run bs (fun _ => parse_typeidx).
   End GC.
   
   Definition vali32_of_Z (z: Z) : value :=

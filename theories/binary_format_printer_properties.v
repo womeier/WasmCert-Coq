@@ -3,7 +3,7 @@
 From Stdlib Require Import ZArith List Lia.
 From Wasm Require Import binary_format_printer binary_format_parser
   numerics leb128_properties leb128_printer_properties
-  binary_parser_combinator_properties.
+  leb128_unsigned_printer_properties binary_parser_combinator_properties.
 From parseque Require Import Parseque.
 
 Theorem binary_of_heap_typeidx_roundtrip x bs :
@@ -63,4 +63,29 @@ Proof.
       change (-9223372036854775808 <= Wasm_int.Int64.signed x <=
         9223372036854775807)%Z in Range.
       lia.
+Qed.
+
+Theorem binary_of_u32_roundtrip x :
+  (x <= 4294967295)%N ->
+  @run option _ _ _ _ Byte.byte tokBytes N
+    (binary_of_u32 x) (fun _ => parse_u32_as_N) = Some x.
+Proof.
+  intro Range.
+  apply (@run_parser_complete N (fun _ => parse_u32_as_N)
+    (fun bs x => unsigned_leb bs x /\ (x <= 4294967295)%N /\ length bs <= 5)).
+  - exact parse_u32_prefix_complete.
+  - unfold binary_of_u32, binary_of_N. split.
+    + apply encode_unsigned_sound.
+    + split; [exact Range |].
+      apply (encode_unsigned_length_bound 4).
+      change (Z.of_N x < 34359738368)%Z.
+      apply N2Z.inj_le in Range. lia.
+Qed.
+
+Theorem binary_of_typeidx_roundtrip x :
+  (x <= 4294967295)%N ->
+  @run option _ _ _ _ Byte.byte tokBytes N
+    (binary_of_typeidx x) (fun _ => parse_typeidx) = Some x.
+Proof.
+  apply binary_of_u32_roundtrip.
 Qed.

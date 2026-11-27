@@ -135,6 +135,10 @@ let () =
   List.iter
     (fun x ->
       let x = BigZ.of_string x in
+      check "ordinary unsigned type-index actual printer/parser roundtrip"
+        (match decode_immediate_typeidx (encode_immediate_typeidx x) with
+         | Some y -> BigZ.equal x y
+         | None -> false);
       match encode_typeidx x with
       | None -> check "heap index printer unexpectedly rejected" false
       | Some bytes ->
@@ -147,4 +151,7 @@ let () =
      "1048575"; "1048576"; "2147483647"; "2147483648"; "4294967295"];
   check "heap index printer rejects overflow"
     (encode_typeidx (BigZ.of_string "4294967296") = None);
+  check "ordinary index encoding is not heap signed encoding"
+    (encode_immediate_typeidx (BigZ.of_int 64) = ['\x40'] &&
+      encode_typeidx (BigZ.of_int 64) = Some ['\xc0'; '\x00']);
   Printf.printf "GC extraction: %d/%d checks passed\n" !checks !checks

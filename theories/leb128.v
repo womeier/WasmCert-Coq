@@ -95,9 +95,6 @@ Definition encode_unsigned_aux (n : N) : list byte :=
   | Npos n' => make_msb_of_non_first_byte_one (binary_of_aux2 nil nil n')
   end.
 
-Definition encode_unsigned (n : N) : list byte :=
-  List.rev (encode_unsigned_aux n).
-
 Definition encode_signed_aux (z : Z) : list byte :=
   match z with
   | Z0 => cons x00 nil
@@ -141,6 +138,27 @@ Definition signed_encoder_fuel (z : Z) : nat :=
 
 Definition encode_signed (z : Z) : list byte :=
   encode_signed_fuel (signed_encoder_fuel z) z.
+
+(** The ordinary u32/index/vector-length printer uses the same checked
+    byte conversion and a bit-length structural bound. *)
+Fixpoint encode_unsigned_fuel (fuel : nat) (n : N) : list byte :=
+  match fuel with
+  | O => nil
+  | S fuel' =>
+      if N.ltb n 128
+      then leb_byte n :: nil
+      else leb_byte (N.modulo n 128 + 128) ::
+        encode_unsigned_fuel fuel' (N.div n 128)
+  end.
+
+Definition unsigned_encoder_fuel (n : N) : nat :=
+  match n with
+  | N0 => 1
+  | Npos p => S (Pos.size_nat p)
+  end.
+
+Definition encode_unsigned (n : N) : list byte :=
+  encode_unsigned_fuel (unsigned_encoder_fuel n) n.
 
 Section Language.
 

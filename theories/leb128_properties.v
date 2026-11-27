@@ -592,3 +592,21 @@ Proof.
     rewrite Lower, Upper. simpl.
     now rewrite Wasm_int.Int64.repr_signed.
 Qed.
+
+Theorem parse_u32_prefix_complete n :
+  parser_complete (@parse_u32_as_N (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+    (fun bs x => unsigned_leb bs x /\ (x <= 4294967295)%N /\ length bs <= 5).
+Proof.
+  unfold parse_u32_as_N.
+  eapply parser_complete_guardM with
+    (P := fun bs x => unsigned_leb bs x /\ length bs <= 5).
+  - apply parser_complete_assert_sized.
+    + eapply parser_complete_weaken.
+      * apply parser_complete_extract. exact parse_unsigned_complete.
+      * intros bs x [P _]. exact P.
+    + intros bs x [_ L]. apply N.leb_le. lia.
+  - intros bs x [P [Range L]].
+    exists x. split; [auto |].
+    assert (Bound : N.leb x 4294967295 = true) by (now apply N.leb_le).
+    now rewrite Bound.
+Qed.
