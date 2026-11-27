@@ -459,17 +459,17 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
               type_update ts [::(T_num T_i32)] [::(T_num T_i32)]
           | None => None
           end
-      | BI_memory_fill =>
-          match lookup_N C.(tc_mems) 0%N with
+      | BI_memory_fill x =>
+          match lookup_N C.(tc_mems) x with
           | Some _ =>
               type_update ts [::(T_num T_i32); (T_num T_i32); (T_num T_i32)] nil
           | None => None
           end
-      | BI_memory_copy =>
-          match lookup_N C.(tc_mems) 0%N with
-          | Some _ =>
+      | BI_memory_copy x y =>
+          match lookup_N C.(tc_mems) x, lookup_N C.(tc_mems) y with
+          | Some _, Some _ =>
               type_update ts [::(T_num T_i32); (T_num T_i32); (T_num T_i32)] nil
-          | None => None
+          | _, _ => None
           end
       | BI_memory_init x y =>
           match lookup_N C.(tc_mems) x with

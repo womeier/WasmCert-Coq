@@ -1,7 +1,7 @@
 (** Wasm AST to binary.
 Breaks non-determinism ties; see binary_format_spec.v for the spec. *)
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
-From Wasm Require Import datatypes_properties numerics common list_extra leb128.
+From Wasm Require Import datatypes_properties numerics common list_extra leb128 operations.
 From compcert Require Integers.
 From Stdlib Require Import ZArith Strings.Byte.
 
@@ -73,11 +73,9 @@ Definition binary_of_vec {A} (f : A -> list byte) (es : list A) : list byte :=
   (binary_of_u32_nat (List.length es)) ++ (List.concat (List.map f es)).
 
 Definition binary_of_memarg (marg: memarg) : list byte :=
-  (if N.eqb marg.(memarg_memory) 0 then
-     binary_of_u32 marg.(memarg_align)
-   else
-     binary_of_u32 (N.add marg.(memarg_align) 64) ++
-       binary_of_memidx marg.(memarg_memory)) ++
+  binary_of_u32 (memarg_flags marg) ++
+    (if N.eqb marg.(memarg_memory) 0 then nil
+     else binary_of_memidx marg.(memarg_memory)) ++
     binary_of_u32 marg.(memarg_offset).
 
 Definition binary_of_i32 (x : i32) : list byte :=
@@ -108,6 +106,12 @@ Definition binary_of_result_type rt : list byte :=
 (** An opaque definition for cases that can’t happen because of the well-formed properties. **)
 Definition dummy : list byte.
 Proof. exact (x00 :: x00 :: x00 :: nil). Qed.
+
+Definition binary_of_laneidx (x: laneidx) : list byte :=
+  match Byte.of_N x with
+  | Some b => b :: nil
+  | None => dummy
+  end.
 
 (* placeholder for vector values, not implemented *)
 Definition binary_of_valvec (v: value_vec) :=
@@ -164,7 +168,7 @@ Definition binary_of_extract_vec (sh: vshape) (s: option sx) (x: laneidx) :=
    | VS_f VSF_64_2, None => x21
    | _, _ => x00 (* will not happen due to well formedness *)
    end
-  ) :: binary_of_N x.
+  ) :: binary_of_laneidx x.
 
 Definition binary_of_replace_vec (sh: vshape) (x: laneidx) :=
   xfd ::
@@ -176,7 +180,7 @@ Definition binary_of_replace_vec (sh: vshape) (x: laneidx) :=
    | VS_f VSF_32_4 => x20
    | VS_f VSF_64_2 => x22
    end
-  ) :: binary_of_N x.
+  ) :: binary_of_laneidx x.
   
 Definition binary_of_load_vec (lvarg: load_vec_arg) (marg: memarg) :=
   let opcode :=
@@ -210,7 +214,7 @@ Definition binary_of_load_vec_lane (w: vwidth) (marg: memarg) (x: laneidx) :=
   | 64%N => x57
   | _ => x00 (* will not happen due to wellformedness *)
   end
-  ) :: binary_of_memarg marg ++ binary_of_N x.
+  ) :: binary_of_memarg marg ++ binary_of_laneidx x.
 
 (* store_vec_lane and load_vec uses the same args. Maybe it's better to find a new name *)
 Definition binary_of_store_vec (marg: memarg) :=
@@ -225,7 +229,7 @@ Definition binary_of_store_vec_lane (w: vwidth) (marg: memarg) (x: laneidx) :=
   | 64%N => x5b
   | _ => x00 (* will not happen due to wellformedness *)
   end
-  ) :: binary_of_memarg marg ++ binary_of_N x.
+  ) :: binary_of_memarg marg ++ binary_of_laneidx x.
 
 Fixpoint binary_of_be (be : basic_instruction) : list byte :=
   let binary_of_instrs bes := List.concat (List.map binary_of_be bes) in
@@ -305,8 +309,8 @@ Fixpoint binary_of_be (be : basic_instruction) : list byte :=
   | BI_memory_grow x => x40 :: binary_of_memidx x
   | BI_memory_init x y => xfc :: x08 :: binary_of_dataidx y ++ binary_of_memidx x
   | BI_data_drop x => xfc :: x09 :: binary_of_idx x
-  | BI_memory_copy => xfc :: x0a :: x00 :: x00 :: nil
-  | BI_memory_fill => xfc :: x0b :: x00 :: nil
+  | BI_memory_copy x y => xfc :: x0a :: binary_of_memidx x ++ binary_of_memidx y
+  | BI_memory_fill x => xfc :: x0b :: binary_of_memidx x
                          
   | BI_const_num (VAL_int32 x) => x41 :: binary_of_i32 x
   | BI_const_num (VAL_int64 x) => x42 :: binary_of_i64 x
@@ -711,5 +715,8 @@ Definition binary_of_module (m : module) : list byte :=
   only_if_non_nil binary_of_exportssec m.(mod_exports) ++
   only_if_non_none binary_of_startsec m.(mod_start) ++
   only_if_non_nil binary_of_elemsec m.(mod_elems) ++
+  (if List.existsb (fun f => bes_datacount_required f.(modfunc_body)) m.(mod_funcs)
+   then x0c :: with_length (binary_of_u32_nat (List.length m.(mod_datas)))
+   else nil) ++
   only_if_non_nil binary_of_codesec m.(mod_funcs) ++
   only_if_non_nil binary_of_datasec m.(mod_datas).

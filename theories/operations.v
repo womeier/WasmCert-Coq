@@ -15,6 +15,36 @@ Unset Printing Implicit Defensive.
 
 Definition v128_size: N := 16%N.
 
+Definition memarg_flags (marg: memarg) : N :=
+  if N.eqb marg.(memarg_memory) 0 then marg.(memarg_align)
+  else N.add marg.(memarg_align) 64.
+
+(* Bit 6 requests an explicit memory index; higher flag bits are reserved. *)
+Definition decode_memarg_flags (flags: N) : option (N * bool) :=
+  if N.ltb flags 64 then Some (flags, false)
+  else if N.ltb flags 128 then Some (N.sub flags 64, true)
+  else None.
+
+(* Shared by binary parsing and printing: bulk data instructions require a
+   data-count section, including when nested inside structured instructions. *)
+Fixpoint be_datacount_required (be: basic_instruction) :=
+  let bes_required bes :=
+    List.fold_left orb (List.map be_datacount_required bes) false in
+  match be with
+  | BI_memory_init _ _ | BI_data_drop _ => true
+  | BI_block _ bes | BI_loop _ bes => bes_required bes
+  | BI_if _ bes1 bes2 => orb (bes_required bes1) (bes_required bes2)
+  | _ => false
+  end.
+
+Fixpoint bes_datacount_required (bes: expr) :=
+  match bes with
+  | nil => false
+  | cons be bes' =>
+      if be_datacount_required be then true
+      else bes_datacount_required bes'
+  end.
+
 Section Operations.
   Context `{memory: BlockUpdateMemory} `{hfc: host_function_class}.
 
@@ -878,8 +908,8 @@ Definition sglob (s : store_record) (i : moduleinst) (j : globalidx) : option gl
 Definition sglob_val (s : store_record) (i : moduleinst) (j : globalidx) : option value :=
   option_map g_val (sglob s i j).
 
-Definition smem_ind (s : store_record) (i : moduleinst) : option memaddr :=
-  lookup_N i.(inst_mems) 0%N.
+Definition smem_ind (s : store_record) (i : moduleinst) (x: memidx) : option memaddr :=
+  lookup_N i.(inst_mems) x.
 
 Definition smem (s: store_record) (inst: moduleinst) (x: memidx) : option meminst :=
   match lookup_N inst.(inst_mems) x with

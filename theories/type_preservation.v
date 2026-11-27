@@ -553,7 +553,11 @@ Proof.
   - rewrite_context_agree.
     econstructor; first by eauto.
     + by rewrite - Htableagree.
-    + by rewrite_context_agree.
+     + by rewrite_context_agree.
+  (* memory copy: both memory types may change independently. *)
+  - destruct (context_agree_mem_type Hext H) as [mt_dst [Hdst Hagree_dst]].
+    destruct (context_agree_mem_type Hext H0) as [mt_src [Hsrc Hagree_src]].
+    by eapply bet_memory_copy; eauto.
 Qed.
 
 (* Two agreeing contexts respect typing of each other *)

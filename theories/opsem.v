@@ -560,87 +560,91 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
     smem_grow s f.(f_inst) x (Wasm_int.N_of_uint i32m c) = None ->
     reduce hs s f [::$VN (VAL_int32 c); AI_basic (BI_memory_grow x)] hs s f [::$VN (VAL_int32 int32_minus_one)]
 | r_memory_fill_bound:
-  forall s f mem d n v hs,
+  forall x s f mem d n v hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let d_z := Wasm_int.Z_of_uint i32m d in
-    smem s f.(f_inst) N0 = Some mem ->
+    smem s f.(f_inst) x = Some mem ->
     (Z.add n_z d_z > Z.of_N (mem_length mem))%Z ->
-    reduce hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); $VN (VAL_int32 n); AI_basic (BI_memory_fill)]
+    reduce hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); $VN (VAL_int32 n); AI_basic (BI_memory_fill x)]
            hs s f [::AI_trap]
 | r_memory_fill_return:
-  forall s f mem d n v hs,
+  forall x s f mem d n v hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let d_z := Wasm_int.Z_of_uint i32m d in
-    smem s f.(f_inst) N0 = Some mem ->
+    smem s f.(f_inst) x = Some mem ->
     (Z.add n_z d_z <= Z.of_N (mem_length mem))%Z ->
     (n_z = 0)%Z ->
-    reduce hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); $VN (VAL_int32 n); AI_basic (BI_memory_fill)]
+    reduce hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); $VN (VAL_int32 n); AI_basic (BI_memory_fill x)]
            hs s f [::]
 | r_memory_fill_step:
-  forall s f mem d n d' n' v hs,
+  forall x s f mem d n d' n' v hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let d_z := Wasm_int.Z_of_uint i32m d in
-    smem s f.(f_inst) N0 = Some mem ->
+    smem s f.(f_inst) x = Some mem ->
     (Z.add n_z d_z <= Z.of_N (mem_length mem))%Z ->
     (n_z <> 0)%Z ->
     n' = Wasm_int.int_of_Z i32m (Z.sub n_z 1) ->
     d' = Wasm_int.int_of_Z i32m (Z.add d_z 1) ->
-    reduce hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); $VN (VAL_int32 n); AI_basic (BI_memory_fill)]
-      hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 N0));
-                $VN (VAL_int32 d'); $VN (VAL_int32 v); $VN (VAL_int32 n'); AI_basic (BI_memory_fill)]
+    reduce hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); $VN (VAL_int32 n); AI_basic (BI_memory_fill x)]
+      hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 x));
+                $VN (VAL_int32 d'); $VN (VAL_int32 v); $VN (VAL_int32 n'); AI_basic (BI_memory_fill x)]
 | r_memory_copy_bound :
-  forall src dst n mem s f hs,
+  forall x y src dst n mem_dst mem s f hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let src_z := Wasm_int.Z_of_uint i32m src in
     let dst_z := Wasm_int.Z_of_uint i32m dst in
-    smem s f.(f_inst) N0 = Some mem ->
+    smem s f.(f_inst) x = Some mem_dst ->
+    smem s f.(f_inst) y = Some mem ->
     ((Z.add src_z n_z > Z.of_N (mem_length mem))%Z \/
-     (Z.add dst_z n_z > Z.of_N (mem_length mem))%Z) ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy)]
+     (Z.add dst_z n_z > Z.of_N (mem_length mem_dst))%Z) ->
+    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy x y)]
       hs s f [::AI_trap]
 | r_memory_copy_return :
-  forall src dst n mem s f hs,
+  forall x y src dst n mem_dst mem s f hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let src_z := Wasm_int.Z_of_uint i32m src in
     let dst_z := Wasm_int.Z_of_uint i32m dst in
-    smem s f.(f_inst) N0 = Some mem ->
+    smem s f.(f_inst) x = Some mem_dst ->
+    smem s f.(f_inst) y = Some mem ->
     (Z.add src_z n_z <= Z.of_N (mem_length mem))%Z ->
-    (Z.add dst_z n_z <= Z.of_N (mem_length mem))%Z ->
+    (Z.add dst_z n_z <= Z.of_N (mem_length mem_dst))%Z ->
     (n_z = 0)%Z ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy)]
+    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy x y)]
       hs s f [::]
 | r_memory_copy_forward :
-  forall src dst n mem src' dst' n' s f hs,
+  forall x y src dst n mem_dst mem src' dst' n' s f hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let src_z := Wasm_int.Z_of_uint i32m src in
     let dst_z := Wasm_int.Z_of_uint i32m dst in
-    smem s f.(f_inst) N0 = Some mem ->
+    smem s f.(f_inst) x = Some mem_dst ->
+    smem s f.(f_inst) y = Some mem ->
     (Z.add src_z n_z <= Z.of_N (mem_length mem))%Z ->
-    (Z.add dst_z n_z <= Z.of_N (mem_length mem))%Z ->
+    (Z.add dst_z n_z <= Z.of_N (mem_length mem_dst))%Z ->
     (n_z <> 0)%Z ->
     (dst_z <= src_z)%Z ->
     n' = Wasm_int.int_of_Z i32m (Z.sub n_z 1) ->
     src' = Wasm_int.int_of_Z i32m (Z.add src_z 1) ->
     dst' = Wasm_int.int_of_Z i32m (Z.add dst_z 1) ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy)]
-      hs s f [:: $VN (VAL_int32 dst); $VN (VAL_int32 src); AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0 N0)); AI_basic (BI_store T_i32 (Some (Tp_i8)) (Build_memarg N0 N0 N0));
-              $VN (VAL_int32 dst'); $VN (VAL_int32 src'); $VN (VAL_int32 n'); AI_basic (BI_memory_copy)]
+    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy x y)]
+      hs s f [:: $VN (VAL_int32 dst); $VN (VAL_int32 src); AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0 y)); AI_basic (BI_store T_i32 (Some (Tp_i8)) (Build_memarg N0 N0 x));
+              $VN (VAL_int32 dst'); $VN (VAL_int32 src'); $VN (VAL_int32 n'); AI_basic (BI_memory_copy x y)]
 | r_memory_copy_backward :
-  forall src dst n mem src' dst' n' s f hs,
+  forall x y src dst n mem_dst mem src' dst' n' s f hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let src_z := Wasm_int.Z_of_uint i32m src in
     let dst_z := Wasm_int.Z_of_uint i32m dst in
-    smem s f.(f_inst) N0 = Some mem ->
+    smem s f.(f_inst) x = Some mem_dst ->
+    smem s f.(f_inst) y = Some mem ->
     (Z.add src_z n_z <= Z.of_N (mem_length mem))%Z ->
-    (Z.add dst_z n_z <= Z.of_N (mem_length mem))%Z ->
+    (Z.add dst_z n_z <= Z.of_N (mem_length mem_dst))%Z ->
     (n_z <> 0)%Z ->
     (dst_z > src_z)%Z ->
     n' = Wasm_int.int_of_Z i32m (Z.sub n_z 1) ->
     src' = Wasm_int.int_of_Z i32m (Z.add src_z (Z.sub n_z 1)) ->
     dst' = Wasm_int.int_of_Z i32m (Z.add dst_z (Z.sub n_z 1)) ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy)]
-      hs s f [:: $VN (VAL_int32 dst'); $VN (VAL_int32 src'); AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0 N0)); AI_basic (BI_store T_i32 (Some (Tp_i8)) (Build_memarg N0 N0 N0));
-              $VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n'); AI_basic (BI_memory_copy)]
+    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy x y)]
+      hs s f [:: $VN (VAL_int32 dst'); $VN (VAL_int32 src'); AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0 y)); AI_basic (BI_store T_i32 (Some (Tp_i8)) (Build_memarg N0 N0 x));
+              $VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n'); AI_basic (BI_memory_copy x y)]
 | r_memory_init_bound :
   forall x y src dst n mem data s f hs,
     let n_z := Wasm_int.Z_of_uint i32m n in

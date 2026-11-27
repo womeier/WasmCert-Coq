@@ -18,17 +18,21 @@ def section(tag, payload):
     return bytes([tag]) + uleb(len(payload)) + payload
 
 
-def module(instructions, memories=(1,), imports=(), data=(), data_count=None):
-    body = b"\x00" + instructions + b"\x0b"
+def module(instructions, memories=(1,), imports=(), data=(), data_count=None, peek=None):
+    bodies = [b"\x00" + instructions + b"\x0b"]
+    exports = [b"\x03run\x00\x00"]
+    if peek is not None:
+        bodies.append(b"\x00" + peek + b"\x0b")
+        exports.append(b"\x04peek\x00\x01")
     return (
         b"\x00asm\x01\x00\x00\x00"
         + section(1, vector([b"\x60\x00\x01\x7f"]))
         + (section(2, vector(imports)) if imports else b"")
-        + section(3, vector([b"\x00"]))
+        + section(3, vector([b"\x00" for _ in bodies]))
         + section(5, vector([b"\x00" + uleb(n) for n in memories]))
-        + section(7, vector([b"\x03run\x00\x00"]))
+        + section(7, vector(exports))
         + (section(12, uleb(data_count)) if data_count is not None else b"")
-        + section(10, vector([uleb(len(body)) + body]))
+        + section(10, vector([uleb(len(body)) + body for body in bodies]))
         + (section(11, vector(data)) if data else b"")
     )
 
@@ -105,3 +109,67 @@ check(
 trapping_init = b"\x41\x00\x41\x00\x41\x02\xfc\x08\x00\x01\x41\x00"
 print(f"(module binary {escaped(module(trapping_init, memories=(0, 1), data=(passive,), data_count=1))})")
 print('(assert_trap (invoke "run") "out of bounds memory access")')
+
+# Fill selects only the requested memory.
+fill1 = b"\x41\x00\x41\x2a\x41\x03\xfc\x0b\x01"
+check(fill1 + b"\x41\x02\x2d" + arg1, 42, memories=(0, 1))
+check(fill1 + b"\x41\x00\x2d" + arg, 0, memories=(1, 1))
+
+# Cross-memory copy uses source and destination bounds independently.
+source = b"\x02\x00\x41\x00\x0b\x04\x01\x02\x03\x04"
+copy = b"\x41\x00\x41\x00\x41\x04\xfc\x0a\x01\x00"
+check(copy + b"\x41\x03\x2d" + arg1, 4, memories=(1, 1), data=(source,))
+check(copy + b"\x41\x00\x2d" + arg, 1, memories=(1, 1), data=(source,))
+backward = b"\x41\x01\x41\x00\x41\x03\xfc\x0a\x01\x00"
+check(
+    backward + b"\x41\x03\x2d" + arg1, 3,
+    imports=(spectest_memory, spectest_memory), data=(source,),
+)
+forward = b"\x41\x00\x41\x01\x41\x03\xfc\x0a\x01\x00"
+check(
+    forward + b"\x41\x00\x2d" + arg1, 2,
+    imports=(spectest_memory, spectest_memory), data=(source,),
+)
+
+# An out-of-bounds source must trap before modifying the destination.
+target = b"\x02\x01\x41\x00\x0b\x01\x11"
+oob_copy = b"\x41\x00\x41\xff\xff\x03\x41\x02\xfc\x0a\x01\x00\x41\x00"
+fixture = module(
+    oob_copy, memories=(1, 1), data=(target,),
+    peek=b"\x41\x00\x2d" + arg1,
+)
+print(f"(module binary {escaped(fixture)})")
+print('(assert_trap (invoke "run") "out of bounds memory access")')
+print('(assert_return (invoke "peek") (i32.const 17))')
+
+# Zero length still checks both offsets; exactly the end is allowed.
+at_end = b"\x41\x80\x80\x04"
+check(at_end + at_end + b"\x41\x00\xfc\x0a\x01\x00\x41\x2a", 42, memories=(1, 1))
+past_end = b"\x41\x81\x80\x04"
+fixture = module(past_end + at_end + b"\x41\x00\xfc\x0a\x01\x00\x41\x00", memories=(1, 1))
+print(f"(module binary {escaped(fixture)})")
+print('(assert_trap (invoke "run") "out of bounds memory access")')
+
+for op in (b"\xfc\x0b\x02", b"\xfc\x0a\x02\x00", b"\xfc\x0a\x00\x02"):
+    invalid = module(b"\x41\x00\x41\x00\x41\x00" + op + b"\x41\x00", memories=(1, 1))
+    print(f'(assert_invalid (module binary {escaped(invalid)}) "unknown memory")')
+
+# Exporting memory 1 and importing it into another module preserves identity.
+provider = (
+    b"\x00asm\x01\x00\x00\x00"
+    + section(5, vector([b"\x00\x00", b"\x00\x01"]))
+    + section(7, vector([b"\x01m\x02\x01"]))
+)
+print(f"(module binary {escaped(provider)})")
+print('(register "provider")')
+provider_memory = b"\x08provider\x01m\x02\x00\x01"
+check(
+    b"\x41\x00\x41\x2a\x3a" + arg + b"\x41\x00\x2d" + arg1,
+    0, imports=(provider_memory,),
+)
+check(b"\x41\x00\x2d" + arg, 42, imports=(provider_memory,))
+
+# Active initialization bounds are checked in the selected memory.
+active_oob = b"\x02\x00\x41\x00\x0b\x01\x2a"
+fixture = module(b"\x41\x00", memories=(0, 1), data=(active_oob,))
+print(f'(assert_trap (module binary {escaped(fixture)}) "out of bounds memory access")')

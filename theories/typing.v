@@ -357,12 +357,13 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 | bet_memory_grow : forall C x mem,
   lookup_N (tc_mems C) x = Some mem ->
   be_typing C [::BI_memory_grow x] (Tf [::T_num T_i32] [::T_num T_i32])
-| bet_memory_fill : forall C mem,
-  lookup_N (tc_mems C) 0%N = Some mem ->
-  be_typing C [::BI_memory_fill] (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::])
-| bet_memory_copy : forall C mem,
-  lookup_N (tc_mems C) 0%N = Some mem ->
-  be_typing C [::BI_memory_copy] (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::])
+| bet_memory_fill : forall C x mem,
+  lookup_N (tc_mems C) x = Some mem ->
+  be_typing C [::BI_memory_fill x] (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::])
+| bet_memory_copy : forall C x y mem_dst mem,
+  lookup_N (tc_mems C) x = Some mem_dst ->
+  lookup_N (tc_mems C) y = Some mem ->
+  be_typing C [::BI_memory_copy x y] (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::])
 | bet_memory_init : forall C x y mem dat,
   lookup_N (tc_mems C) x = Some mem ->
   lookup_N (tc_datas C) y = Some dat ->

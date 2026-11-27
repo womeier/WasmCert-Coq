@@ -557,8 +557,8 @@ Instructions in this group are concerned with linear memory.
   | BI_store_vec_lane : vwidth -> memarg -> laneidx -> basic_instruction
   | BI_memory_size : memidx -> basic_instruction
   | BI_memory_grow : memidx -> basic_instruction
-  | BI_memory_fill
-  | BI_memory_copy
+  | BI_memory_fill : memidx -> basic_instruction
+  | BI_memory_copy : memidx -> memidx -> basic_instruction
   | BI_memory_init: memidx -> dataidx -> basic_instruction
   | BI_data_drop: dataidx -> basic_instruction
 (** std-doc:

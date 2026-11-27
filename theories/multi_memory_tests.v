@@ -53,3 +53,18 @@ Lemma simd_store_unknown_memory_invalid :
     [BI_store_vec_lane 32%N (Build_memarg 0%N 2%N 2%N) 0%N]
     (Tf [T_num T_i32; T_vec T_v128] []) = false.
 Proof. vm_compute. reflexivity. Qed.
+
+Lemma copy_between_memories_valid :
+  b_e_type_checker multi_memory_context [BI_memory_copy 1%N 0%N]
+    (Tf [T_num T_i32; T_num T_i32; T_num T_i32] []) = true.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma copy_unknown_source_invalid :
+  b_e_type_checker multi_memory_context [BI_memory_copy 1%N 2%N]
+    (Tf [T_num T_i32; T_num T_i32; T_num T_i32] []) = false.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma copy_unknown_destination_invalid :
+  b_e_type_checker multi_memory_context [BI_memory_copy 2%N 1%N]
+    (Tf [T_num T_i32; T_num T_i32; T_num T_i32] []) = false.
+Proof. vm_compute. reflexivity. Qed.

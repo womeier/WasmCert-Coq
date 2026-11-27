@@ -672,9 +672,9 @@ Fixpoint pp_basic_instruction (i : indentation) (be : basic_instruction) : strin
     indent i (with_fg be_style "memory.init " ++ pp_id x ++ newline)
   | BI_data_drop x =>
     indent i (with_fg be_style "data.drop " ++ pp_id x ++ newline)
-  | BI_memory_copy =>
+  | BI_memory_copy _ _ =>
     indent i (with_fg be_style "memory.copy" ++ newline)
-  | BI_memory_fill =>
+  | BI_memory_fill _ =>
     indent i (with_fg be_style "memory.fill" ++ newline)
   | BI_const_num v =>
     indent i (pp_value_num v)
