@@ -587,11 +587,11 @@ Proof.
       (* BI_store t [Some tp|None] marg *) t op marg |
       (* BI_store_vec marg *) marg |
       (* BI_store_vec_lane width marg laneidx *) width marg x |
-      (* BI_memory_size *) |
-      (* BI_memory_grow *) |
-      (* BI_memory_fill *) |
-      (* BI_memory_copy *) |
-      (* BI_memory_init x *) x |
+      (* BI_memory_size x *) x |
+      (* BI_memory_grow x *) x |
+      (* BI_memory_fill x *) x |
+      (* BI_memory_copy x y *) x y |
+      (* BI_memory_init x y *) x y |
       (* BI_data_drop x *) x |
       (* BI_unreachable *) |
       (* BI_nop *) |
@@ -1181,7 +1181,7 @@ the condition that all values should live in the operand stack. *)
     - destruct vs0 as [|v vs0]; first by no_args.
       assert_i32 v.
       (* VAL_int32 v :: ves' *)
-      destruct (smem s fc.(FC_frame).(f_inst)) as [mem_s_j|] eqn:?.
+      destruct (smem s fc.(FC_frame).(f_inst) marg.(memarg_memory)) as [mem_s_j|] eqn:?.
       (* Some mem_s_j *)
       { destruct ops as [[tp sx] | ].
         (* Some (tp, sx) *)
@@ -1218,7 +1218,7 @@ the condition that all values should live in the operand stack. *)
     - destruct vs0 as [|v vs0]; first by no_args.
       assert_i32 v.
       (* VAL_int32 v :: ves' *)
-      destruct (smem s fc.(FC_frame).(f_inst)) as [mem_s_j|] eqn:?.
+      destruct (smem s fc.(FC_frame).(f_inst) marg.(memarg_memory)) as [mem_s_j|] eqn:?.
       (* Some mem_s_j *)
       { destruct (load_vec mem_s_j ($nou32 v) lvarg marg) as [v' | ] eqn:Hload_vec.
         - apply <<hs, (s, (fc, lcs) :: ccs', (VAL_vec v' :: vs0, es0), None), d>> => //.
@@ -1243,7 +1243,7 @@ the condition that all values should live in the operand stack. *)
       assert_i32 v1.
       assert_value_vec v2.
       (* VAL_int32 v :: ves' *)
-      destruct (smem s fc.(FC_frame).(f_inst)) as [mem_s_j|] eqn:?.
+      destruct (smem s fc.(FC_frame).(f_inst) marg.(memarg_memory)) as [mem_s_j|] eqn:?.
       (* Some mem_s_j *)
       { destruct (load_vec_lane mem_s_j ($nou32 v1) v2 width marg x) as [v' | ] eqn:Hload_vec_lane.
         - apply <<hs, (s, (fc, lcs) :: ccs', (VAL_vec v' :: vs0, es0), None), d>> => //.
@@ -1270,7 +1270,7 @@ the condition that all values should live in the operand stack. *)
       destruct (typeof_num v2 == t) eqn:Heq; move/eqP in Heq; last by discriminate_value_type; apply num_subtyping in H; inversion H; subst.
       destruct op as [tp | ].
       (* packed *)
-      + destruct (smem_store_packed s fc.(FC_frame).(f_inst) ($nou32 v1) marg.(memarg_offset) v2 tp) as [s' | ] eqn:Hsmem.
+      + destruct (smem_store_packed s fc.(FC_frame).(f_inst) marg.(memarg_memory) ($nou32 v1) marg.(memarg_offset) v2 tp) as [s' | ] eqn:Hsmem.
         * apply <<hs, (s', (fc, lcs) :: ccs', (vs0, es0), None), d>> => //.
           resolve_reduce_ctx vs0 es0.
           by eapply r_store_packed_success; subst; eauto.
@@ -1279,7 +1279,7 @@ the condition that all values should live in the operand stack. *)
           resolve_reduce_ctx vs0 es0.
           by eapply r_store_packed_failure; subst; eauto.
       (* None *)
-      + destruct (smem_store s fc.(FC_frame).(f_inst) ($nou32 v1) marg.(memarg_offset) v2 t) as [s' | ] eqn:Hsmem.
+      + destruct (smem_store s fc.(FC_frame).(f_inst) marg.(memarg_memory) ($nou32 v1) marg.(memarg_offset) v2 t) as [s' | ] eqn:Hsmem.
         * apply <<hs, (s', (fc, lcs) :: ccs', (vs0, es0), None), d>> => //.
           resolve_reduce_ctx vs0 es0.
           by eapply r_store_success; subst; eauto.
@@ -1313,7 +1313,7 @@ the condition that all values should live in the operand stack. *)
         by eapply r_store_vec_lane_failure; subst; eauto.
       
     (* AI_basic BI_memory_size *)
-    - destruct (smem s fc.(FC_frame).(f_inst)) as [s_mem_s_j|] eqn:?.
+    - destruct (smem s fc.(FC_frame).(f_inst) x) as [s_mem_s_j|] eqn:?.
       (* Some j *)
       + apply <<hs, (s, (fc, lcs) :: ccs', (VAL_num (VAL_int32 ($u32oz (Z.of_N (mem_size (s_mem_s_j))))) :: vs0, es0), None), d>> => //.
         resolve_reduce_ctx vs0 es0.
@@ -1333,7 +1333,7 @@ the condition that all values should live in the operand stack. *)
     (* AI_basic BI_memory_grow *)
     - destruct vs0 as [|v vs0]; first by no_args.
       assert_i32 v.
-      destruct (smem_grow s fc.(FC_frame).(f_inst) ($nou32 v)) as [[s' sz] | ] eqn:Hsmem.
+      destruct (smem_grow s fc.(FC_frame).(f_inst) x ($nou32 v)) as [[s' sz] | ] eqn:Hsmem.
       (* Some mem'' *)
       + apply <<hs, (s', (fc, lcs) :: ccs', (VAL_num (VAL_int32 ($u32oz (Z.of_N sz))) :: vs0, es0), None), d>> => //.
         resolve_reduce_ctx vs0 es0.
@@ -1349,7 +1349,7 @@ the condition that all values should live in the operand stack. *)
       assert_i32 v3.
       assert_i32 v2.
       assert_i32 v1.
-      destruct (smem s fc.(FC_frame).(f_inst)) as [mem|] eqn:Hsmem.
+      destruct (smem s fc.(FC_frame).(f_inst) x) as [mem|] eqn:Hsmem.
       (* Some *)
       + destruct (Z.ltb (Z.of_N (mem_length mem)) (Z.add ($zou32 v1) ($zou32 v3))) eqn:Hlt; move/Z.ltb_spec0 in Hlt.
         (* true *)
@@ -1369,8 +1369,8 @@ the condition that all values should live in the operand stack. *)
                             [::$VN (VAL_int32 ($u32oz (Z.add ($zou32 v1) 1%Z)));
                              $VN (VAL_int32 v2);
                              $VN (VAL_int32 ($u32oz (Z.sub ($zou32 v3) 1%Z)));
-                            AI_basic (BI_memory_fill)] ++ es0),
-                          Some (AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0)))), d>> => //.
+                            AI_basic (BI_memory_fill x)] ++ es0),
+                          Some (AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 x)))), d>> => //.
             resolve_reduce_ctx vs0 es0.
             by eapply r_memory_fill_step; eauto; lias.
           }
@@ -1392,7 +1392,19 @@ the condition that all values should live in the operand stack. *)
       assert_i32 n.
       assert_i32 src.
       assert_i32 dst.
-      destruct (smem s fc.(FC_frame).(f_inst)) as [mem|] eqn:Hsmem.
+      destruct (smem s fc.(FC_frame).(f_inst) x) as [mem_dst|] eqn:Hsmem_dst.
+      2: { resolve_invalid_typing.
+           unfold_frame_type Hftype.
+           unfold_store_operations.
+           { eapply inst_typing_mem_lookup_inv in Hconjl0 as [? [Hextmt ?]]; eauto.
+             unfold ext_mem_typing in Hextmt; remove_bools_options.
+             by simplify_multieq.
+           }
+           { eapply inst_typing_mem_lookup_inv in Hconjl0 as [? [??]]; eauto.
+             by simplify_multieq.
+           }
+      }
+      destruct (smem s fc.(FC_frame).(f_inst) y) as [mem|] eqn:Hsmem.
       (* Some *)
       + destruct (Z.ltb (Z.of_N (mem_length mem)) (($zou32 src) + ($zou32 n))) eqn:Hboundy; move/Z.ltb_spec0 in Hboundy.
         (* y Out of bound *)
@@ -1400,7 +1412,7 @@ the condition that all values should live in the operand stack. *)
           resolve_reduce_ctx vs0 es0.
           by eapply r_memory_copy_bound; eauto; lias.
         }
-        destruct (Z.ltb (Z.of_N (mem_length mem)) (($zou32 dst) + ($zou32 n))) eqn:Hboundx; move/Z.ltb_spec0 in Hboundx.
+        destruct (Z.ltb (Z.of_N (mem_length mem_dst)) (($zou32 dst) + ($zou32 n))) eqn:Hboundx; move/Z.ltb_spec0 in Hboundx.
         (* x Out of bound *)
         { apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
           resolve_reduce_ctx vs0 es0.
@@ -1417,8 +1429,8 @@ the condition that all values should live in the operand stack. *)
           (* copy -- forward *)
           { apply <<hs, (s, (fc, lcs) :: ccs',
                           ((VAL_num (VAL_int32 src)) :: (VAL_num (VAL_int32 dst)) :: vs0,
-                            [::(AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0))); $VN (VAL_int32 ($u32oz (Z.add ($zou32 dst) 1))); $VN (VAL_int32 ($u32oz (Z.add ($zou32 src) 1%Z))); $VN (VAL_int32 ($u32oz (Z.sub ($zou32 n) 1))); AI_basic (BI_memory_copy)] ++ es0),
-                          Some (AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0)))), d>> => //.
+                            [::(AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 x))); $VN (VAL_int32 ($u32oz (Z.add ($zou32 dst) 1))); $VN (VAL_int32 ($u32oz (Z.add ($zou32 src) 1%Z))); $VN (VAL_int32 ($u32oz (Z.sub ($zou32 n) 1))); AI_basic (BI_memory_copy x y)] ++ es0),
+                          Some (AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0 y)))), d>> => //.
             resolve_reduce_ctx vs0 es0.
             by eapply r_memory_copy_forward; eauto; simpl in *; lias.
           }
@@ -1427,8 +1439,8 @@ the condition that all values should live in the operand stack. *)
                           ((VAL_num (VAL_int32 ($u32oz (Z.add ($zou32 src) (Z.sub ($zou32 n) 1))))) ::
                              (VAL_num (VAL_int32 ($u32oz (Z.add ($zou32 dst) (Z.sub ($zou32 n) 1))))) ::
                              vs0,
-                            [::(AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0))); $VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 ($u32oz (Z.sub ($zou32 n) 1%Z))); AI_basic (BI_memory_copy)] ++ es0),
-                          Some (AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0)))), d>> => //.
+                            [::(AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 x))); $VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 ($u32oz (Z.sub ($zou32 n) 1%Z))); AI_basic (BI_memory_copy x y)] ++ es0),
+                          Some (AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0 y)))), d>> => //.
             resolve_reduce_ctx vs0 es0.
             eapply r_memory_copy_backward; eauto; simpl in *; try by lias.
           }
@@ -1437,11 +1449,11 @@ the condition that all values should live in the operand stack. *)
       + resolve_invalid_typing.
         unfold_frame_type Hftype.
         unfold_store_operations.
-        { eapply inst_typing_mem_lookup_inv in Hconjr as [? [Hextmt ?]]; eauto.
+        { eapply inst_typing_mem_lookup_inv in Hconjr0 as [? [Hextmt ?]]; eauto.
           unfold ext_mem_typing in Hextmt; remove_bools_options.
           by simplify_multieq.
         }
-        { eapply inst_typing_mem_lookup_inv in Hconjr as [? [??]]; eauto.
+        { eapply inst_typing_mem_lookup_inv in Hconjr0 as [? [??]]; eauto.
           by simplify_multieq.
         }
         
@@ -1451,9 +1463,9 @@ the condition that all values should live in the operand stack. *)
       assert_i32 n.
       assert_i32 src.
       assert_i32 dst.
-      destruct (smem s fc.(FC_frame).(f_inst)) as [mem|] eqn:Hsmem.
+      destruct (smem s fc.(FC_frame).(f_inst) x) as [mem|] eqn:Hsmem.
       (* Some *)
-      + destruct (sdata s fc.(FC_frame).(f_inst) x) as [data|] eqn:Hsdata.
+      + destruct (sdata s fc.(FC_frame).(f_inst) y) as [data|] eqn:Hsdata.
         (* Some *)
         * destruct (Z.ltb (Z.of_nat (data_size data)) (($zou32 src) + ($zou32 n))) eqn:Hboundy; move/Z.ltb_spec0 in Hboundy.
           (* y Out of bound *)
@@ -1482,9 +1494,9 @@ the condition that all values should live in the operand stack. *)
                                 [::$VN (VAL_int32 ($u32oz (Z.add ($zou32 dst) 1)));
                                  $VN (VAL_int32 ($u32oz (Z.add ($zou32 src) 1)));
                                  $VN (VAL_int32 ($u32oz (Z.sub ($zou32 n) 1)));
-                                 AI_basic (BI_memory_init x)
+                                 AI_basic (BI_memory_init x y)
                                 ] ++ es0),
-                              Some (AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0)))), d>> => //.
+                              Some (AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 x)))), d>> => //.
                 resolve_reduce_ctx vs0 es0.
                 by eapply r_memory_init_step; eauto; simpl in *; lias.
               }
