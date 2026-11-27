@@ -70,6 +70,34 @@ Proof. vm_compute. reflexivity. Qed.
 
 Definition indexed_memarg := Build_memarg 1234%N 0%N 128%N.
 
+Lemma splat_instruction_roundtrip sh :
+  run_parse_bes (binary_of_be (BI_splat_vec sh)) =
+    Some (BI_splat_vec sh :: nil).
+Proof.
+  destruct sh as [i|f]; destruct i || destruct f; vm_compute; reflexivity.
+Qed.
+
+Definition shuffle_test_lanes : list N :=
+  (0 :: 1 :: 2 :: 3 :: 4 :: 5 :: 6 :: 7 ::
+  24 :: 25 :: 26 :: 27 :: 28 :: 29 :: 30 :: 31 :: nil)%N.
+
+Lemma shuffle_encoding_raw_lanes :
+  binary_of_be (BI_vbinop (13%N, shuffle_test_lanes)) =
+    xfd :: x0d ::
+    x00 :: x01 :: x02 :: x03 :: x04 :: x05 :: x06 :: x07 ::
+    x18 :: x19 :: x1a :: x1b :: x1c :: x1d :: x1e :: x1f :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma shuffle_instruction_roundtrip :
+  run_parse_bes (binary_of_be (BI_vbinop (13%N, shuffle_test_lanes))) =
+    Some (BI_vbinop (13%N, shuffle_test_lanes) :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma shuffle_raw_high_lane_decodes_before_validation :
+  run_parse_bes (xfd :: x0d :: List.repeat xff 16) =
+    Some (BI_vbinop (13%N, List.repeat 255%N 16) :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
 Definition indexed_memory_instructions :=
   BI_load T_i32 None indexed_memarg ::
   BI_load T_i64 (Some (Tp_i32, SX_U)) indexed_memarg ::

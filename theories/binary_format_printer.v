@@ -130,7 +130,9 @@ Definition binary_of_vunop (op: vunop) :=
 Definition binary_of_vbinop (op: vbinop) :=
   let '(opcode, args) := op in
   if N.eqb opcode 13%N then (* shuffle *)
-    xfd :: x0d :: binary_of_vec (binary_of_N) args
+    (* Exactly 16 raw lane bytes for well-formed shuffle instructions:
+       neither a vector length prefix nor a LEB128 encoding per lane. *)
+    xfd :: x0d :: List.concat (List.map binary_of_laneidx args)
   else
     xfd :: binary_of_N opcode.
 
@@ -146,12 +148,12 @@ Definition binary_of_vshiftop (op: vshiftop) :=
 Definition binary_of_splat_vec (sh: vshape) :=
   xfd ::
   (match sh with
-   | VS_i VSI_8_16 => x0e
-   | VS_i VSI_16_8 => x0f
-   | VS_i VSI_32_4 => x10
-   | VS_i VSI_64_2 => x11
-   | VS_f VSF_32_4 => x12
-   | VS_f VSF_64_2 => x13
+    | VS_i VSI_8_16 => x0f
+    | VS_i VSI_16_8 => x10
+    | VS_i VSI_32_4 => x11
+    | VS_i VSI_64_2 => x12
+    | VS_f VSF_32_4 => x13
+    | VS_f VSF_64_2 => x14
    end
   ) :: nil.
 

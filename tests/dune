@@ -38,6 +38,11 @@
  (modules scalar_codec_extracted)
  (libraries wasmcert_extracted parray zarith))
 
+(test
+ (name simd_codec_extracted)
+ (modules simd_codec_extracted)
+ (libraries wasmcert_extracted parray zarith))
+
 (rule
  (alias runtest)
  (deps run_wast_test.sh ../run_wast.sh)
