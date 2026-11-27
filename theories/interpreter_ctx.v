@@ -611,14 +611,16 @@ Proof.
       (* BI_ref_as_non_null *) |
       (* BI_call_ref x *) x |
       (* BI_return_call_ref x *) x |
-      (* BI_br_on_non_null x *) x ] |
+      (* BI_br_on_non_null x *) x |
+      (* BI_ref_i31 *) ] |
       (* AI_trap *) |
       (* AI_ref a *) a |
       (* AI_ref_extern a *) a |
       (* AI_invoke a *) a |
       (* AI_return_invoke a *) a |
       (* AI_label ln les es *) ln les es |
-      (* AI_frame ln lf es *) ln lf es ].
+      (* AI_frame ln lf es *) ln lf es |
+      (* AI_ref_i31 n *) n ].
 
     (* AI_basic (BI_const _) *)
     (* This along with other value instructions are invalid, as it doesn't respect
@@ -808,7 +810,7 @@ the condition that all values should live in the operand stack. *)
     (* AI_basic BI_ref_is_null *)
     - destruct vs0 as [|v vs0]; first by no_args.
       assert_value_ref v.
-      destruct v as [ v | v | v ].
+      destruct v as [ v | v | v | v ].
       (* ref_null *)
       + apply <<hs, (s, (fc, lcs) :: ccs', ((VAL_num (VAL_int32 Wasm_int.Int32.one)) :: vs0, es0), None), d>> => //.
         resolve_reduce_ctx vs0 es0.
@@ -821,7 +823,11 @@ the condition that all values should live in the operand stack. *)
       (* ref_extern *)
       + apply <<hs, (s, (fc, lcs) :: ccs', ((VAL_num (VAL_int32 Wasm_int.Int32.zero)) :: vs0, es0), None), d>> => //.
         resolve_reduce_ctx vs0 es0.
-        replace (AI_ref_extern v) with ($V (VAL_ref (VAL_ref_extern v))) => //.
+         replace (AI_ref_extern v) with ($V (VAL_ref (VAL_ref_extern v))) => //.
+         by apply r_simple, rs_ref_is_null_false.
+      + apply <<hs, (s, (fc, lcs) :: ccs', ((VAL_num (VAL_int32 Wasm_int.Int32.zero)) :: vs0, es0), None), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        replace (AI_ref_i31 v) with ($V (VAL_ref (VAL_ref_i31 v))) => //.
         by apply r_simple, rs_ref_is_null_false.
 
     (* AI_basic (BI_ref_func x) *)
@@ -1698,7 +1704,7 @@ the condition that all values should live in the operand stack. *)
       assert_i32 v.
       destruct (stab_elem s fc.(FC_frame).(f_inst) x ($nou32 v)) as [vref|] eqn:?.
       (* Some a *)
-      + destruct vref as [t | a | a].
+      + destruct vref as [t | a | a | n].
         (* ref_null *)
         * apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
           resolve_reduce_ctx vs0 es0.
@@ -1736,6 +1742,16 @@ the condition that all values should live in the operand stack. *)
           simplify_multieq.
           apply ref_subtyping in Hif1.
           by rewrite Hconjl1 in Hif1.
+        * resolve_invalid_typing.
+          unfold_frame_type Hftype.
+          unfold_store_operations.
+          resolve_store_inst_lookup.
+          destruct t1; remove_bools_options; simpl in *.
+          eapply all_projection in Hif1; eauto.
+          unfold value_typing in Hif1; simpl in *.
+          simplify_multieq.
+          apply ref_subtyping in Hif1.
+          by rewrite Hconjl1 in Hif1.
       (* None *)
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_trap)), d>> => //.
         resolve_reduce_ctx vs0 es0.
@@ -1759,7 +1775,7 @@ the condition that all values should live in the operand stack. *)
       assert_i32 v.
       destruct (stab_elem s fc.(FC_frame).(f_inst) x ($nou32 v)) as [vref|] eqn:?.
       (* Some a *)
-      + destruct vref as [t | a | a].
+      + destruct vref as [t | a | a | n].
         (* ref_null *)
         * apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
           resolve_reduce_ctx vs0 es0.
@@ -1800,6 +1816,16 @@ the condition that all values should live in the operand stack. *)
           simplify_multieq.
           apply ref_subtyping in Hif1.
           by rewrite Hconjl1 in Hif1.
+        * resolve_invalid_typing.
+          unfold_frame_type Hftype.
+          unfold_store_operations.
+          resolve_store_inst_lookup.
+          destruct t1; remove_bools_options; simpl in *.
+          eapply all_projection in Hif1; eauto.
+          unfold value_typing in Hif1; simpl in *.
+          simplify_multieq.
+          apply ref_subtyping in Hif1.
+          by rewrite Hconjl1 in Hif1.
       (* None *)
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_trap)), d>> => //.
         resolve_reduce_ctx vs0 es0.
@@ -1809,7 +1835,7 @@ the condition that all values should live in the operand stack. *)
     (* AI_basic BI_ref_as_non_null *)
     - destruct vs0 as [|v vs0]; first by no_args.
       assert_value_ref v.
-      destruct v as [t | a | a].
+      destruct v as [t | a | a | n].
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
         resolve_reduce_ctx vs0 es0.
         by apply r_simple, rs_ref_as_non_null_null.
@@ -1821,37 +1847,44 @@ the condition that all values should live in the operand stack. *)
       + apply <<hs, (s, (fc, lcs) :: ccs',
                     (VAL_ref (VAL_ref_extern a) :: vs0, es0), None), d>> => //.
         resolve_reduce_ctx vs0 es0.
-        replace (AI_ref_extern a) with ($V (VAL_ref (VAL_ref_extern a))) => //.
+         replace (AI_ref_extern a) with ($V (VAL_ref (VAL_ref_extern a))) => //.
+         by apply r_simple, rs_ref_as_non_null.
+      + apply <<hs, (s, (fc, lcs) :: ccs',
+                    (VAL_ref (VAL_ref_i31 n) :: vs0, es0), None), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        replace (AI_ref_i31 n) with ($V (VAL_ref (VAL_ref_i31 n))) => //.
         by apply r_simple, rs_ref_as_non_null.
 
     (* AI_basic (BI_call_ref x) *)
     - destruct vs0 as [|v vs0]; first by resolve_invalid_typing.
       destruct v as [v|v|v]; [by resolve_invalid_typing | by resolve_invalid_typing |].
-      destruct v as [h|a|a].
+      destruct v as [h|a|a|n].
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
         resolve_reduce_ctx vs0 es0.
         by apply r_call_ref_null.
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_invoke a)), d>> => //.
         resolve_reduce_ctx vs0 es0.
         by apply r_call_ref.
-      + by resolve_invalid_typing.
+       + by resolve_invalid_typing.
+       + by resolve_invalid_typing.
 
     (* AI_basic (BI_return_call_ref x) *)
     - destruct vs0 as [|v vs0]; first by resolve_invalid_typing.
       destruct v as [v|v|v]; [by resolve_invalid_typing | by resolve_invalid_typing |].
-      destruct v as [h|a|a].
+      destruct v as [h|a|a|n].
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
         resolve_reduce_ctx vs0 es0.
         by apply r_return_call_ref_null.
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_return_invoke a)), d>> => //.
         resolve_reduce_ctx vs0 es0.
         by apply r_return_call_ref.
-      + by resolve_invalid_typing.
+       + by resolve_invalid_typing.
+       + by resolve_invalid_typing.
 
     (* AI_basic (BI_br_on_non_null x) *)
     - destruct vs0 as [|v vs0]; first by no_args.
       assert_value_ref v.
-      destruct v as [h|a|a].
+      destruct v as [h|a|a|n].
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), None), d>> => //.
         resolve_reduce_ctx vs0 es0.
         by apply r_simple, rs_br_on_non_null_null.
@@ -1863,8 +1896,23 @@ the condition that all values should live in the operand stack. *)
       + apply <<hs, (s, (fc, lcs) :: ccs', (VAL_ref (VAL_ref_extern a) :: vs0, es0),
                     Some (AI_basic (BI_br x))), d>> => //.
         resolve_reduce_ctx vs0 es0.
-        replace (AI_ref_extern a) with ($V (VAL_ref (VAL_ref_extern a))) => //.
+         replace (AI_ref_extern a) with ($V (VAL_ref (VAL_ref_extern a))) => //.
+         by apply r_simple, rs_br_on_non_null.
+      + apply <<hs, (s, (fc, lcs) :: ccs', (VAL_ref (VAL_ref_i31 n) :: vs0, es0),
+                    Some (AI_basic (BI_br x))), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        replace (AI_ref_i31 n) with ($V (VAL_ref (VAL_ref_i31 n))) => //.
         by apply r_simple, rs_br_on_non_null.
+
+    (* AI_basic BI_ref_i31 *)
+    - destruct vs0 as [|v vs0]; first by no_args.
+      assert_value_num v.
+      destruct v as [n|n|n|n];
+        try by resolve_invalid_typing; resolve_invalid_value.
+      apply <<hs, (s, (fc, lcs) :: ccs',
+        (VAL_ref (VAL_ref_i31 (i31bits_of_i32 n)) :: vs0, es0), None), d>> => //.
+      resolve_reduce_ctx vs0 es0.
+      by apply r_simple, rs_ref_i31.
 
     (* AI_trap *)
     - destruct ((vs0 == nil) && (es0 == nil)) eqn:Hscnil; move/andP in Hscnil.
@@ -1918,6 +1966,8 @@ the condition that all values should live in the operand stack. *)
     - by apply RSC_invalid => /=; move => [??].
 
     (* AI_frame ln lf es *)
+    - by apply RSC_invalid => /=; move => [??].
+    (* AI_ref_i31 *)
     - by apply RSC_invalid => /=; move => [??].
   }
 Defined.

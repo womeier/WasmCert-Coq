@@ -14,4 +14,11 @@
  (deps function_references_binary.py)
  (action
   (run python3 %{dep:function_references_binary.py}
+    %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps gc_i31_binary.py)
+ (action
+  (run python3 %{dep:gc_i31_binary.py}
    %{exe:../src/wasm_coq_interpreter.exe})))

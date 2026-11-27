@@ -600,6 +600,7 @@ Instructions in this group affect the flow of control.
   | BI_call_ref : typeidx -> basic_instruction
   | BI_return_call_ref : typeidx -> basic_instruction
   | BI_br_on_non_null : labelidx -> basic_instruction
+  | BI_ref_i31
   .
 
 
@@ -625,6 +626,7 @@ Inductive value_ref : Set :=
 | VAL_ref_null: heap_type -> value_ref
 | VAL_ref_func: funcaddr -> value_ref
 | VAL_ref_extern: externaddr -> value_ref
+| VAL_ref_i31: i31bits -> value_ref
 .
 
 Inductive value : Type :=
@@ -1069,6 +1071,7 @@ Inductive administrative_instruction : Type := (* e *)
 | AI_return_invoke : funcaddr -> administrative_instruction
 | AI_label : nat -> list administrative_instruction -> list administrative_instruction -> administrative_instruction
 | AI_frame : nat -> frame -> list administrative_instruction -> administrative_instruction
+| AI_ref_i31 : i31bits -> administrative_instruction
 .
 
 (** std-doc:

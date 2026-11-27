@@ -1561,8 +1561,9 @@ Proof.
       destruct Hupdate as [tn [Hagree' Hsub]].
       rewrite rev_cons -cats1 in Hsub.
       exists tn; split => //.
-      eapply bet_subtyping; first by eapply bet_br_on_non_null; eauto.
-      exact Hsub.
+       eapply bet_subtyping; first by eapply bet_br_on_non_null; eauto.
+       exact Hsub.
+    + by resolve_tc_be_typing.
 Qed.
       
 Lemma tc_to_bet_list: forall C cts bes tm cts',

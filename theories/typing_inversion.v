@@ -80,6 +80,8 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       tf = (Tf nil [::T_ref (Ref_type true t)])
   | BI_ref_is_null =>
       exists t, tf = (Tf [::T_ref t] [::T_num T_i32])
+  | BI_ref_i31 =>
+      tf = (Tf [::T_num T_i32] [::T_ref (Ref_type false HT_i31)])
   | BI_ref_as_non_null =>
       exists t, tf = (Tf [::t] [::t]) /\ is_ref_t t
   | BI_call_ref _ | BI_return_call_ref _ => False
@@ -541,6 +543,8 @@ Definition e_principal_typing (s: store_record) (C: t_context) (e: administrativ
       True (* Equivalently, add trivial equalities *)
   | AI_ref_extern a =>
       tf = (Tf nil [::T_ref T_externref])
+  | AI_ref_i31 _ =>
+      tf = (Tf nil [::T_ref (Ref_type false HT_i31)])
   | AI_ref a =>
       exists t, tf = (Tf nil [::T_ref T_funcref]) /\
         ext_func_typing s a = Some t
@@ -701,7 +705,7 @@ Proof.
   - exists (T_vec (typeof_vec v)); split => //.
     by destruct v.
   (* ref -- slightly annoying, since one is basic and the other ones are not *)
-  - destruct v as [h|a|a]; simpl in *.
+  - destruct v as [h|a|a|n]; simpl in *.
     (* ref_null *)
     + apply et_to_bet in HType; last done; simpl in *.
       invert_be_typing.
@@ -716,7 +720,11 @@ Proof.
     (* ref_extern *)
     + apply e_typing_inversion in HType; simpl in *.
       extract_premise.
-      exists (T_ref T_externref).
+       exists (T_ref T_externref).
+       by split => //.
+    + apply e_typing_inversion in HType; simpl in *.
+      extract_premise.
+      exists (T_ref (Ref_type false HT_i31)).
       by split => //.
   Transparent instr_subtyping.
 Qed.
@@ -760,14 +768,16 @@ Proof.
   - apply ety_a' => //=.
     econstructor; first by econstructor.
     apply instr_subtyping_weaken2 with (ty2 := [::T_vec (typeof_vec v)]); by resolve_subtyping.
-  - destruct v as [h| f | e] => /=; simpl in *; try injection Hoption as <-; remove_bools_options.
+  - destruct v as [h| f | e | n] => /=; simpl in *; try injection Hoption as <-; remove_bools_options.
     + apply ety_a' => //=.
       econstructor; first by econstructor.
       apply instr_subtyping_weaken2 with (ty2 := [::T_ref (Ref_type true h)]); by resolve_subtyping.
     + eapply ety_subtyping; first by eapply ety_ref; eauto.
       apply instr_subtyping_weaken2 with (ty2 := [::T_ref T_funcref]); by resolve_subtyping.
-    + eapply ety_subtyping; first by eapply ety_ref_extern; eauto.
-      apply instr_subtyping_weaken2 with (ty2 := [::T_ref T_externref]); by resolve_subtyping.
+     + eapply ety_subtyping; first by eapply ety_ref_extern; eauto.
+       apply instr_subtyping_weaken2 with (ty2 := [::T_ref T_externref]); by resolve_subtyping.
+     + eapply ety_subtyping; first by eapply ety_ref_i31; eauto.
+       apply instr_subtyping_weaken2 with (ty2 := [::T_ref (Ref_type false HT_i31)]); by resolve_subtyping.
 Qed.
 
 Lemma et_values_typing: forall s C vs ts,

@@ -1272,6 +1272,7 @@ Definition vref_to_e (vref: value_ref) : administrative_instruction :=
   | VAL_ref_null t => AI_basic (BI_ref_null t)
   | VAL_ref_func addr => AI_ref addr
   | VAL_ref_extern eaddr => AI_ref_extern eaddr
+  | VAL_ref_i31 n => AI_ref_i31 n
   end.
 
 Definition v_to_e (v: value) : administrative_instruction :=
@@ -1291,6 +1292,7 @@ Definition e_to_vref (e: administrative_instruction) : value_ref :=
   | AI_basic (BI_ref_null t) => VAL_ref_null t
   | AI_ref addr => VAL_ref_func addr
   | AI_ref_extern eaddr => VAL_ref_extern eaddr
+  | AI_ref_i31 n => VAL_ref_i31 n
   | _ => VAL_ref_null HT_func
   end.
 
@@ -1299,6 +1301,7 @@ Definition e_to_vref_opt (e: administrative_instruction) : option value_ref :=
   | AI_basic (BI_ref_null t) => Some (VAL_ref_null t)
   | AI_ref addr => Some (VAL_ref_func addr)
   | AI_ref_extern eaddr => Some (VAL_ref_extern eaddr)
+  | AI_ref_i31 n => Some (VAL_ref_i31 n)
   | _ => None
   end.
 

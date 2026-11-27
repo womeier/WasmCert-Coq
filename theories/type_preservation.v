@@ -656,6 +656,8 @@ Proof.
   - move=> s C n f es ts HType IHHType E s' HST1 HST2 Hext.
     apply ety_frame => //.
     by eapply IHHType; try apply HST1 => //.
+  - move=> s C n s' HST1 HST2 Hext.
+    apply ety_ref_i31.
   (* Thread *)
   - move=> s f es rs ts C C' HFType HContext HType IHHType s' HST1 HST2 Hext.
     remove_bools_options.
@@ -1744,7 +1746,7 @@ Proof.
   - by exists cl, i.
   - by repeat (destruct ves => //).
   - destruct (lfill_singleton_invert H x) as [[? Hlheq] [-> ->]] => //.
-    + by do 2 (destruct v as [v|v|v] => //=).
+    + destruct v as [v|v|v] => //=; by destruct v as [v|v|v|v] => //=.
     + by apply IHHreduce.
 Qed.
   

@@ -63,6 +63,7 @@ Definition typeof_ref (s: store_record) (v: value_ref) : option reference_type :
       | _ => None
       end
   | VAL_ref_extern eaddr => Some T_externref
+  | VAL_ref_i31 _ => Some (Ref_type false HT_i31)
   end.
 
 Definition typeof_value (s: store_record) (v: value) : option value_type :=
@@ -392,6 +393,9 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   lookup_N C.(tc_labels) x = Some (ts ++ [::t]) ->
   is_ref_t t ->
   be_typing C [::BI_br_on_non_null x] (Tf (ts ++ [::t]) ts)
+| bet_ref_i31 : forall C,
+  be_typing C [::BI_ref_i31]
+    (Tf [::T_num T_i32] [::T_ref (Ref_type false HT_i31)])
 .
 
 Definition expr_typing (C: t_context) (bes: list basic_instruction) (ts: result_type) : Prop :=
@@ -559,6 +563,8 @@ Inductive e_typing : store_record -> t_context -> seq administrative_instruction
   thread_typing s (Some ts) (f, es) ts ->
   length ts = n ->
   e_typing s C [::AI_frame n f es] (Tf [::] ts)
+| ety_ref_i31 : forall s C n,
+  e_typing s C [::AI_ref_i31 n] (Tf [::] [::T_ref (Ref_type false HT_i31)])
 
 with thread_typing : store_record -> option result_type -> thread -> result_type -> Prop :=
 | mk_thread_typing : forall s f es rs ts C C',

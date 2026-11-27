@@ -97,7 +97,10 @@ Inductive reduce_simple : seq administrative_instruction -> seq administrative_i
   | rs_ref_is_null_false:
     forall ref,
     (forall t, ref <> VAL_ref_null t) ->
-    reduce_simple [:: $V (VAL_ref ref); AI_basic BI_ref_is_null] [::$VN (VAL_int32 Wasm_int.Int32.zero)]
+     reduce_simple [:: $V (VAL_ref ref); AI_basic BI_ref_is_null] [::$VN (VAL_int32 Wasm_int.Int32.zero)]
+  | rs_ref_i31 : forall n,
+    reduce_simple [:: $VN (VAL_int32 n); AI_basic BI_ref_i31]
+      [:: $V (VAL_ref (VAL_ref_i31 (i31bits_of_i32 n)))]
                   
   (** control-flow operations **)
   | rs_unreachable :

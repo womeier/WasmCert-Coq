@@ -169,6 +169,8 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       | BI_const_vec v => type_update ts [::] [::T_vec (typeof_vec v)]
       | BI_ref_null t => type_update ts [::]  [::T_ref (Ref_type true t)]
       | BI_ref_is_null => type_update_ref_is_null ts
+      | BI_ref_i31 =>
+          type_update ts [::T_num T_i32] [::T_ref (Ref_type false HT_i31)]
       | BI_ref_as_non_null => type_update_ref_as_non_null ts
       (* Parsing and dispatch are available, but accepting these instructions
          requires closed indexed function reference typing. Never substitute

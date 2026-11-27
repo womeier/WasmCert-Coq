@@ -260,7 +260,9 @@ Ltac resolve_e_typing :=
     | |- e_typing _ _ nil _ =>
         try eapply ety_subtyping; first (by apply ety_a' => //; apply bet_empty; eauto; try apply instr_subtyping_eq); eauto => //
     | |- e_typing _ _ [::AI_basic _] _ =>
-        try eapply ety_subtyping; first (by apply ety_a' => //; econstructor; eauto; try apply instr_subtyping_eq); eauto => //
+         try eapply ety_subtyping; first (by apply ety_a' => //; econstructor; eauto; try apply instr_subtyping_eq); eauto => //
+    | |- e_typing _ _ [::AI_ref_i31 _] _ =>
+         try eapply ety_subtyping; first (by apply ety_ref_i31); eauto => //
     | |- e_typing _ _ (v_to_e_list _) _ =>
         try eapply ety_subtyping; first (by eapply et_values_typing; eauto); eauto => //
     | |- e_typing _ _ ((cons ($VN ?v) ?es)) _ =>
