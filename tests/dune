@@ -8,3 +8,15 @@
  (alias runtest)
  (deps run_wast_runner.sh ../run_wast.sh)
  (action (run bash %{dep:run_wast_runner.sh} %{dep:../run_wast.sh})))
+
+(rule
+ (alias runtest)
+ (deps exception_tags.py)
+ (action
+  (run python3 %{dep:exception_tags.py} %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps wast_assertion_stages.py)
+ (action
+  (run python3 %{dep:wast_assertion_stages.py} %{exe:../src/wasm_coq_interpreter.exe})))

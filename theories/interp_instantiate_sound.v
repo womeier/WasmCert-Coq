@@ -26,6 +26,7 @@ Proof.
   destruct (gather_m_d_types (ext_t_mems impts ++ map modmem_type mod_mems) mod_datas) as [dts | ] eqn:Hmdtypes => //.
   destruct (all _ _ && _ && _ && _ && _ && _ && _ && _ && _) eqn:Hallcond => //.
   destruct (module_exports_typer _ mod_exports) eqn:Hmexptypes => //.
+  destruct (all (module_tag_type_checker mod_types) mod_tags) eqn:Htags => //.
   move/andP in Hallcond; destruct Hallcond as [Hallcond Hnameunique].
   move/andP in Hallcond; destruct Hallcond as [Hallcond Hstartcheck].
   move/andP in Hallcond; destruct Hallcond as [Hallcond Hdatacheck].
@@ -170,6 +171,15 @@ Proof.
     unfold module_export_typing.
     simpl in *.
     destruct modexp_desc => //=; remove_bools_options; unfold module_export_desc_typing => /=; rewrite Hoption; by apply/eqP.
+  }
+  (* tags *)
+  { apply Forall_spec.
+    move => n x Hnth.
+    eapply all_projection in Htags; eauto.
+    unfold module_tag_type_checker in Htags.
+    destruct (lookup_N mod_types x) as [[ps results]|] eqn:Hlookup => //.
+    destruct results => //.
+    by exists ps.
   }
 Qed.
 

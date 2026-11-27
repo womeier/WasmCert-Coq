@@ -551,6 +551,12 @@ Definition binary_of_module_mem (t : module_mem) : list byte :=
 Definition binary_of_memsec (ms : list module_mem) : list byte :=
   x05 :: with_length (binary_of_vec binary_of_module_mem ms).
 
+Definition binary_of_tag (x : typeidx) : list byte :=
+  x00 :: binary_of_typeidx x.
+
+Definition binary_of_tagsec (tags : list typeidx) : list byte :=
+  x0d :: with_length (binary_of_vec binary_of_tag tags).
+
 Definition binary_of_module_global (g : module_global) : list byte :=
   binary_of_global_type g.(modglob_type) ++
   binary_of_expr g.(modglob_init).
@@ -682,6 +688,7 @@ Definition binary_of_module (m : module) : list byte :=
   only_if_non_nil binary_of_funcsec m.(mod_funcs) ++
   only_if_non_nil binary_of_tablesec m.(mod_tables) ++
   only_if_non_nil binary_of_memsec m.(mod_mems) ++
+  only_if_non_nil binary_of_tagsec m.(mod_tags) ++
   only_if_non_nil binary_of_globalsec m.(mod_globals) ++
   only_if_non_nil binary_of_exportssec m.(mod_exports) ++
   only_if_non_none binary_of_startsec m.(mod_start) ++

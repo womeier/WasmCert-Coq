@@ -188,6 +188,20 @@ let load_wast_module verbosity hs s ovar moddef mod_counter =
   | _ -> error "Exception raised in loading module"
   end
 
+(* Negative assertions must fail at the specified stage. In particular, a
+   parse failure is not evidence that validation rejected an invalid module. *)
+let parse_assertion_module moddef =
+  try
+    let binary = match moddef.it with
+      | Textual ast -> Some (Wasm.Encode.encode ast)
+      | Encoded (_, binary) -> Some binary
+      | Quoted (_, text) -> Parse.binary_of_text text
+    in
+    match binary with
+    | None -> None
+    | Some binary -> Interpreter.run_parse_module_str binary
+  with Wasm.Parse_error.Syntax _ -> None
+
 let print_wast_command cmd = 
   let cmd_sexpr = Wasm.Arrange.script `Textual [cmd] in
   let cmd_string = String.concat "" (List.map (Wasm.Sexpr.to_string 200) cmd_sexpr) in
@@ -313,40 +327,55 @@ let run_wast_command verbosity max_call_depth cmd hs s mod_counter default_modul
         error "Unsupported wast action: Get"
       end
     | AssertInvalid (moddef, _str) ->
-      (* very ugly... *)
-      let res = (load_wast_module verbosity hs s None moddef mod_counter) in
-      begin match to_out res with
-      (* AssertInvalid shouldn't enter execution stage, so any OK result is counted as a failure *)
-      | OK _ -> 
-        error "Unexpected successful instantiation of an invalid module"
-      (* Trap still needs to update the store*)
-      | Error _ -> 
-        debug_info verbosity stage (fun _ -> "Test passed: correctly rejected an invalid module\n");
-        pure (hs, s, mod_counter, default_module_name, Verdict_OK)
-      end
-    (* The following three assertiosn are grouped into one *)
-    | AssertMalformed (moddef, _str)
-    | AssertUnlinkable (moddef, _str)
-    | AssertUninstantiable (moddef, _str) ->
-      let res = (load_wast_module verbosity hs s None moddef mod_counter) in
-      begin match to_out res with
-      | OK _ ->
-        (* This is really stupid. Is there a better way to match on host_event? *)
-        let* res_result = res in 
-        begin match res_result with
-        (* Only an OK with Cfg_res represents a successful instantiation *)
-        | (_, _, Cfg_res _, _, _) -> 
-          error "Unexpected successful instantiation of a malformed module"
-        (* OK with a trap is a failure which passes the test, but the store needs to be updated *)
-        | (_, _, Cfg_trap (s', _), _, _) -> 
-          debug_info verbosity stage (fun _ -> "Test passed: post-instantiation initialisation trapped, leading to instantiation failure correctly\n");
-          pure (hs, s', mod_counter, default_module_name, Verdict_OK)
-        | _ ->
-          error "Unexpected post-instantiation initialisation error"
+      begin match parse_assertion_module moddef with
+      | None -> error "assert_invalid failed during parsing, not validation"
+      | Some m ->
+        begin match Extract.module_type_checker m with
+        | (None, _) ->
+          pure (hs, s, mod_counter, default_module_name, Verdict_OK)
+        | (Some _, _) -> error "assert_invalid unexpectedly passed validation"
         end
-      | _ -> 
-        debug_info verbosity stage (fun _ -> "Test passed: correctly rejected a malformed/unlinkable/uninstantiable module\n");
-        pure (hs, s, mod_counter, default_module_name, Verdict_OK)
+      end
+    | AssertMalformed (moddef, _str) ->
+      begin match parse_assertion_module moddef with
+      | None -> pure (hs, s, mod_counter, default_module_name, Verdict_OK)
+      | Some _ -> error "assert_malformed unexpectedly passed parsing"
+      end
+    | AssertUnlinkable (moddef, _str) ->
+      begin match parse_assertion_module moddef with
+      | None -> error "assert_unlinkable failed during parsing"
+      | Some m ->
+        begin match Extract.module_type_checker m with
+        | (None, _) -> error "assert_unlinkable failed during validation"
+        | (Some _, _) ->
+          let imports = List.map (Execute.get_ext_import hs) (get_import_path m) in
+          let values = List.filter_map (fun x -> x) imports in
+          if List.length values <> List.length imports then
+            pure (hs, s, mod_counter, default_module_name, Verdict_OK)
+          else
+            begin match interp_instantiate_wrapper s m values with
+            | (None, "Import type checking failure") ->
+              pure (hs, s, mod_counter, default_module_name, Verdict_OK)
+            | (None, _) -> error "assert_unlinkable failed outside import matching"
+            | (Some _, _) -> error "assert_unlinkable unexpectedly linked"
+            end
+        end
+      end
+    | AssertUninstantiable (moddef, _str) ->
+      begin match parse_assertion_module moddef with
+      | None -> error "assert_uninstantiable failed during parsing"
+      | Some m ->
+        begin match Extract.module_type_checker m with
+        | (None, _) -> error "assert_uninstantiable failed during validation"
+        | (Some _, _) ->
+          let* (_, s', result, _, _) =
+            load_wast_module verbosity hs s None moddef mod_counter in
+          begin match result with
+          | Cfg_trap _ ->
+            pure (hs, s', mod_counter, default_module_name, Verdict_OK)
+          | _ -> error "assert_uninstantiable did not trap during initialization"
+          end
+        end
       end
     end
   | Register (newname_utf8, ovar) ->

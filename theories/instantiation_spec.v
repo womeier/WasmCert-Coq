@@ -491,6 +491,7 @@ Definition module_typing (m : module) (impts : list extern_type) (expts : list e
     mod_start := i_opt;
     mod_imports := imps;
     mod_exports := exps;
+    mod_tags := tags;
   |} := m in
   let ifts := ext_t_funcs impts in
   let its := ext_t_tables impts in
@@ -534,7 +535,9 @@ Definition module_typing (m : module) (impts : list extern_type) (expts : list e
   pred_option (module_start_typing c) i_opt /\
   List.Forall2 (module_import_typing c) imps impts /\
   List.Forall2 (module_export_typing c) exps expts /\
-  export_name_unique exps. 
+   export_name_unique exps /\
+   List.Forall (fun x => exists ps,
+     lookup_N tfs x = Some (Tf ps nil)) tags.
 
 (** std-doc:
 For the purpose of checking external values against imports, such values are classified by external types. The following auxiliary typing rules specify this typing relation relative to a store S in which the referenced instances live.

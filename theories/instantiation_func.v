@@ -144,6 +144,12 @@ Definition module_data_type_checker (c : t_context) (d : module_data) : bool :=
 Definition module_start_type_checker (c : t_context) (ms : module_start) : bool :=
   module_start_typing c ms.
 
+Definition module_tag_type_checker (types : list function_type) (x : typeidx) : bool :=
+  match lookup_N types x with
+  | Some (Tf _ nil) => true
+  | _ => false
+  end.
+
 Definition module_type_checker (m : module) : option ((list extern_type) * (list extern_type)) * string :=
   let '{|
     mod_types := tfs;
@@ -156,6 +162,7 @@ Definition module_type_checker (m : module) : option ((list extern_type) * (list
     mod_start := i_opt;
     mod_imports := imps;
     mod_exports := exps;
+    mod_tags := tags;
   |} := m in
   match (gather_m_f_types tfs fs, module_imports_typer tfs imps) with
   | (Some fts, Some impts) =>
@@ -206,7 +213,10 @@ Definition module_type_checker (m : module) : option ((list extern_type) * (list
        export_name_unique exps
       then
        match module_exports_typer c exps with
-       | Some expts => (Some (impts, expts), "ok")
+        | Some expts =>
+            if seq.all (module_tag_type_checker tfs) tags
+            then (Some (impts, expts), "ok")
+            else (None, "invalid tag type")
        | None => (None, "invalid module export type")
        end
     else (None, "invalid module components")

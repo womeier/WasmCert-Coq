@@ -42,6 +42,7 @@ Definition memidx : Set := u32.
 Definition globalidx : Set := u32.
 Definition elemidx : Set := u32.
 Definition dataidx : Set := u32.
+Definition tagidx : Set := u32.
 Definition localidx : Set := u32.
 Definition labelidx : Set := u32.
 
@@ -67,6 +68,7 @@ Definition globaladdr : Set := addr.
 Definition elemaddr : Set := addr.
 Definition dataaddr : Set := addr.
 Definition externaddr : Set := addr.
+Definition tagaddr : Set := addr.
 
 (** std-doc:
 WebAssembly programs operate on primitive numeric values. Moreover, in the definition of programs, immutable sequences of values occur to represent more complex data, such as text strings or other vectors.
@@ -748,6 +750,7 @@ Record module : Type := {
   mod_start : option module_start;
   mod_imports : list module_import;
   mod_exports : list module_export;
+  mod_tags : list typeidx;
 }.
     
 End Modules.

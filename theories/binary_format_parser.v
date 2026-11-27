@@ -1092,6 +1092,14 @@ Definition parse_tablesec {n} : byte_parser (list module_table) n :=
 Definition parse_memsec {n} : byte_parser (list module_mem) n :=
   exact_byte x05 &> parse_u32_as_N &> parse_vec parse_module_mem.
 
+Definition parse_tag {n} : byte_parser typeidx n :=
+  exact_byte x00 &> parse_typeidx.
+
+Definition parse_tagsec {n} : byte_parser (list typeidx) n :=
+  exact_byte x0d &>
+    (parse_u32_as_N >>= fun sz =>
+       assert_sized (parse_vec parse_tag) (fun consumed => N.eqb sz consumed)).
+
 Definition parse_globalsec {n} : byte_parser (list module_global) n :=
   exact_byte x06 &> parse_u32_as_N &> parse_vec parse_module_global.
 
@@ -1156,6 +1164,9 @@ Definition parse_tablesec_wrapper {n} : byte_parser (list module_table) n :=
 
 Definition parse_memsec_wrapper {n} : byte_parser (list module_mem) n :=
   (parse_with_customsec_star_before parse_memsec).
+
+Definition parse_tagsec_wrapper {n} : byte_parser (list typeidx) n :=
+  (parse_with_customsec_star_before parse_tagsec).
 
 Definition parse_globalsec_wrapper {n} : byte_parser (list module_global) n :=
   (parse_with_customsec_star_before parse_globalsec).
@@ -1238,7 +1249,7 @@ Definition parse_module_sections_after {n} {A} (f: byte_parser A n) : byte_parse
   guardM
   (fun results =>
      match results with
-     | (_, otypes, oimports, ofts, otables, omems, oglobals, oexports, ostart, oelems, odatacount, ocodes, odatas) =>
+      | (_, otypes, oimports, ofts, otables, omems, otags, oglobals, oexports, ostart, oelems, odatacount, ocodes, odatas) =>
          let types := option_to_list otypes in
          let imports := option_to_list oimports in
          let fts := option_to_list ofts in
@@ -1267,7 +1278,8 @@ Definition parse_module_sections_after {n} {A} (f: byte_parser A n) : byte_parse
                mod_datas := datas;
                mod_start := ostart;
                mod_imports := imports;
-               mod_exports := exports
+                mod_exports := exports
+                ; mod_tags := option_to_list otags
                |}
              else None
            else None
@@ -1276,12 +1288,13 @@ Definition parse_module_sections_after {n} {A} (f: byte_parser A n) : byte_parse
   )
   (parse_with_customsec_star_after
   (* "<&?>" is right associative, but we want the other way round here *)
-  (((((((((((((f <&?>
+   ((((((((((((((f <&?>
   parse_typesec_wrapper) <&?>
   parse_importsec_wrapper) <&?>
   parse_funcsec_wrapper) <&?>
   parse_tablesec_wrapper) <&?>
-  parse_memsec_wrapper) <&?>
+   parse_memsec_wrapper) <&?>
+   parse_tagsec_wrapper) <&?>
   parse_globalsec_wrapper) <&?>
   parse_exportsec_wrapper) <&?>
   parse_startsec_wrapper) <&?>
