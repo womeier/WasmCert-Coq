@@ -1,7 +1,8 @@
 (** Wasm AST to binary.
 Breaks non-determinism ties; see binary_format_spec.v for the spec. *)
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
-From Wasm Require Import datatypes_properties numerics common list_extra leb128.
+From Wasm Require Import datatypes_properties numerics common list_extra leb128
+  binary_uleb128_printer.
 From compcert Require Integers.
 From Stdlib Require Import ZArith Strings.Byte.
 
@@ -222,8 +223,9 @@ Fixpoint binary_of_be (be : basic_instruction) : list byte :=
   | BI_return => x0f :: nil
   | BI_call x => x10 :: binary_of_idx x
   | BI_call_indirect x y => x11 :: binary_of_idx y ++ binary_of_idx x
-  | BI_return_call x => x12 :: binary_of_idx x
-  | BI_return_call_indirect x y => x13 :: binary_of_idx y ++ binary_of_idx x
+  | BI_return_call x => x12 :: binary_of_tailidx x
+  | BI_return_call_indirect x y =>
+      x13 :: binary_of_tailidx y ++ binary_of_tailidx x
 
   | BI_ref_null t => xd0 :: binary_of_reference_type t :: nil
   | BI_ref_is_null => xd1 :: nil

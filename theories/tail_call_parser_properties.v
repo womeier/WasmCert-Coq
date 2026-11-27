@@ -297,3 +297,63 @@ Proof.
   cbn in Hlength. subst remaining.
   reflexivity.
 Qed.
+
+(** Tail opcodes cannot fall through to an unrelated decoder, even when an
+    immediate is malformed. This connects rejection to the actual dispatcher. *)
+Lemma parse_be_tail_opcode_exact :
+    forall n input opcode
+      (Hle : (S (List.length input) <= n)%nat),
+    opcode = x12 \/ opcode = x13 ->
+    runParser (parse_be n) Hle (mkSizedList (opcode :: input)) =
+    runParser (parse_tail_call :
+      Parser (SizedList Byte.byte) Byte.byte option basic_instruction n)
+      Hle (mkSizedList (opcode :: input)).
+Proof.
+  intros n input opcode Hle Hopcode.
+  destruct Hopcode as [-> | ->];
+    unfold parse_be, language, Fix, Induction.extract;
+    cbn [FixBox call _be];
+    unfold Combinators.alt; cbn [runParser];
+    destruct (runParser (parse_tail_call :
+      Parser (SizedList Byte.byte) Byte.byte option basic_instruction n)
+      Hle (mkSizedList (_ :: input))) as [result|] eqn:Htail;
+    reflexivity.
+Qed.
+
+Lemma run_option_parser_characterization : forall A input
+    (parser : forall n,
+      Parser (SizedList Byte.byte) Byte.byte option A n) result,
+    binary_format_parser.run input parser = Some result <->
+    option_map observe_reader
+      (runParser (parser (List.length input)) (Nat.le_refl _)
+        (mkSizedList input)) = Some (result, nil).
+Proof.
+  intros A input parser result.
+  unfold binary_format_parser.run.
+  cbn [binary_format_parser.fromText tokenize tokBytes _tokenize].
+  destruct (runParser (parser (List.length input)) (Nat.le_refl _)
+    (mkSizedList input))
+    as [[value remaining Hsmall [leftovers Hlength]]|].
+  - destruct leftovers as [|b rest]; cbn in Hlength; subst remaining;
+      cbn [observe_reader Success.value Success.size Success.leftovers
+        Sized.value].
+    + split; intro H; inversion H; reflexivity.
+    + split; intro H; discriminate.
+  - cbn [runMonad _runMonad optionRawMonadRun mapM pure _pure
+      optionRawApplicative].
+    split; intro H; discriminate.
+Qed.
+
+Theorem run_parse_tail_call_sound_complete : forall opcode input instruction,
+    opcode = x12 \/ opcode = x13 ->
+    (run_parse_be (opcode :: input) = Some instruction <->
+      return_call_prefix (opcode :: input) instruction nil \/
+        return_call_indirect_prefix (opcode :: input) instruction nil).
+Proof.
+  intros opcode input instruction Hopcode.
+  unfold run_parse_be.
+  rewrite run_option_parser_characterization.
+  cbn [List.length].
+  rewrite (parse_be_tail_opcode_exact _ input opcode (Nat.le_refl _) Hopcode).
+  apply tail_call_parser_sound_complete.
+Qed.

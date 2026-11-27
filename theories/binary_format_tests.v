@@ -2,7 +2,7 @@
 From Stdlib Require Import Strings.Byte ZArith.
 From parseque Require Import Parseque.
 From Wasm Require Import binary_format_parser binary_format_printer
-                         datatypes_properties check_toks.
+                         binary_uleb128_printer datatypes_properties check_toks.
 
 Open Scope string_scope.
 Import Stdlib.Strings.String.StringSyntax.
@@ -17,12 +17,12 @@ Proof. vm_compute. reflexivity. Qed.
 (** Final tail-call opcodes. Internal indirect operands are table/type, whereas
     the wire format is type/table. Distinct multi-byte indices catch swaps. *)
 Lemma return_call_opcode : forall x,
-    binary_of_be (BI_return_call x) = x12 :: binary_of_idx x.
+    binary_of_be (BI_return_call x) = x12 :: binary_of_tailidx x.
 Proof. reflexivity. Qed.
 
 Lemma return_call_indirect_opcode : forall table type,
     binary_of_be (BI_return_call_indirect table type) =
-      x13 :: binary_of_idx type ++ binary_of_idx table.
+      x13 :: binary_of_tailidx type ++ binary_of_tailidx table.
 Proof. reflexivity. Qed.
 
 Lemma return_call_multibyte :
@@ -47,6 +47,14 @@ Proof. vm_compute. reflexivity. Qed.
 Lemma return_call_padded_index :
     run_parse_be (x12 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil) =
       Some (BI_return_call 0%N).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma return_call_canonical_index_64 :
+    binary_of_be (BI_return_call 64%N) = x12 :: x40 :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma return_call_legacy_padded_index_64 :
+    run_parse_be (x12 :: xc0 :: x00 :: nil) = Some (BI_return_call 64%N).
 Proof. vm_compute. reflexivity. Qed.
 
 Lemma return_call_truncated :
