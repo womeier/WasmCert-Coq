@@ -11,7 +11,7 @@
 
 (rule
  (target multi_memory_binary.wast)
- (deps multi_memory_binary.py)
+ (deps multi_memory_binary.py binary_fixtures.py)
  (action
   (with-stdout-to %{target}
    (run python3 %{dep:multi_memory_binary.py}))))
@@ -30,3 +30,31 @@
  (action
   (run bash %{dep:wast_assertion_phases_test.sh} %{dep:../run_wast.sh}
    %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (targets
+  official_multi_memory_memory_size0.wast
+  official_multi_memory_memory_size1.wast
+  official_multi_memory_memory_fill0.wast)
+ (deps
+  official_multi_memory_binary.py binary_fixtures.py
+  ../wast_testsuite/proposals/multi-memory/memory_size0.wast
+  ../wast_testsuite/proposals/multi-memory/memory_size1.wast
+  ../wast_testsuite/proposals/multi-memory/memory_fill0.wast)
+ (action
+  (run python3 %{dep:official_multi_memory_binary.py}
+   %{dep:../wast_testsuite/proposals/multi-memory/memory_size0.wast}
+   %{dep:../wast_testsuite/proposals/multi-memory/memory_size1.wast}
+   %{dep:../wast_testsuite/proposals/multi-memory/memory_fill0.wast})))
+
+(rule
+ (alias runtest)
+ (deps
+  official_multi_memory_memory_size0.wast
+  official_multi_memory_memory_size1.wast
+  official_multi_memory_memory_fill0.wast
+  ../run_wast.sh)
+ (action
+  (setenv EXE %{exe:../src/wasm_coq_interpreter.exe}
+   (setenv JOBS 1
+    (run bash %{dep:../run_wast.sh} . official_multi_memory)))))

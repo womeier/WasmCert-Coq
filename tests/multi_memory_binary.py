@@ -1,21 +1,5 @@
 """Binary-only fixtures: do not depend on a multi-memory text frontend."""
-
-
-def uleb(n):
-    out = bytearray()
-    while n >= 128:
-        out.append((n & 127) | 128)
-        n >>= 7
-    out.append(n)
-    return bytes(out)
-
-
-def vector(items):
-    return uleb(len(items)) + b"".join(items)
-
-
-def section(tag, payload):
-    return bytes([tag]) + uleb(len(payload)) + payload
+from binary_fixtures import escaped, section, uleb, vector
 
 
 def module(instructions, memories=(1,), imports=(), data=(), data_count=None, peek=None):
@@ -35,10 +19,6 @@ def module(instructions, memories=(1,), imports=(), data=(), data_count=None, pe
         + section(10, vector([uleb(len(body)) + body for body in bodies]))
         + (section(11, vector(data)) if data else b"")
     )
-
-
-def escaped(data):
-    return '"' + "".join(f"\\{b:02x}" for b in data) + '"'
 
 
 def check(instructions, expected, **kwargs):
