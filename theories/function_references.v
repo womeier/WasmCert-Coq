@@ -176,6 +176,26 @@ Definition ref_has_type (s : store_record) (types : list function_type)
   | VAL_ref_extern _ => heap t = Abstract T_externref
   end.
 
+(* The refinement layer is conservative over the existing runtime typing.
+   Erasure forgets nullability and indexed function identity, but cannot turn
+   an ill-typed or dangling runtime reference into a well-typed old value. *)
+Lemma ref_has_type_erases s types v t :
+  ref_has_type s types v t ->
+  value_typing s (VAL_ref v) (T_ref (erase_heap (heap t))) = true.
+Proof.
+  intros [_ Hv]. destruct v as [h | a | a].
+  - destruct Hv as [_ He]. subst h.
+    unfold value_typing, typeof_value, typeof_ref. simpl.
+    apply value_subtyping_eq.
+  - destruct Hv as [ft [Ha Hheap]].
+    unfold value_typing, typeof_value, typeof_ref. rewrite Ha.
+    destruct (heap t) as [h | i]; simpl in *.
+    + destruct h; [apply value_subtyping_eq | contradiction].
+    + apply value_subtyping_eq.
+  - unfold value_typing, typeof_value, typeof_ref.
+    rewrite Hv. simpl. apply value_subtyping_eq.
+Qed.
+
 Lemma ref_has_type_weaken s types v t1 t2 :
   ref_has_type s types v t1 ->
   ref_subtype t1 t2 ->
