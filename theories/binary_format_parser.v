@@ -310,8 +310,7 @@ Definition parse_alignment_exponent {n} : byte_parser N n :=
 Definition parse_static_offset {n} : byte_parser N n :=
   parse_u32_as_N.
 
-Definition parse_memarg {n} : byte_parser memarg n :=
-  parse_alignment_exponent >>= (fun a =>
+Definition parse_memarg_tail {n} (a: N) : byte_parser memarg n :=
     match decode_memarg_flags a with
     | Some (align, false) =>
       (fun o => Build_memarg o align 0%N) <$> parse_static_offset
@@ -319,7 +318,10 @@ Definition parse_memarg {n} : byte_parser memarg n :=
       (fun '(x, o) => Build_memarg o align x) <$>
         (parse_memidx <&> parse_static_offset)
     | None => fail
-    end).
+    end.
+
+Definition parse_memarg {n} : byte_parser memarg n :=
+  parse_alignment_exponent >>= (fun a => parse_memarg_tail a).
 
 Definition parse_i32_load {n} : byte_parser basic_instruction n :=
   exact_byte x28 &> ((BI_load T_i32 None) <$> parse_memarg).
