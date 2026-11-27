@@ -21,4 +21,4 @@
  (alias runtest)
  (deps extended_const.wast)
  (action
-  (bash "set -o pipefail; %{exe:../src/wasm_coq_interpreter.exe} --wast %{dep:extended_const.wast} | grep 'Result: 6/6 '")))
+  (bash "set -o pipefail; %{exe:../src/wasm_coq_interpreter.exe} --wast %{dep:extended_const.wast} | grep 'Result: 22/22 '")))

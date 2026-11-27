@@ -1,7 +1,7 @@
 (** Correctness of the terminating extended-constant evaluator. *)
 From mathcomp Require Import ssreflect ssrbool ssrnat eqtype seq.
 From Wasm Require Import instantiation_func type_checker_reflects_typing type_preservation.
-From Stdlib Require Import Relations Relation_Operators NArith.
+From Stdlib Require Import Relations Relation_Operators NArith Arith.Wf_nat Arith.PeanoNat.
 
 Set SsrOldRewriteGoalsOrder.
 
@@ -184,6 +184,146 @@ Proof.
       * by apply/IH.
 Qed.
 
+Lemma extended_globals_typing_nth c gs n g :
+  extended_globals_typing c gs ->
+  List.nth_error gs n = Some g ->
+  exists c',
+    c'.(tc_globals) = c.(tc_globals) ++ map modglob_type (take n gs) /\
+    extended_global_typing c' g.
+Proof.
+  move: c n.
+  induction gs as [|g0 gs IH]; move => c [|n] //=.
+  - move => [Hg Hgs] [<-].
+    exists c; by rewrite cats0.
+  - move => [Hg Hgs] Hnth.
+    specialize (IH _ _ Hgs Hnth) as [c' [Hglobals Htype]].
+    exists c'; split => //.
+    by rewrite Hglobals /= -catA.
+Qed.
+
+Lemma global_init_values_typing C hs s f gs vs :
+  extended_globals_typing C gs ->
+  List.Forall2 (fun g v =>
+    reduce_trans (hs, s, f, to_e_list g.(modglob_init))
+                 (hs, s, f, [::v_to_e v])) gs vs ->
+  (forall n addr, List.nth_error f.(f_inst).(inst_funcs) n = Some addr ->
+     (addr < N.of_nat (length s.(s_funcs)))%N) ->
+  (forall gidx v gt, sglob_val s f.(f_inst) gidx = Some v ->
+     lookup_N C.(tc_globals) gidx = Some gt ->
+     value_typing s v gt.(tg_t)) ->
+  (forall j g v, List.nth_error gs j = Some g ->
+     List.nth_error vs j = Some v ->
+     sglob_val s f.(f_inst) (N.of_nat (length C.(tc_globals) + j)) = Some v) ->
+  List.Forall2 (fun g v => value_typing s v g.(modglob_type).(tg_t)) gs vs.
+Proof.
+  move => Hprefix Hreduce Hfunc Himport Hdefined.
+  specialize (List.Forall2_length Hreduce) as Hlen.
+  apply Forall2_spec => //.
+  move => n.
+  induction n using lt_wf_ind.
+  move => g v Hnthg Hnthv.
+  specialize (extended_globals_typing_nth _ _ _ _ Hprefix Hnthg)
+    as [Cn [Hglobals [Hconst Hbet]]].
+  specialize (Forall2_lookup Hreduce Hnthg) as [v0 [Hnthv0 Hred]].
+  rewrite Hnthv in Hnthv0; injection Hnthv0 as <-.
+  eapply extended_init_value_typing; eauto.
+  move => idx w gt Hget Hlookup.
+  rewrite Hglobals in Hlookup.
+  unfold lookup_N in Hlookup.
+  destruct (Nat.lt_ge_cases (N.to_nat idx) (length (tc_globals C))) as [Hlt|Hge].
+  - rewrite List.nth_error_app1 in Hlookup; last exact Hlt.
+    by eapply Himport; eauto.
+  - rewrite List.nth_error_app2 in Hlookup; last exact Hge.
+    apply nth_error_map in Hlookup as [g' [Htake <-]].
+    set j := (N.to_nat idx - length (tc_globals C))%coq_nat.
+    fold j in Htake.
+    assert (j < n) as Hjn.
+    { apply nth_error_Some_length in Htake.
+      rewrite length_is_size size_take in Htake.
+      by destruct (n < size gs) eqn:Hnlt; lias.
+    }
+    assert (List.nth_error gs j = Some g') as Hnthg'.
+    { by rewrite (nth_error_take_longer _ Hjn). }
+    destruct (List.nth_error vs j) as [v'|] eqn:Hnthv'.
+    2: { apply List.nth_error_None in Hnthv'.
+         apply nth_error_Some_length in Hnthg'.
+         by lias.
+    }
+    specialize (Hdefined _ _ _ Hnthg' Hnthv').
+    assert (idx = N.of_nat (length (tc_globals C) + j)) as Hidx.
+    { apply Nnat.N2Nat.inj.
+      rewrite Nnat.Nat2N.id.
+      unfold j; by lias.
+    }
+    rewrite Hidx Hdefined in Hget.
+    injection Hget as <-.
+    by eapply H; eauto; lias.
+Qed.
+
+Lemma sglob_val_defined s f oldgs imports gs vs j g v :
+  s.(s_globals) = oldgs ++ map (fun '(g, v) => gen_global_instance g v) (List.combine gs vs) ->
+  f.(f_inst).(inst_globals) = imports ++ iota_N (length oldgs) (length gs) ->
+  List.nth_error gs j = Some g ->
+  List.nth_error vs j = Some v ->
+  sglob_val s f.(f_inst) (N.of_nat (length imports + j)) = Some v.
+Proof.
+  move => Hstore Hinst Hg Hv.
+  unfold sglob_val, sglob, sglob_ind.
+  rewrite Hinst /lookup_N Nnat.Nat2N.id.
+  rewrite List.nth_error_app2; last exact (Nat.le_add_r _ _).
+  rewrite /addn Nat.add_sub_swap; last exact (Nat.le_refl _).
+  rewrite Nat.sub_diag /=.
+  rewrite iota_N_lookup; last by apply nth_error_Some_length in Hg; lias.
+  rewrite Hstore Nnat.Nat2N.id.
+  rewrite List.nth_error_app2; last by lias.
+  rewrite /addn Nat.add_sub_swap; last exact (Nat.le_refl _).
+  rewrite Nat.sub_diag /=.
+  assert (List.nth_error (List.combine gs vs) j = Some (g, v)) as Hpair.
+  { clear - Hg Hv.
+    move: gs vs Hg Hv.
+    induction j; move => [|g0 gs] [|v0 vs] //= Hg Hv.
+    - by injection Hg as ->; injection Hv as ->.
+    - by apply IHj.
+  }
+  by rewrite nth_error_map' Hpair.
+Qed.
+
+Lemma global_instances_map gs vs :
+  map (fun '(g, v) => gen_global_instance g v) (List.combine gs vs) =
+  map (fun '({| modglob_type := gt |}, v) => {| g_type := gt; g_val := v |})
+      (List.combine gs vs).
+Proof.
+  apply eq_map.
+  by move => [[gt init] v].
+Qed.
+
+Lemma global_init_context_typing C s f gs vs :
+  List.Forall2 (fun g v => value_typing s v g.(modglob_type).(tg_t)) gs vs ->
+  (forall idx v gt, sglob_val s f.(f_inst) idx = Some v ->
+     lookup_N C.(tc_globals) idx = Some gt -> value_typing s v gt.(tg_t)) ->
+  (forall j g v, List.nth_error gs j = Some g ->
+     List.nth_error vs j = Some v ->
+     sglob_val s f.(f_inst) (N.of_nat (length C.(tc_globals) + j)) = Some v) ->
+  forall idx v gt, sglob_val s f.(f_inst) idx = Some v ->
+    lookup_N (C.(tc_globals) ++ map modglob_type gs) idx = Some gt ->
+    value_typing s v gt.(tg_t).
+Proof.
+  move => Hvalues Himport Hdefined idx v gt Hget Hlookup.
+  unfold lookup_N in Hlookup.
+  destruct (Nat.lt_ge_cases (N.to_nat idx) (length (tc_globals C))) as [Hlt|Hge].
+  - rewrite List.nth_error_app1 in Hlookup; last exact Hlt.
+    by eapply Himport; eauto.
+  - rewrite List.nth_error_app2 in Hlookup; last exact Hge.
+    apply nth_error_map in Hlookup as [g [Hnthg <-]].
+    specialize (Forall2_lookup Hvalues Hnthg) as [w [Hnthw Htype]].
+    specialize (Hdefined _ _ _ Hnthg Hnthw).
+    assert (idx = N.of_nat (length (tc_globals C) +
+      (N.to_nat idx - length (tc_globals C)))) as Hidx.
+    { apply Nnat.N2Nat.inj; rewrite Nnat.Nat2N.id; by lias. }
+    rewrite Hidx Hdefined in Hget.
+    by injection Hget as <-.
+Qed.
+
 Lemma const_reduce_context hs s f vs es es' tail :
   reduce hs s f es hs s f es' ->
   reduce hs s f (v_to_e_list vs ++ es ++ tail)
@@ -311,6 +451,113 @@ Proof.
   destruct ws as [|w [|w' ws]] => //.
   move => [<-].
   by apply (interp_const_stack_sound hs _ _ _ _ _ Heval).
+Qed.
+
+Lemma interp_const_step_environment s f s' f' e vs ws :
+  f'.(f_inst).(inst_funcs) = f.(f_inst).(inst_funcs) ->
+  (forall i v, sglob_val s f.(f_inst) i = Some v ->
+     sglob_val s' f'.(f_inst) i = Some v) ->
+  interp_const_step s f e vs = Some ws ->
+  interp_const_step s' f' e vs = Some ws.
+Proof.
+  move => Hfunc Hglob.
+  destruct e => //=.
+  - by rewrite Hfunc.
+  - destruct (sglob_val s (f_inst f) g) as [v|] eqn:Hget => //.
+    by rewrite (Hglob _ _ Hget).
+Qed.
+
+Lemma interp_const_stack_environment s f s' f' es vs ws :
+  f'.(f_inst).(inst_funcs) = f.(f_inst).(inst_funcs) ->
+  (forall i v, sglob_val s f.(f_inst) i = Some v ->
+     sglob_val s' f'.(f_inst) i = Some v) ->
+  interp_const_stack s f es vs = Some ws ->
+  interp_const_stack s' f' es vs = Some ws.
+Proof.
+  move => Hfunc Hglob.
+  move: vs ws.
+  induction es as [|e es IH]; move => vs ws //=.
+  destruct (interp_const_step s f e vs) as [vs'|] eqn:Hstep => //.
+  erewrite interp_const_step_environment; eauto.
+Qed.
+
+Lemma interp_get_const_environment s f s' f' es v :
+  f'.(f_inst).(inst_funcs) = f.(f_inst).(inst_funcs) ->
+  (forall i v, sglob_val s f.(f_inst) i = Some v ->
+     sglob_val s' f'.(f_inst) i = Some v) ->
+  interp_get_const s f es = Some v ->
+  interp_get_const s' f' es = Some v.
+Proof.
+  move => Hfunc Hglob.
+  rewrite !interp_get_const_stack.
+  destruct (interp_const_stack s f es nil) as [ws|] eqn:Heval => //.
+  erewrite interp_const_stack_environment; eauto.
+Qed.
+
+Lemma const_global_extension s f g v :
+  forall i w, sglob_val s f.(f_inst) i = Some w ->
+  sglob_val (add_glob s (gen_global_instance g v))
+    (const_frame_add_global f (N.of_nat (length s.(s_globals)))).(f_inst) i = Some w.
+Proof.
+  move => i w.
+  unfold sglob_val, sglob, sglob_ind, lookup_N.
+  cbn [const_frame_add_global add_glob].
+  destruct (List.nth_error (inst_globals (f_inst f)) (N.to_nat i))
+    as [addr|] eqn:Haddr => //.
+  rewrite List.nth_error_app1; last by apply List.nth_error_Some; rewrite Haddr.
+  rewrite Haddr.
+  destruct (List.nth_error (s_globals s) (N.to_nat addr)) as [gi|] eqn:Hgi => //.
+  rewrite List.nth_error_app1; first by rewrite Hgi.
+  by apply List.nth_error_Some; rewrite Hgi.
+Qed.
+
+Theorem interp_global_chain_results s f gs s' f' vs :
+  interp_global_chain s f gs = Some (s', f', vs) ->
+  f'.(f_inst).(inst_funcs) = f.(f_inst).(inst_funcs) /\
+  (forall i v, sglob_val s f.(f_inst) i = Some v ->
+     sglob_val s' f'.(f_inst) i = Some v) /\
+  List.Forall2 (fun g v => interp_get_const s' f' g.(modglob_init) = Some v) gs vs.
+Proof.
+  move: s f s' f' vs.
+  induction gs as [|g gs IH]; move => s f s' f' vs; cbn [interp_global_chain].
+  - move => [<- <- <-].
+    repeat split => //; constructor.
+  - destruct (interp_get_const s f (modglob_init g)) as [v|] eqn:Heval => //.
+    cbn [alloc_glob].
+    destruct (interp_global_chain _ _ gs) as [[[s2 f2] ws]|] eqn:Hchain => //.
+    move => [<- <- <-].
+    specialize (IH _ _ _ _ _ Hchain) as [Hfunc [Hglob Hresults]].
+    assert (forall i w, sglob_val s f.(f_inst) i = Some w ->
+      sglob_val s2 f2.(f_inst) i = Some w) as Hglob'.
+    { move => i w Hget.
+      apply Hglob.
+      by apply const_global_extension.
+    }
+    repeat split => //.
+    constructor => //.
+    by eapply (interp_get_const_environment s f s2 f2 _ v); eauto.
+Qed.
+
+Lemma interp_global_chain_shape s f gs s' f' vs :
+  interp_global_chain s f gs = Some (s', f', vs) ->
+  s'.(s_globals) = s.(s_globals) ++
+    map (fun '(g, v) => gen_global_instance g v) (List.combine gs vs) /\
+  f'.(f_inst).(inst_globals) = f.(f_inst).(inst_globals) ++
+    iota_N (length s.(s_globals)) (length gs).
+Proof.
+  move: s f s' f' vs.
+  induction gs as [|g gs IH]; move => s f s' f' vs; cbn [interp_global_chain].
+  - move => [<- <- <-].
+    by rewrite /= !cats0.
+  - destruct (interp_get_const s f (modglob_init g)) as [v|] eqn:Heval => //.
+    cbn [alloc_glob].
+    destruct (interp_global_chain _ _ gs) as [[[s2 f2] ws]|] eqn:Hchain => //.
+    move => [<- <- <-].
+    specialize (IH _ _ _ _ _ Hchain) as [Hglobals Hinst].
+    split.
+    + by rewrite Hglobals /= -catA.
+    + rewrite Hinst /= List.length_app /= Nat.add_1_r -catA.
+      reflexivity.
 Qed.
 
 Lemma interp_const_step_store_extension s s' f e vs ws :

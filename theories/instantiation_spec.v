@@ -335,6 +335,19 @@ Definition const_context_add_global (c : t_context) (gt : global_type) : t_conte
      tc_return := c.(tc_return);
      tc_refs := c.(tc_refs) |}.
 
+Definition const_context_add_globals (c : t_context) (gts : list global_type) : t_context :=
+  {| tc_types := c.(tc_types);
+     tc_funcs := c.(tc_funcs);
+     tc_tables := c.(tc_tables);
+     tc_mems := c.(tc_mems);
+     tc_globals := c.(tc_globals) ++ gts;
+     tc_elems := c.(tc_elems);
+     tc_datas := c.(tc_datas);
+     tc_locals := c.(tc_locals);
+     tc_labels := c.(tc_labels);
+     tc_return := c.(tc_return);
+     tc_refs := c.(tc_refs) |}.
+
 Definition extended_global_typing (c : t_context) (g : module_global) : Prop :=
   extended_const_exprs c g.(modglob_init) /\
   be_typing c g.(modglob_init) (Tf nil [::g.(modglob_type).(tg_t)]).
@@ -569,9 +582,9 @@ Definition module_typing (m : module) (impts : list extern_type) (expts : list e
   List.Forall2 (module_table_typing c') ts tts /\
   List.Forall2 (module_mem_typing c') ms mts /\
   wasm_2_memory_count_check ms ims /\
-  List.Forall2 (module_global_typing c') gs gts /\
-  List.Forall2 (module_elem_typing c') els rts /\
-  List.Forall2 (module_data_typing c') ds dts /\
+   (gts = map modglob_type gs /\ extended_globals_typing c' gs) /\
+   List.Forall2 (module_elem_typing (const_context_add_globals c' gts)) els rts /\
+   List.Forall2 (module_data_typing (const_context_add_globals c' gts)) ds dts /\
   pred_option (module_start_typing c) i_opt /\
   List.Forall2 (module_import_typing c) imps impts /\
   List.Forall2 (module_export_typing c) exps expts /\
@@ -702,7 +715,7 @@ Definition instantiate (s : store_record) (m : module) (v_imps : list extern_val
     List.Forall2 (external_typing s) v_imps t_imps /\
     List.Forall2 import_subtyping t_imps t_imps_mod /\
     alloc_module s m v_imps g_inits r_inits (s_end, inst) /\
-    let inst_init := Build_moduleinst nil inst.(inst_funcs) nil nil (ext_globals v_imps) nil nil nil in
+    let inst_init := Build_moduleinst nil inst.(inst_funcs) nil nil inst.(inst_globals) nil nil nil in
     let f_init := Build_frame nil inst_init in
     (* Init values *)
     instantiate_globals f_init hs' s_end m g_inits /\

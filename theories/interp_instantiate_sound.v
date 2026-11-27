@@ -83,18 +83,7 @@ Proof.
   }
   (* globals *)
   { clear -Hglobalcheck hfc.
-    unfold gather_m_g_types.
-    apply Forall2_spec; first by rewrite List.length_map.
-    move => n mglob gt Hgnth Hmgnth.
-    erewrite List.map_nth_error in Hmgnth; last by eauto.
-    injection Hmgnth as <-.
-    unfold module_global_typing.
-    destruct mglob => /=.
-    eapply all_projection in Hglobalcheck; eauto.
-    unfold module_global_type_checker in Hglobalcheck.
-    move/andP in Hglobalcheck; destruct Hglobalcheck as [? Hbet].
-    repeat split => //.
-    by move/b_e_type_checker_reflects_typing in Hbet.
+    by apply/extended_globals_type_checker_reflects.
   }
   (* elem *)
   { clear -Helemcheck Hmetypes hfc.
@@ -215,11 +204,10 @@ Proof.
   by repeat rewrite eq_refl => /=.
 Qed.
 
-(* Breaking circularity: the global initialisers need to be well-typed under a
-   context with only the imported globals added. *)
+(* Each initializer sees imports and the types of preceding defined globals. *)
 Lemma module_typecheck_glob_aux: forall m t_imps t_exps str,
     module_type_checker m = (Some (t_imps, t_exps), str) ->
-    exists c, all (module_global_type_checker c) m.(mod_globals).
+    exists c, extended_globals_type_checker c m.(mod_globals).
 Proof.
   move => m t_imps t_exps str.
   unfold module_type_checker.
@@ -253,7 +241,7 @@ Proof.
   destruct (module_type_checker m) as [[[t_imps_mod t_exps]|] str'] eqn:Hmodcheck => //.
   destruct (those _) as [t_imps | ] eqn:Hextcheck => //.
   destruct (all2 import_subtyping _ _) eqn:Hextsubtyping => //.
-  destruct (get_global_inits _ _ (mod_globals m)) as [g_inits |] eqn:Hglobinit => //.
+  destruct (interp_global_chain _ _ (mod_globals m)) as [[[s_init f_init_final] g_inits] |] eqn:Hglobinit => //.
   destruct (get_elem_inits _ _ (mod_elems m)) as [r_inits |] eqn:Heleminit => //.
   destruct (interp_alloc_module s m v_imps g_inits r_inits) as [s' inst'] eqn:Halloc => //.
   injection Hinterp as <- <- Heq.
@@ -265,7 +253,7 @@ Proof.
   
   assert (alloc_module s m v_imps g_inits r_inits (s', inst')) as Hallocmodule.
   { apply interp_alloc_sound => //.
-    - by apply those_length in Hglobinit; rewrite length_is_size size_map -length_is_size in Hglobinit.
+    - by eapply interp_global_chain_length; eauto.
     - by apply those_length in Heleminit; rewrite length_is_size size_map -length_is_size in Heleminit.
   }
   
@@ -281,9 +269,7 @@ Proof.
   
   assert (Hgvs_len : length g_inits = length m.(mod_globals)).
   {
-    apply those_length in Hglobinit.
-    rewrite length_is_size size_map in Hglobinit.
-    by rewrite length_is_size.
+    by eapply interp_global_chain_length; eauto.
   }
   
   assert (Hrvs_len : length r_inits = length m.(mod_elems)).
@@ -311,6 +297,11 @@ Proof.
   specialize (alloc_data_iota_N Hallocdatas) as Hdataaddrs.
 
   extract_premise.
+  specialize (interp_global_chain_results _ _ _ _ _ _ Hglobinit)
+    as [Hinitfuncs [Hinitglobals Hinitresults]].
+  specialize (interp_global_chain_shape _ _ _ _ _ _ Hglobinit)
+    as [Hinitstore Hinitaddrs].
+  rewrite global_instances_map in Hinitstore.
 
   destruct s, s1, s2, s3, s4, s5, s6; simpl in *.
   repeat split => //.
@@ -321,10 +312,14 @@ Proof.
     unfold instantiate_globals.
     apply Forall2_spec => //.
     move => n mglob gv Hnth1 Hnth2.
-    eapply those_map_lookup in Hglobinit as [gi [Hmap Hnth]]; last by eauto.
+    eapply Forall2_lookup in Hinitresults as [gi [Hnth Hmap]]; last by eauto.
     simplify_multieq.
-    eapply interp_get_const_sound_global_extension; last exact Hmap.
-    by subst.
+    apply interp_get_const_sound.
+    eapply (interp_get_const_environment s_init f_init_final); last exact Hmap.
+    + by rewrite Hinitfuncs.
+    + move => i v.
+      unfold sglob_val, sglob, sglob_ind.
+      by rewrite Hinitstore Hinitaddrs.
   - subst.
     unfold instantiate_elems.
     apply Forall2_spec => //.
@@ -340,8 +335,12 @@ Proof.
       destruct (interp_get_const _ _ bes) as [[v|v|v]|] eqn:Heval => //.
       injection Hmap as <-.
       simplify_multieq.
-      eapply interp_get_const_sound_global_extension with (v := VAL_ref v); last exact Heval.
-      by subst.
+      apply (interp_get_const_sound _ _ _ _ (VAL_ref v)).
+      eapply (interp_get_const_environment s_init f_init_final); last exact Heval.
+      * by rewrite Hinitfuncs.
+      * move => j w.
+        unfold sglob_val, sglob, sglob_ind.
+        by rewrite Hinitstore Hinitaddrs.
 Qed.
 
 End Host.

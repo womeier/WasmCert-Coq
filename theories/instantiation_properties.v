@@ -735,4 +735,39 @@ Proof.
   by eapply extended_init_value_typing; eauto.
 Qed.
 
+Lemma imported_global_value_typing s s' f v_imps t_imps t_imps_mod added_globals added_addrs :
+  store_typing s ->
+  store_extension s s' ->
+  List.Forall2 (external_typing s) v_imps t_imps ->
+  List.Forall2 import_subtyping t_imps t_imps_mod ->
+  s'.(s_globals) = s.(s_globals) ++ added_globals ->
+  f.(f_inst).(inst_globals) = ext_globals v_imps ++ added_addrs ->
+  forall idx v gt, sglob_val s' f.(f_inst) idx = Some v ->
+    lookup_N (ext_t_globals t_imps_mod) idx = Some gt ->
+    value_typing s' v gt.(tg_t).
+Proof.
+  move => HST Hext Himps Hsub Hgs Hinst idx v gt Hget Hlookup.
+  eapply import_subtyping_globs_impl' in Hsub as [gt' [Hnthsub Hsub]]; eauto.
+  move/eqP: Hsub => Hsub; subst gt'.
+  eapply vt_imps_globals_typing in Hnthsub as [addr [Haddr Htext]]; eauto.
+  unfold external_typing, ext_typing, ext_global_typing in Htext.
+  destruct (lookup_N (s_globals s) addr) as [gi|] eqn:Hgi => //.
+  injection Htext as <-.
+  unfold sglob_val, sglob, sglob_ind in Hget.
+  rewrite Hinst /lookup_N in Hget.
+  rewrite List.nth_error_app1 in Hget; last by apply nth_error_Some_length in Haddr.
+  rewrite Haddr Hgs in Hget.
+  unfold lookup_N in Hgi.
+  rewrite List.nth_error_app1 in Hget; last by apply nth_error_Some_length in Hgi.
+  rewrite Hgi /= in Hget.
+  injection Hget as <-.
+  destruct s; simpl in *.
+  destruct HST as [_ [_ [_ [Hglobals _]]]].
+  eapply Forall_lookup in Hglobals as [gtype Htyped]; eauto.
+  unfold globalinst_typing in Htyped.
+  destruct gi => /=.
+  remove_bools_options; subst.
+  by eapply value_typing_extension; eauto.
+Qed.
+
 End Host.

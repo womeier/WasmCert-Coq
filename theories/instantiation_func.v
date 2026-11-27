@@ -105,6 +105,18 @@ Definition module_global_type_checker (c : t_context) (mg : module_global) : boo
   const_exprs c es &&
   type_checker.b_e_type_checker c es (Tf nil [::tg.(tg_t)]).
 
+Definition extended_global_type_checker (c : t_context) (g : module_global) : bool :=
+  extended_const_exprs c g.(modglob_init) &&
+  type_checker.b_e_type_checker c g.(modglob_init) (Tf nil [::g.(modglob_type).(tg_t)]).
+
+Fixpoint extended_globals_type_checker (c : t_context) (gs : list module_global) : bool :=
+  match gs with
+  | nil => true
+  | g :: gs' =>
+      extended_global_type_checker c g &&
+      extended_globals_type_checker (const_context_add_global c g.(modglob_type)) gs'
+  end.
+
 Definition module_elem_mode_checker (c: t_context) (emode: module_elemmode) (reftype: reference_type) : bool :=
   match emode with
   | ME_passive => true
@@ -199,9 +211,9 @@ Definition module_type_checker (m : module) : option ((list extern_type) * (list
        seq.all (module_table_type_checker c) ts &&
        seq.all (module_mem_type_checker c) ms &&
        wasm_2_memory_count_check ms ims &&  
-       seq.all (module_global_type_checker c') gs &&
-       seq.all (module_elem_type_checker c') els &&
-       seq.all (module_data_type_checker c') ds &&
+        extended_globals_type_checker c' gs &&
+        seq.all (module_elem_type_checker (const_context_add_globals c' gts)) els &&
+        seq.all (module_data_type_checker (const_context_add_globals c' gts)) ds &&
        pred_option (module_start_type_checker c) i_opt &&
        export_name_unique exps
       then
@@ -217,18 +229,6 @@ Definition module_type_checker (m : module) : option ((list extern_type) * (list
 
 Definition external_type_checker (s : store_record) (v : extern_value): option extern_type :=
   ext_typing s v.
-
-Definition extended_global_type_checker (c : t_context) (g : module_global) : bool :=
-  extended_const_exprs c g.(modglob_init) &&
-  type_checker.b_e_type_checker c g.(modglob_init) (Tf nil [::g.(modglob_type).(tg_t)]).
-
-Fixpoint extended_globals_type_checker (c : t_context) (gs : list module_global) : bool :=
-  match gs with
-  | nil => true
-  | g :: gs' =>
-      extended_global_type_checker c g &&
-      extended_globals_type_checker (const_context_add_global c g.(modglob_type)) gs'
-  end.
 
 (* Stack head is the most recently produced value.  Unlike the full interpreter,
    this evaluator needs no fuel: every recursive call consumes an instruction. *)
@@ -374,10 +374,10 @@ Definition interp_instantiate (hs: host_state) (s : store_record) (m : module) (
                 inst_exports := nil;
               |} in
             let f_init := Build_frame nil inst_init in
-            match get_global_inits s f_init m.(mod_globals) with
+            match interp_global_chain s f_init m.(mod_globals) with
             | None => (None, "Error in evaluating global initialisers")
-            | Some g_inits =>
-                match get_elem_inits s f_init m.(mod_elems) with
+            | Some (s_init, f_init_final, g_inits) =>
+                match get_elem_inits s_init f_init_final m.(mod_elems) with
                 | Some r_inits =>
                     let '(s', inst_final) := interp_alloc_module s m v_imps g_inits r_inits in
                     let f_final := Build_frame nil inst_final in
