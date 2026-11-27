@@ -4,6 +4,7 @@
 *)
 
 From Wasm Require Import datatypes_properties typing leb128 utf8.
+From Wasm Require Import gc_binary.
 From compcert Require Import Integers.
 From parseque Require Import Parseque.
 From Stdlib Require Import Strings.Byte ZArith.
@@ -174,6 +175,22 @@ Definition parse_vector_type {n} : byte_parser vector_type n :=
 Definition parse_reference_type {n} : byte_parser reference_type n :=
   (exact_byte x70 $> T_funcref) <|>
   (exact_byte x6f $> T_externref).
+
+(** Shared-reference integration can map this abstract fragment into its
+    final heap/reference representation.  Keep it distinct from the legacy
+    [parse_reference_type] until that representation is integrated. *)
+Definition parse_gc_abstract_heap_type {n} :
+    byte_parser gc_types.abstract_heap_type n :=
+  guardM decode_abstract_heap anyTok.
+
+Definition parse_gc_abstract_reference_type {n} :
+    byte_parser gc_types.abstract_reference_type n :=
+  ((fun h => {| gc_types.art_nullable := true; gc_types.art_heap := h |}) <$>
+    (exact_byte x63 &> parse_gc_abstract_heap_type)) <|>
+  ((fun h => {| gc_types.art_nullable := false; gc_types.art_heap := h |}) <$>
+    (exact_byte x64 &> parse_gc_abstract_heap_type)) <|>
+  ((fun h => {| gc_types.art_nullable := true; gc_types.art_heap := h |}) <$>
+    parse_gc_abstract_heap_type).
 
 Definition parse_value_type {n} : byte_parser value_type n :=
   T_num <$> parse_number_type <|>
@@ -1360,6 +1377,19 @@ Definition run_parse_be (bs : list byte) : option basic_instruction :=
 
 Definition run_parse_heap_typeidx (bs : list byte) : option typeidx :=
   run bs (fun _ => parse_heap_typeidx).
+
+(** A prefix entry point, retaining the suffix rather than requiring end of
+    input.  The parser and token/monad instances are the same as [run]. *)
+Definition run_parse_prefix {A}
+    (p : forall n, Parser (SizedList byte) byte option A n) (bs : list byte) :
+    option (A * list byte) :=
+  option_map
+    (fun s => (Success.value s, @Sized.value _ _ _ (Success.leftovers s)))
+    (runParser (p (List.length bs)) (Nat.le_refl _) (mkSizedList bs)).
+
+Definition run_parse_gc_abstract_reference_type (bs : list byte) :
+    option (gc_types.abstract_reference_type * list byte) :=
+  run_parse_prefix (fun _ => parse_gc_abstract_reference_type) bs.
 
 Definition run_parse_expr (bs : list byte) : option (list basic_instruction) :=
   run bs (fun n => parse_expr).

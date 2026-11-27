@@ -434,3 +434,47 @@ Proof.
     change (length (output_bytes s) = Success.size s) in Lout.
     rewrite Out in Lout. simpl in Lout. congruence.
 Qed.
+
+Lemma parser_sound_exact_byte b n :
+  parser_sound (@exact_byte (SizedList Byte.byte) _ option _ _ _ _ _ _ b n)
+    (fun bs x => bs = b :: nil /\ x = b).
+Proof.
+  unfold exact_byte.
+  eapply parser_sound_guardM with (P := fun bs x => bs = x :: nil).
+  - apply parser_sound_anyTok.
+  - intros bs x y E F.
+    unfold datatypes_properties.byte_eqb in F.
+    destruct (Byte.byte_eq_dec x b) as [Eq|Neq]; simpl in F;
+      [|discriminate].
+    inversion F; subst. auto.
+Qed.
+
+Lemma parser_complete_exact_byte b n :
+  parser_complete (@exact_byte (SizedList Byte.byte) _ option _ _ _ _ _ _ b n)
+    (fun bs x => bs = b :: nil /\ x = b).
+Proof.
+  unfold exact_byte.
+  eapply parser_complete_guardM with (P := fun bs x => bs = x :: nil).
+  - apply parser_complete_anyTok.
+  - intros bs x [E V]. subst x.
+    exists b. split; [exact E |].
+    unfold datatypes_properties.byte_eqb.
+    destruct (Byte.byte_eq_dec b b); simpl; congruence.
+Qed.
+
+Lemma run_parse_prefix_sound {A}
+    (p : forall n, Parser (SizedList Byte.byte) Byte.byte option A n) P :
+  (forall n, parser_sound (p n) P) ->
+  forall bs a rest,
+    run_parse_prefix p bs = Some (a, rest) ->
+    exists prefix, bs = prefix ++ rest /\ P prefix a.
+Proof.
+  intros H bs a rest R.
+  unfold run_parse_prefix in R.
+  destruct (runParser (p (length bs)) (Nat.le_refl _) (mkSizedList bs))
+    as [s|] eqn:Raw; [|discriminate].
+  inversion R; subst.
+  destruct (H _ _ (Nat.le_refl _) (mkSizedList bs) s Raw)
+    as [prefix [E Pp]].
+  exists prefix. auto.
+Qed.

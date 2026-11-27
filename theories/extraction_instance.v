@@ -72,7 +72,7 @@ Module Utility.
     Definition heap_subtyping := abstract_heap_subtyping.
     Definition reference_subtyping := abstract_reference_subtyping.
     Definition encode_reference := encode_abstract_reference.
-    Definition decode_reference := decode_abstract_reference.
+    Definition decode_reference := run_parse_gc_abstract_reference_type.
     Definition encode_packed := encode_packed_type.
     Definition decode_packed := decode_packed_type.
     Definition decode_typeidx := run_parse_heap_typeidx.
