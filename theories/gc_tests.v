@@ -26,6 +26,33 @@ Example nullable_not_nonnull :
     {| art_nullable := false; art_heap := AH_any |} = false.
 Proof. reflexivity. Qed.
 
+Definition heap_field_matches :=
+  @field_matchesb abstract_heap_type abstract_heap_subtyping abstract_heap_type_beq.
+
+Example immutable_fields_covariant :
+  heap_field_matches
+    {| field_mutability := MUT_const; field_storage := ST_value AH_struct |}
+    {| field_mutability := MUT_const; field_storage := ST_value AH_eq |} = true.
+Proof. reflexivity. Qed.
+
+Example mutable_fields_invariant :
+  heap_field_matches
+    {| field_mutability := MUT_var; field_storage := ST_value AH_struct |}
+    {| field_mutability := MUT_var; field_storage := ST_value AH_eq |} = false.
+Proof. reflexivity. Qed.
+
+Example packed_types_invariant :
+  heap_field_matches
+    {| field_mutability := MUT_const; field_storage := ST_packed PT_i8 |}
+    {| field_mutability := MUT_const; field_storage := ST_packed PT_i16 |} = false.
+Proof. reflexivity. Qed.
+
+Example field_mutability_must_agree :
+  heap_field_matches
+    {| field_mutability := MUT_var; field_storage := ST_packed PT_i8 |}
+    {| field_mutability := MUT_const; field_storage := ST_packed PT_i8 |} = false.
+Proof. reflexivity. Qed.
+
 Definition test_i32 (z : Z) : i32 := Wasm_int.Int32.repr z.
 Definition read_i32_u (n : i32) : Z := Wasm_int.Int32.unsigned n.
 Definition read_i32_s (n : i32) : Z := Wasm_int.Int32.signed n.

@@ -1,0 +1,5 @@
+(rule
+ (alias runtest)
+ (deps ../../run_wast.sh runner_test.sh fake_interpreter.sh)
+ (action
+  (run bash %{dep:runner_test.sh} %{dep:../../run_wast.sh} %{dep:fake_interpreter.sh})))

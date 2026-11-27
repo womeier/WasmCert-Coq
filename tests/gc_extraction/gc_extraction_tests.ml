@@ -54,4 +54,33 @@ let () =
   check "none is not function bottom" (not (heap_subtyping AH_none AH_func));
   check "nofunc is not internal bottom" (not (heap_subtyping AH_nofunc AH_any));
   check "noextern is not internal bottom" (not (heap_subtyping AH_noextern AH_eq));
+  let encodings =
+    [ '\x6a', AH_array; '\x6b', AH_struct; '\x6c', AH_i31;
+      '\x6d', AH_eq; '\x6e', AH_any; '\x6f', AH_extern;
+      '\x70', AH_func; '\x71', AH_none; '\x72', AH_noextern;
+      '\x73', AH_nofunc ]
+  in
+  for code = 0 to 255 do
+    let b = Char.chr code in
+    let expected nullable =
+      Stdlib.Option.map
+        (fun heap -> ({ art_nullable = nullable; art_heap = heap }, ['\x0b']))
+        (List.assoc_opt b encodings)
+    in
+    check "one-byte reference opcode table"
+      (decode_reference [b; '\x0b'] = expected true);
+    check "explicit nullable reference opcode table"
+      (decode_reference ['\x63'; b; '\x0b'] = expected true);
+    check "explicit nonnull reference opcode table"
+      (decode_reference ['\x64'; b; '\x0b'] = expected false);
+    let expected_packed =
+      match code with 0x78 -> Some PT_i8 | 0x77 -> Some PT_i16 | _ -> None
+    in
+    check "packed opcode table" (decode_packed b = expected_packed)
+  done;
+  check "truncated nullable reference" (decode_reference ['\x63'] = None);
+  check "truncated nonnull reference" (decode_reference ['\x64'] = None);
+  check "empty reference" (decode_reference [] = None);
+  check "overlong abstract heap encoding is not an abstract heap type"
+    (decode_reference ['\xee'; '\x7f'] = None);
   Printf.printf "GC extraction: %d/%d checks passed\n" !checks !checks
