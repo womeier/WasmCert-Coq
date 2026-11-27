@@ -14,6 +14,61 @@ Proof. vm_compute. reflexivity. Qed.
 Lemma test_nop : check_toks (x01 :: nil) parse_be = Running.Singleton BI_nop.
 Proof. vm_compute. reflexivity. Qed.
 
+(** Final tail-call opcodes. Internal indirect operands are table/type, whereas
+    the wire format is type/table. Distinct multi-byte indices catch swaps. *)
+Lemma return_call_opcode : forall x,
+    binary_of_be (BI_return_call x) = x12 :: binary_of_idx x.
+Proof. reflexivity. Qed.
+
+Lemma return_call_indirect_opcode : forall table type,
+    binary_of_be (BI_return_call_indirect table type) =
+      x13 :: binary_of_idx type ++ binary_of_idx table.
+Proof. reflexivity. Qed.
+
+Lemma return_call_multibyte :
+    run_parse_be (x12 :: x80 :: x01 :: nil) = Some (BI_return_call 128%N).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma return_call_indirect_multibyte :
+    run_parse_be (x13 :: x80 :: x01 :: x81 :: x02 :: nil) =
+      Some (BI_return_call_indirect 257%N 128%N).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma return_call_u32_max_roundtrip :
+    run_parse_be (binary_of_be (BI_return_call 4294967295%N)) =
+      Some (BI_return_call 4294967295%N).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma return_call_indirect_roundtrip :
+    run_parse_be (binary_of_be (BI_return_call_indirect 257%N 128%N)) =
+      Some (BI_return_call_indirect 257%N 128%N).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma return_call_padded_index :
+    run_parse_be (x12 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil) =
+      Some (BI_return_call 0%N).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma return_call_truncated :
+    run_parse_be (x12 :: x80 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma return_call_indirect_missing_table :
+    run_parse_be (x13 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma return_call_index_overflow :
+    run_parse_be (x12 :: xff :: xff :: xff :: xff :: x10 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma return_call_index_overlong :
+    run_parse_be (x12 :: x80 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma return_call_trailing_bytes :
+    run_parse_be (x12 :: x00 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
 (** An example program. **)
 Definition test :=
   BI_if (BT_valtype None) (BI_testop T_i64 TO_eqz :: nil) (BI_testop T_i64 TO_eqz :: nil).
@@ -146,6 +201,31 @@ Definition module_42 := {|
 
 Lemma module_42_round_trip :
   run_parse_module (binary_of_module module_42) = Some module_42.
+Proof. vm_compute. reflexivity. Qed.
+
+Definition module_tail_calls := {|
+  mod_types := mod_types module_42;
+  mod_funcs := mod_funcs module_42 ++
+    {| modfunc_type := 0%N; modfunc_locals := nil;
+       modfunc_body := BI_return_call 0%N :: nil |} ::
+    {| modfunc_type := 0%N; modfunc_locals := nil;
+       modfunc_body :=
+         BI_const_num (VAL_int32 Wasm_int.Int32.zero) ::
+         BI_return_call_indirect 0%N 0%N :: nil |} :: nil;
+  mod_tables :=
+    Build_module_table
+      (Build_table_type (Build_limits 1%N None) T_funcref) :: nil;
+  mod_mems := nil;
+  mod_globals := nil;
+  mod_elems := nil;
+  mod_datas := nil;
+  mod_start := None;
+  mod_imports := nil;
+  mod_exports := nil;
+|}.
+
+Lemma module_tail_calls_round_trip :
+  run_parse_module (binary_of_module module_tail_calls) = Some module_tail_calls.
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_42_exported := {|

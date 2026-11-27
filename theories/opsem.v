@@ -228,13 +228,13 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
       forall s f x (y: typeidx) i hs t,
         stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_null t) ->
         reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_call_indirect x y)] hs s f [::AI_trap]
-(* https://webassembly.github.io/tail-call/core/exec/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-return-call-x *)
+(* https://webassembly.github.io/spec/core/exec/instructions.html#exec-return-call *)
   | r_return_call :
       forall s f i a hs,
         reduce hs s f [::AI_basic (BI_call i)] hs s f [::AI_invoke a] ->
         reduce hs s f [::AI_basic (BI_return_call i)] hs s f [::AI_return_invoke a]
 
-  (* https://webassembly.github.io/tail-call/core/exec/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-return-call-indirect-x-y *)
+  (* https://webassembly.github.io/spec/core/exec/instructions.html#exec-return-call-indirect *)
   | r_return_call_indirect_success :
       forall s f x y a v hs,
         reduce hs s f [::v_to_e v; AI_basic (BI_call_indirect x y)] hs s f [::AI_invoke a] ->
@@ -276,7 +276,9 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
         length t2s = m ->
         host_application hs s (Tf t1s t2s) h vcs hs' None ->
         reduce hs s f (ves ++ [::AI_invoke a]) hs' s f [::AI_trap]
-  (* https://webassembly.github.io/tail-call/core/exec/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-return-call-indirect-x-y *)
+  (* Administrative frame replacement for a tail call. The callee arguments
+     survive, while the caller frame, labels, and unused operands are discarded.
+     https://webassembly.github.io/spec/core/exec/instructions.html#exec-return-call *)
   | r_return_invoke :
       forall a cl t1s t2s n m vs es i (lh: lholed i) f f0 hs s,
         lookup_N s.(s_funcs) a = Some cl ->

@@ -55,20 +55,21 @@ run_one() {
   local summary
   if (( rc != 0 )); then
     summary="CRASH: $base"
-    echo "0 0" > "$results_dir/$base"
+    echo "0 0 1" > "$results_dir/$base"
   else
     local result_line
     if result_line=$(printf '%s' "$cleaned" | grep -m1 "Result: "); then
-      if [[ "$result_line" =~ Result:\ ([0-9]+)/([0-9]+) ]]; then
-        echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}" > "$results_dir/$base"
+      if [[ "$result_line" =~ Result:\ ([0-9]+)/([0-9]+) ]] &&
+         (( BASH_REMATCH[2] > 0 && BASH_REMATCH[1] <= BASH_REMATCH[2] )); then
+        echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]} 0" > "$results_dir/$base"
         summary="DONE: $base — $result_line"
       else
         summary="PARSE ERROR: $base — could not parse result line"
-        echo "0 0" > "$results_dir/$base"
+        echo "0 0 1" > "$results_dir/$base"
       fi
     else
       summary="NO RESULT: $base"
-      echo "0 0" > "$results_dir/$base"
+      echo "0 0 1" > "$results_dir/$base"
     fi
   fi
 
@@ -90,10 +91,12 @@ printf '%s\n' "${files[@]}" | xargs -P "$jobs" -I {} bash -c 'run_one "$@"' _ {}
 # Aggregate results
 total_passed=0
 total_tests=0
+failed_files=0
 for f in "$results_dir"/*; do
-  read -r p t < "$f"
+  read -r p t failed < "$f"
   total_passed=$((total_passed + p))
   total_tests=$((total_tests + t))
+  failed_files=$((failed_files + failed))
 done
 
 echo "================"
@@ -104,6 +107,11 @@ fi
 
 percentage=$(awk "BEGIN { printf \"%.2f\", ($total_passed / $total_tests) * 100 }")
 echo "Total Passed: $total_passed/$total_tests ($percentage%)"
+
+if (( failed_files != 0 )); then
+  echo "FAILED: $failed_files file(s) crashed or did not produce a valid summary."
+  exit 1
+fi
 
 if (( total_passed < total_tests )); then
   echo "FAILED: $((total_tests - total_passed)) test(s) did not pass."

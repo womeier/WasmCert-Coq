@@ -189,9 +189,13 @@ let load_wast_module verbosity hs s ovar moddef mod_counter =
   end
 
 let print_wast_command cmd = 
-  let cmd_sexpr = Wasm.Arrange.script `Textual [cmd] in
-  let cmd_string = String.concat "" (List.map (Wasm.Sexpr.to_string 200) cmd_sexpr) in
-  cmd_string
+  (* The diagnostic printer's older decoder may not know an opcode supported by
+     the extracted binary parser. A failed diagnostic must not prevent the
+     unchanged command from reaching the actual parser/validator/interpreter. *)
+  try
+    let cmd_sexpr = Wasm.Arrange.script `Textual [cmd] in
+    String.concat "" (List.map (Wasm.Sexpr.to_string 200) cmd_sexpr)
+  with _ -> "<command not supported by the reference diagnostic printer>"
 
 let wasm_name_to_raw_string n = 
   Wasm.Utf8.encode n
@@ -311,6 +315,19 @@ let run_wast_command verbosity max_call_depth cmd hs s mod_counter default_modul
         end
       | Get (_ovar, _funcname) ->
         error "Unsupported wast action: Get"
+      end
+    | AssertInvalid ({it = Encoded (_, bytes); _}, _) ->
+      (* Invalid binaries must decode successfully and fail validation, not
+         merely fail somewhere during parsing, linking, or execution. *)
+      let* m = Parse.parse_module verbosity false bytes in
+      begin match Extract.module_type_checker m with
+      | (None, _) -> pure (hs, s, mod_counter, default_module_name, Verdict_OK)
+      | (Some _, _) -> error "Unexpected valid module in assert_invalid"
+      end
+    | AssertMalformed ({it = Encoded (_, bytes); _}, _) ->
+      begin match run_parse_module_str bytes with
+      | None -> pure (hs, s, mod_counter, default_module_name, Verdict_OK)
+      | Some _ -> error "Unexpected decodable module in assert_malformed"
       end
     | AssertInvalid (moddef, _str) ->
       (* very ugly... *)

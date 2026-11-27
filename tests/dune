@@ -3,3 +3,15 @@
      (package coq-wasm)
      (glob_files *.wasm))
 )
+
+(rule
+  (alias runtest)
+  (deps ../run_wast.sh (glob_files conformance/*.wast))
+  (action
+    (setenv EXE %{exe:../src/wasm_coq_interpreter.exe}
+      (run bash ../run_wast.sh conformance))))
+
+(rule
+  (alias runtest)
+  (deps ../run_wast.sh test_wast_runner.py)
+  (action (run python3 test_wast_runner.py ../run_wast.sh)))

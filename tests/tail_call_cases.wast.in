@@ -1,0 +1,92 @@
+;; Additional binary/runtime regressions, encoded by binary_wast.py.
+(module
+  (type $answer (func (result i32)))
+  (table 0 funcref)
+  (table $calls 3 funcref)
+  (global $started (mut i32) (i32.const 0))
+  (func $finish (global.set $started (i32.const 42)))
+  (func $start (return_call $finish))
+  (start $start)
+  (func $answer (result i32) (i32.const 42))
+  (func $wrong (result i64) (i64.const 7))
+  (elem (table $calls) (i32.const 0) func $answer $wrong)
+  (func (export "started") (result i32) (global.get $started))
+  (func (export "nested") (result i32)
+    (i64.const 999)
+    (block
+      (i32.const 123)
+      (block (return_call $answer))
+      drop)
+    unreachable)
+  (func (export "indirect") (param i32) (result i32)
+    (f64.const 999)
+    (block
+      (i64.const 123)
+      (block
+        (return_call_indirect $calls (type $answer) (local.get 0)))
+      drop)
+    unreachable)
+)
+(assert_return (invoke "started") (i32.const 42))
+(assert_return (invoke "nested") (i32.const 42))
+(assert_return (invoke "indirect" (i32.const 0)) (i32.const 42))
+(assert_trap (invoke "indirect" (i32.const 1)) "indirect call type mismatch")
+(assert_trap (invoke "indirect" (i32.const 2)) "uninitialized element")
+(assert_trap (invoke "indirect" (i32.const 3)) "undefined element")
+
+;; Imported tail calls must enter the callee's instance, not reuse the caller's.
+(module
+  (global i32 (i32.const 42))
+  (func (export "target") (result i32) (global.get 0)))
+(register "tail-provider")
+(module
+  (import "tail-provider" "target" (func $target (result i32)))
+  (global i32 (i32.const 7))
+  (func (export "cross-instance") (result i32) (return_call $target)))
+(assert_return (invoke "cross-instance") (i32.const 42))
+
+;; Result-arity/type rejection cases also present in the current final suite.
+(assert_invalid
+  (module
+    (func $f (result i32) unreachable)
+    (func (result i32 i32) (return_call $f)))
+  "type mismatch")
+(assert_invalid
+  (module
+    (func $f (result i64) unreachable)
+    (func (result i32) (return_call $f)))
+  "type mismatch")
+(assert_invalid
+  (module
+    (type $t (func (result i32)))
+    (table 0 funcref)
+    (func (result i32 i32) (return_call_indirect (type $t) (i32.const 0))))
+  "type mismatch")
+(assert_invalid
+  (module
+    (type $t (func (result i64)))
+    (table 0 funcref)
+    (func (result i32) (return_call_indirect (type $t) (i32.const 0))))
+  "type mismatch")
+
+;; Binary-only malformed tail-call immediates (one [] -> [] function).
+(assert_malformed
+  (module binary
+    "\00asm\01\00\00\00\01\04\01\60\00\00\03\02\01\00"
+    "\0a\05\01\03\00\12\0b")
+  "unexpected end")
+(assert_malformed
+  (module binary
+    "\00asm\01\00\00\00\01\04\01\60\00\00\03\02\01\00"
+    "\0a\06\01\04\00\13\00\0b")
+  "unexpected end")
+(assert_malformed
+  (module binary
+    "\00asm\01\00\00\00\01\04\01\60\00\00\03\02\01\00"
+    "\0a\0a\01\08\00\12\ff\ff\ff\ff\10\0b")
+  "integer too large")
+(assert_malformed
+  (module binary
+    "\00asm\01\00\00\00\01\04\01\60\00\00\03\02\01\00"
+    "\0a\0b\01\09\00\12\80\80\80\80\80\00\0b")
+  "integer representation too long")

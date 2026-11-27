@@ -83,7 +83,14 @@ make run_wast FILTER="load"
 ```
 runs only the test files whose names include `load` (i.e. various memory load instructions both for the Wasm 1.0 values and the v128 values).
 
-Note that tail-call is not part of the standard yet and is therefore not tested.
+Tail calls are part of Wasm 3.0. Binary `return_call` and
+`return_call_indirect` conformance fixtures run in `dune test` and CI:
+```bash
+bash run_wast.sh tests/conformance
+```
+See [the fixture notes](tests/conformance/README.md) for the pinned suite,
+generation command, coverage, and remaining verification/dependency gaps.
+The existing text frontend does not support tail-call operators.
 
 
 ## Using the project
