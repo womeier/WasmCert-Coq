@@ -18,7 +18,15 @@
 
 (rule
  (alias runtest)
- (deps multi_memory_binary.wast)
+ (deps multi_memory_binary.wast ../run_wast.sh)
  (action
-  (run %{exe:../src/wasm_coq_interpreter.exe} --wast
-   %{dep:multi_memory_binary.wast})))
+  (setenv EXE %{exe:../src/wasm_coq_interpreter.exe}
+   (setenv JOBS 1
+    (run bash %{dep:../run_wast.sh} . multi_memory_binary)))))
+
+(rule
+ (alias runtest)
+ (deps wast_assertion_phases_test.sh ../run_wast.sh)
+ (action
+  (run bash %{dep:wast_assertion_phases_test.sh} %{dep:../run_wast.sh}
+   %{exe:../src/wasm_coq_interpreter.exe})))

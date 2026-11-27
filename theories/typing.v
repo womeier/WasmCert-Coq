@@ -363,10 +363,10 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 | bet_memory_copy : forall C mem,
   lookup_N (tc_mems C) 0%N = Some mem ->
   be_typing C [::BI_memory_copy] (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::])
-| bet_memory_init : forall C x mem dat,
-  lookup_N (tc_mems C) 0%N = Some mem ->
-  lookup_N (tc_datas C) x = Some dat ->
-  be_typing C [::BI_memory_init x] (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::])
+| bet_memory_init : forall C x y mem dat,
+  lookup_N (tc_mems C) x = Some mem ->
+  lookup_N (tc_datas C) y = Some dat ->
+  be_typing C [::BI_memory_init x y] (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::])
 | bet_data_drop : forall C x dat,
   lookup_N (tc_datas C) x = Some dat ->
   be_typing C [::BI_data_drop x] (Tf [::] [::])

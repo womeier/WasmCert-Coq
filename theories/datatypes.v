@@ -559,7 +559,7 @@ Instructions in this group are concerned with linear memory.
   | BI_memory_grow : memidx -> basic_instruction
   | BI_memory_fill
   | BI_memory_copy
-  | BI_memory_init: dataidx -> basic_instruction
+  | BI_memory_init: memidx -> dataidx -> basic_instruction
   | BI_data_drop: dataidx -> basic_instruction
 (** std-doc:
 Instructions in this group affect the flow of control.

@@ -81,6 +81,16 @@ Lemma memarg_rejects_truncated_memory_index :
   run_parse_bes (x28 :: x40 :: x80 :: nil) = None.
 Proof. vm_compute. reflexivity. Qed.
 
+Lemma memory_init_index_order :
+  run_parse_bes (xfc :: x08 :: x07 :: x02 :: nil) =
+    Some (BI_memory_init 2%N 7%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memory_init_indices_round_trip :
+  run_parse_bes (binary_of_be (BI_memory_init 128%N 256%N)) =
+    Some (BI_memory_init 128%N 256%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
 (** An example program. **)
 Definition test :=
   BI_if (BT_valtype None) (BI_testop T_i64 TO_eqz :: nil) (BI_testop T_i64 TO_eqz :: nil).

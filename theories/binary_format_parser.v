@@ -401,7 +401,7 @@ Definition parse_memory_grow {n} : byte_parser basic_instruction n :=
   exact_byte x40 &> (BI_memory_grow <$> parse_memidx).
 
 Definition parse_memory_init {n} : byte_parser basic_instruction n :=
-  exact_byte xfc &> assert_u32 8%N &> (((fun x _ => BI_memory_init x) <$> parse_dataidx) <*> exact_byte x00).
+  exact_byte xfc &> assert_u32 8%N &> (((fun y x => BI_memory_init x y) <$> parse_dataidx) <*> parse_memidx).
 
 Definition parse_data_drop {n} : byte_parser basic_instruction n :=
   exact_byte xfc &> assert_u32 9%N &> ((fun x => BI_data_drop x) <$> parse_dataidx).
@@ -1201,7 +1201,7 @@ Fixpoint be_datacount_required (be: basic_instruction) :=
   let bes_datacount_required bes :=
     List.fold_left orb (List.map be_datacount_required bes) false in
   match be with
-  | BI_memory_init _
+  | BI_memory_init _ _
   | BI_data_drop _ => true
   | BI_block _ bes => bes_datacount_required bes
   | BI_loop _ bes => bes_datacount_required bes

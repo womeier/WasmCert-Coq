@@ -294,11 +294,11 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       exists mt,
       tf = (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::]) /\
         lookup_N (tc_mems C) 0%N = Some mt
-  | BI_memory_init x =>
+  | BI_memory_init x y =>
       exists mt dt,
       tf = (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
-        lookup_N (tc_datas C) x = Some dt
+        lookup_N (tc_mems C) x = Some mt /\
+        lookup_N (tc_datas C) y = Some dt
   | BI_data_drop x =>
       exists dt,
       tf = (Tf nil nil) /\

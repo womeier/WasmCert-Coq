@@ -668,7 +668,7 @@ Fixpoint pp_basic_instruction (i : indentation) (be : basic_instruction) : strin
     indent i (with_fg be_style "memory.size" ++ newline ++ newline)
   | BI_memory_grow _ =>
     indent i (with_fg be_style "memory.grow" ++ newline)
-  | BI_memory_init x =>
+  | BI_memory_init _ x =>
     indent i (with_fg be_style "memory.init " ++ pp_id x ++ newline)
   | BI_data_drop x =>
     indent i (with_fg be_style "data.drop " ++ pp_id x ++ newline)

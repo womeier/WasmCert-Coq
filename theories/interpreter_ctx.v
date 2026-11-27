@@ -591,7 +591,7 @@ Proof.
       (* BI_memory_grow x *) x |
       (* BI_memory_fill *) |
       (* BI_memory_copy *) |
-      (* BI_memory_init x *) x |
+      (* BI_memory_init x y *) x y |
       (* BI_data_drop x *) x |
       (* BI_unreachable *) |
       (* BI_nop *) |
@@ -1451,9 +1451,9 @@ the condition that all values should live in the operand stack. *)
       assert_i32 n.
       assert_i32 src.
       assert_i32 dst.
-      destruct (smem s fc.(FC_frame).(f_inst) N0) as [mem|] eqn:Hsmem.
+      destruct (smem s fc.(FC_frame).(f_inst) x) as [mem|] eqn:Hsmem.
       (* Some *)
-      + destruct (sdata s fc.(FC_frame).(f_inst) x) as [data|] eqn:Hsdata.
+      + destruct (sdata s fc.(FC_frame).(f_inst) y) as [data|] eqn:Hsdata.
         (* Some *)
         * destruct (Z.ltb (Z.of_nat (data_size data)) (($zou32 src) + ($zou32 n))) eqn:Hboundy; move/Z.ltb_spec0 in Hboundy.
           (* y Out of bound *)
@@ -1482,9 +1482,9 @@ the condition that all values should live in the operand stack. *)
                                 [::$VN (VAL_int32 ($u32oz (Z.add ($zou32 dst) 1)));
                                  $VN (VAL_int32 ($u32oz (Z.add ($zou32 src) 1)));
                                  $VN (VAL_int32 ($u32oz (Z.sub ($zou32 n) 1)));
-                                 AI_basic (BI_memory_init x)
+                                 AI_basic (BI_memory_init x y)
                                 ] ++ es0),
-                              Some (AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 N0)))), d>> => //.
+                              Some (AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 x)))), d>> => //.
                 resolve_reduce_ctx vs0 es0.
                 by eapply r_memory_init_step; eauto; simpl in *; lias.
               }

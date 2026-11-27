@@ -471,10 +471,10 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
               type_update ts [::(T_num T_i32); (T_num T_i32); (T_num T_i32)] nil
           | None => None
           end
-      | BI_memory_init x =>
-          match lookup_N C.(tc_mems) 0%N with
+      | BI_memory_init x y =>
+          match lookup_N C.(tc_mems) x with
           | Some _ =>
-              match lookup_N C.(tc_datas) x with
+              match lookup_N C.(tc_datas) y with
               | Some _ =>
                   type_update ts [::(T_num T_i32); (T_num T_i32); (T_num T_i32)] nil
               | None => None
