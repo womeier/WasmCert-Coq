@@ -167,7 +167,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       match be with
       | BI_const_num v => type_update ts [::] [::T_num (typeof_num v)]
       | BI_const_vec v => type_update ts [::] [::T_vec (typeof_vec v)]
-      | BI_ref_null t => type_update ts [::]  [::T_ref t]
+      | BI_ref_null t => type_update ts [::]  [::T_ref (Ref_type true t)]
       | BI_ref_is_null => type_update_ref_is_null ts
       | BI_ref_as_non_null => type_update_ref_as_non_null ts
       | BI_ref_func x =>
@@ -281,7 +281,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       | BI_call_indirect x y =>
           match lookup_N C.(tc_tables) x with
           | Some tabt =>
-              if tabt.(tt_elem_type) == T_funcref then
+               if reference_type_match C.(tc_types) tabt.(tt_elem_type) T_funcref then
                 match lookup_N (tc_types C) y with
                 | Some (Tf tn tm) =>
                     type_update ts ((T_num T_i32 :: tn)) tm
@@ -307,7 +307,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           | Some t2s =>
               match lookup_N C.(tc_tables) x with
               | Some tabt =>
-                  if tabt.(tt_elem_type) == T_funcref then
+                   if reference_type_match C.(tc_types) tabt.(tt_elem_type) T_funcref then
                     match lookup_N (tc_types C) y with
                     | Some (Tf tn tm) =>
                         if (t2s == tm) then

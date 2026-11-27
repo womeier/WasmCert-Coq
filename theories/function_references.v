@@ -9,50 +9,36 @@ Set Implicit Arguments.
 
 Module FunctionReferences.
 
-(* Reuse the existing abstract heap types and type-index space.  Indexed
-   types here have nominal identity; recursive/declared GC subtyping is not
-   approximated by equality of expanded function signatures. *)
-Inductive heap_type :=
-| Abstract : reference_type -> heap_type
-| Indexed : typeidx -> heap_type.
-
-Record ref_type := Ref {
-  nullable : bool;
-  heap : heap_type
-}.
-
-Definition lift_reference t := Ref true (Abstract t).
+(* Use the core representation, including its module-local index space.
+   No parallel heap/reference representation is maintained here. *)
+Definition ref_type := reference_type.
+Notation Ref := Ref_type.
+Notation Indexed := HT_type.
+Definition nullable := ref_nullable.
+Definition heap := ref_heap.
+Definition lift_reference (t : reference_type) := t.
 Definition non_null t := Ref false (heap t).
 
 Inductive heap_subtype : heap_type -> heap_type -> Prop :=
 | hs_refl : forall h, heap_subtype h h
-| hs_func : forall i, heap_subtype (Indexed i) (Abstract T_funcref).
+| hs_func : forall i, heap_subtype (Indexed i) HT_func.
 
 Definition heap_subtypeb h1 h2 :=
-  match h1, h2 with
-  | Abstract t1, Abstract t2 => reference_type_eqb t1 t2
-  | Indexed i, Indexed j => N.eqb i j
-  | Indexed _, Abstract T_funcref => true
-  | _, _ => false
-  end.
+  if heap_type_eq_dec h1 h2 then true
+  else match h1, h2 with
+       | Indexed _, HT_func => true
+       | _, _ => false
+       end.
 
 Lemma heap_subtypeb_spec h1 h2 :
   heap_subtypeb h1 h2 = true <-> heap_subtype h1 h2.
 Proof.
-  split.
-  - destruct h1 as [t1 | i], h2 as [t2 | j]; simpl.
-    + unfold reference_type_eqb.
-      destruct (reference_type_eq_dec t1 t2); simpl; intro H;
-        [subst; constructor | discriminate].
-    + discriminate.
-    + destruct t2; intro H; [constructor | discriminate].
-    + intro H. apply N.eqb_eq in H. subst. constructor.
-  - intro H. destruct H; simpl.
-    + destruct h as [t | i]; simpl.
-      * unfold reference_type_eqb.
-        destruct (reference_type_eq_dec t t); [reflexivity | contradiction].
-      * apply N.eqb_refl.
-    + reflexivity.
+  unfold heap_subtypeb.
+  destruct (heap_type_eq_dec h1 h2) as [E | E].
+  - subst h2. split; [intros _; constructor | reflexivity].
+  - split.
+    + destruct h1, h2; simpl; intros H; try discriminate; constructor.
+    + intros H. inversion H; subst; [contradiction | reflexivity].
 Qed.
 
 Lemma heap_subtype_trans h1 h2 h3 :
@@ -96,14 +82,14 @@ Proof. split; [constructor | left; reflexivity]. Qed.
 
 Definition heap_valid (types : list function_type) h :=
   match h with
-  | Abstract _ => True
   | Indexed i => exists ft, lookup_N types i = Some ft
+  | _ => True
   end.
 
 Definition erase_heap h :=
   match h with
-  | Abstract t => t
-  | Indexed _ => T_funcref
+  | Indexed _ => HT_func
+  | _ => h
   end.
 
 (* This signature checker handles the reference operand separately from the
@@ -169,11 +155,11 @@ Definition ref_has_type (s : store_record) (types : list function_type)
   | VAL_ref_func a =>
       exists ft, ext_func_typing s a = Some ft /\
         match heap t with
-        | Abstract T_funcref => True
-        | Abstract T_externref => False
+        | HT_func => True
         | Indexed i => lookup_N types i = Some ft
+        | _ => False
         end
-  | VAL_ref_extern _ => heap t = Abstract T_externref
+  | VAL_ref_extern _ => heap t = HT_extern
   end.
 
 (* The refinement layer is conservative over the existing runtime typing.
@@ -181,7 +167,7 @@ Definition ref_has_type (s : store_record) (types : list function_type)
    an ill-typed or dangling runtime reference into a well-typed old value. *)
 Lemma ref_has_type_erases s types v t :
   ref_has_type s types v t ->
-  value_typing s (VAL_ref v) (T_ref (erase_heap (heap t))) = true.
+  value_typing s (VAL_ref v) (T_ref (Ref_type true (erase_heap (heap t)))) = true.
 Proof.
   intros [_ Hv]. destruct v as [h | a | a].
   - destruct Hv as [_ He]. subst h.
@@ -189,9 +175,7 @@ Proof.
     apply value_subtyping_eq.
   - destruct Hv as [ft [Ha Hheap]].
     unfold value_typing, typeof_value, typeof_ref. rewrite Ha.
-    destruct (heap t) as [h | i]; simpl in *.
-    + destruct h; [apply value_subtyping_eq | contradiction].
-    + apply value_subtyping_eq.
+    destruct (heap t); simpl in *; try contradiction; apply value_subtyping_eq.
   - unfold value_typing, typeof_value, typeof_ref.
     rewrite Hv. simpl. apply value_subtyping_eq.
 Qed.

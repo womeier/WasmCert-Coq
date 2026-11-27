@@ -222,7 +222,7 @@ Definition parse_return_call_indirect {n} : byte_parser basic_instruction n :=
 
 (* Reference instructions *)
 Definition parse_ref_null {n}: byte_parser basic_instruction n :=
-  exact_byte xd0 &> (BI_ref_null <$> parse_reference_type).
+  exact_byte xd0 &> ((fun t => BI_ref_null (ref_heap t)) <$> parse_reference_type).
 
 Definition parse_ref_is_null {n} : byte_parser basic_instruction n :=
   exact_byte xd1 $> BI_ref_is_null.

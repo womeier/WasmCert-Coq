@@ -1,4 +1,4 @@
-From Wasm Require Import datatypes function_references.
+From Wasm Require Import datatypes operations typing function_references.
 From Stdlib Require Import List NArith.
 Import ListNotations FunctionReferences.
 
@@ -75,7 +75,7 @@ Example set_preserves_other_flags :
 Proof. reflexivity. Qed.
 
 Example null_branch_drops_null :
-  branch_on_null (VAL_ref_null T_funcref) = Branch None.
+  branch_on_null (VAL_ref_null HT_func) = Branch None.
 Proof. reflexivity. Qed.
 
 Example non_null_branch_keeps_value :
@@ -84,7 +84,7 @@ Example non_null_branch_keeps_value :
 Proof. reflexivity. Qed.
 
 Example null_fallthrough_drops_null :
-  branch_on_non_null (VAL_ref_null T_funcref) = Continue None.
+  branch_on_non_null (VAL_ref_null HT_func) = Continue None.
 Proof. reflexivity. Qed.
 
 Example non_null_fallthrough_keeps_value :
@@ -103,5 +103,28 @@ Proof. reflexivity. Qed.
 
 Example nullable_indexed_default :
   default_reference (Ref true (Indexed 0%N)) =
-    Some (VAL_ref_null T_funcref).
+    Some (VAL_ref_null HT_func).
 Proof. reflexivity. Qed.
+
+Example core_non_null_local_has_no_default :
+  default_val (T_ref (Ref_type false HT_func)) = None.
+Proof. reflexivity. Qed.
+
+Example core_nullable_local_default :
+  default_val (T_ref (Ref_type true HT_func)) =
+    Some (VAL_ref (VAL_ref_null HT_func)).
+Proof. reflexivity. Qed.
+
+Section Runtime.
+Context `{hfc : host_function_class} `{memory : BlockUpdateMemory}.
+
+Lemma core_null_is_never_non_null s h1 h2 :
+  value_typing s (VAL_ref (VAL_ref_null h1))
+    (T_ref (Ref_type false h2)) = false.
+Proof. reflexivity. Qed.
+
+Lemma core_null_principal_heap s h :
+  typeof_ref s (VAL_ref_null h) = Some (Ref_type true h).
+Proof. reflexivity. Qed.
+
+End Runtime.

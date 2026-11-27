@@ -965,7 +965,7 @@ Proof.
   apply/andP; split; first by lias.
   unfold tab_size in *; simpl in *.
   erewrite nth_error_set_nth_length => //.
-  apply nth_error_nth with (x := (VAL_ref_null T_funcref)).
+  apply nth_error_nth with (x := (VAL_ref_null HT_func)).
   move/N.ltb_spec0 in Hif.
   by lias.
 Qed.
@@ -1055,7 +1055,9 @@ Proof.
     rewrite Hif3 List.length_app List.repeat_length.
     replace (_ == _) with true; last first.
     { symmetry; apply/eqP. by lias. }
-    { resolve_if_true_eq.
+    { move/andP: Hif0 => [Hnullable _].
+      rewrite Hnullable /=.
+      resolve_if_true_eq.
       rewrite all_cat.
       apply/andP; split => //.
       apply all_repeat.

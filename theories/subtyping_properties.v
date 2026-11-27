@@ -896,7 +896,7 @@ Ltac resolve_value_principal_typing :=
 
 (* Given a value type, destruct it and the subcases as well. *)
 Ltac destruct_value_type t :=
-  destruct t as [ [ | | | ] | [] | [ | ] | ].
+  destruct t as [ [ | | | ] | [] | [nullable h] | ].
 
 (* DESTRUCT ALL VALUE TYPES TO THE OBLIVION *)
 Ltac total_destruction :=
@@ -911,14 +911,20 @@ Section Lattice_properties.
   Lemma t_inf_comm t1 t2:
     t_inf t1 t2 = t_inf t2 t1.
   Proof.
-    by total_destruction.
+    unfold t_inf.
+    destruct (t1 == t2) eqn:E.
+    - move/eqP in E; subst. by rewrite eq_refl.
+    - by rewrite eq_sym E.
   Qed.
   
   Lemma t_inf_sub t1 t2 tinf:
     tinf = t_inf t1 t2 ->
     tinf <t: t1.
   Proof.
-    by total_destruction.
+    move => ->. unfold t_inf.
+    destruct (t1 == t2).
+    - apply value_subtyping_eq.
+    - by rewrite /value_subtyping eq_refl orbT.
   Qed.
 
   Lemma t_inf_strict t1 t2 t3:
@@ -926,20 +932,31 @@ Section Lattice_properties.
     t3 <t: t2 ->
     t3 <t: t_inf t1 t2.
   Proof.
-    by total_destruction.
+    unfold value_subtyping.
+    move => H1 H2; remove_bools_options; subst;
+      unfold t_inf; by rewrite ?eq_refl ?orbT.
   Qed.
   
   Lemma t_sup_comm t1 t2:
     t_sup t1 t2 = t_sup t2 t1.
   Proof.
-    by total_destruction.
+    unfold t_sup.
+    destruct (t1 == T_bot) eqn:E1; destruct (t2 == T_bot) eqn:E2.
+    - move/eqP in E1; move/eqP in E2; subst. reflexivity.
+    - move/eqP in E1; subst. reflexivity.
+    - move/eqP in E2; subst. reflexivity.
+    - destruct (t1 == t2) eqn:E.
+      + move/eqP in E; subst. by rewrite eq_refl.
+      + by rewrite eq_sym E.
   Qed.
   
   Lemma t_sup_sub t1 t2 tsup:
     t_sup t1 t2 = Some tsup ->
     t1 <t: tsup.
   Proof.
-    by total_destruction.
+    unfold t_sup; move => H; remove_bools_options; subst.
+    all: unfold value_subtyping; rewrite ?eq_refl ?orTb; try done.
+    by rewrite Hif orbT.
   Qed.
 
   Lemma t_sup_strict t1 t2 t3:
@@ -948,7 +965,19 @@ Section Lattice_properties.
     exists tsup, t_sup t1 t2 = Some tsup /\
     tsup <t: t3.
   Proof.
-    total_destruction; by eexists.
+    unfold value_subtyping.
+    move/orP => [/eqP E1 | /eqP E1];
+      move/orP => [/eqP E2 | /eqP E2]; subst t1; subst t2.
+    - exists t3. split; last by rewrite eq_refl.
+      unfold t_sup. rewrite eq_refl.
+      destruct (t3 == T_bot) eqn:E; last reflexivity.
+      by move/eqP in E; subst.
+    - exists t3. split; last by rewrite eq_refl.
+      unfold t_sup. rewrite eq_refl.
+      destruct (t3 == T_bot) eqn:E; last reflexivity.
+      by move/eqP in E; subst.
+    - exists t3. split; [by rewrite /t_sup eq_refl | by rewrite eq_refl].
+    - exists T_bot. split; [by rewrite /t_sup eq_refl | by rewrite eq_refl orbT].
   Qed.
 
   Lemma ts_inf_length ts1 ts2 tsinf:
