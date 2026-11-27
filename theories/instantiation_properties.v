@@ -620,6 +620,24 @@ Proof.
   by congruence.
 Qed.
 
+Lemma import_func_subtyping_correct t1 t2 :
+  import_func_subtyping t1 t2 = true <->
+    function_type_closed t1 = true /\ t1 = t2.
+Proof.
+  split.
+  - move => Hmatch.
+    have Heq := import_func_subtyping_eq Hmatch.
+    split; last exact Heq.
+    unfold import_func_subtyping in Hmatch.
+    destruct (close_defined_type t1) as [dt|] eqn:Hclose; try discriminate.
+    apply close_defined_type_expands in Hclose.
+    by apply (expanded_function_type_closed Hclose).
+  - move => [Hclosed <-].
+    destruct (close_defined_type_complete Hclosed) as [dt Hdt].
+    unfold import_func_subtyping. rewrite Hdt.
+    by apply defined_type_match_bidir.
+Qed.
+
 Lemma import_subtyping_comp_len t_imps1 t_imps2:
   List.Forall2 import_subtyping t_imps1 t_imps2->
   (length (ext_t_funcs t_imps1) = length (ext_t_funcs t_imps2) /\

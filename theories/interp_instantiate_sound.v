@@ -188,6 +188,30 @@ Proof.
   by unfold external_typing, ext_typing, ext_func_typing; rewrite Hlookup.
 Qed.
 
+Lemma external_type_checker_complete s ext t :
+  store_typing s ->
+  external_typing s ext t ->
+  external_type_checker s ext = Some t.
+Proof.
+  move => Hstore Hext.
+  destruct ext as [a|a|a|a]; try exact Hext.
+  unfold external_typing, ext_typing in Hext.
+  destruct (ext_func_typing s a) as [ft|] eqn:Hft;
+    simpl in Hext; try discriminate.
+  inversion Hext; subst t.
+  destruct (ext_func_defined_type_complete Hstore Hft) as [dt [Hdt Hexpand]].
+  by unfold external_type_checker; rewrite Hdt Hexpand.
+Qed.
+
+Lemma external_type_checker_correct s ext t :
+  store_typing s ->
+  (external_type_checker s ext = Some t <-> external_typing s ext t).
+Proof.
+  move => Hstore; split.
+  - apply external_type_checker_sound.
+  - by apply external_type_checker_complete.
+Qed.
+
 Lemma interp_alloc_sound: forall s m v_imps g_inits r_inits s' inst,
   length g_inits = length m.(mod_globals) ->
   length r_inits = length m.(mod_elems) ->
