@@ -393,10 +393,10 @@ Definition parse_i64_store32 {n} : byte_parser basic_instruction n :=
   exact_byte x3e &> ((BI_store T_i64 (Some Tp_i32)) <$> parse_memarg).
 
 Definition parse_memory_size {n} : byte_parser basic_instruction n :=
-  exact_byte x3f &> (exact_byte x00 $> BI_memory_size).
+  exact_byte x3f &> (BI_memory_size <$> parse_memidx).
 
 Definition parse_memory_grow {n} : byte_parser basic_instruction n :=
-  exact_byte x40 &> (exact_byte x00 $> BI_memory_grow).
+  exact_byte x40 &> (BI_memory_grow <$> parse_memidx).
 
 Definition parse_memory_init {n} : byte_parser basic_instruction n :=
   exact_byte xfc &> assert_u32 8%N &> (((fun x _ => BI_memory_init x) <$> parse_dataidx) <*> exact_byte x00).

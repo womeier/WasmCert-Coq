@@ -881,8 +881,8 @@ Definition sglob_val (s : store_record) (i : moduleinst) (j : globalidx) : optio
 Definition smem_ind (s : store_record) (i : moduleinst) : option memaddr :=
   lookup_N i.(inst_mems) 0%N.
 
-Definition smem (s: store_record) (inst: moduleinst) : option meminst :=
-  match lookup_N inst.(inst_mems) 0%N with
+Definition smem (s: store_record) (inst: moduleinst) (x: memidx) : option meminst :=
+  match lookup_N inst.(inst_mems) x with
   | Some a => lookup_N s.(s_mems) a
   | None => None
   end.
@@ -1070,8 +1070,8 @@ Definition smem_store_vec_lane (s: store_record) (inst: moduleinst) (n: N) (v: v
   | None => None
   end.
 
-Definition smem_grow (s: store_record) (inst: moduleinst) (n: N) : option (store_record * N) :=
-  match lookup_N inst.(inst_mems) 0%N with
+Definition smem_grow (s: store_record) (inst: moduleinst) (x: memidx) (n: N) : option (store_record * N) :=
+  match lookup_N inst.(inst_mems) x with
   | Some addr =>
       match lookup_N s.(s_mems) addr with
       | Some mem =>

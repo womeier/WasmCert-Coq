@@ -1415,14 +1415,14 @@ Proof.
   - by apply nth_error_Some_length in Hoption2; lias.
 Qed.
 
-Lemma smem_grow_extension: forall s f n s' sz C mt,
+Lemma smem_grow_extension: forall s f x n s' sz C mt,
   store_typing s ->
-  smem_grow s (f_inst f) n = Some (s', sz) ->
+  smem_grow s (f_inst f) x n = Some (s', sz) ->
   inst_typing s (f_inst f) = Some C -> 
-  lookup_N (tc_mems C) 0%N = Some mt ->
+  lookup_N (tc_mems C) x = Some mt ->
   store_extension s s'.
 Proof.
-  move => s f n s' sz C a Hst Hupd Hit Hnth.
+  move => s f x n s' sz C a Hst Hupd Hit Hnth.
   unfold smem_grow in Hupd.
   unfold store_extension => /=; remove_bools_options; resolve_store_inst_lookup => /=.
   resolve_store_extension.
@@ -1435,14 +1435,14 @@ Proof.
   by rewrite Hif Hif0.
 Qed.
 
-Lemma smem_grow_typing: forall s f n s' sz C mt,
+Lemma smem_grow_typing: forall s f x n s' sz C mt,
   store_typing s ->
-  smem_grow s (f_inst f) n = Some (s', sz) ->
+  smem_grow s (f_inst f) x n = Some (s', sz) ->
   inst_typing s (f_inst f) = Some C -> 
-  lookup_N (tc_mems C) 0%N = Some mt ->
+  lookup_N (tc_mems C) x = Some mt ->
   store_typing s'.
 Proof.
-  move => s f n s' sz C a Hst Hupd Hit Hnth.
+  move => s f x n s' sz C a Hst Hupd Hit Hnth.
   assert (store_extension s s') as Hstext; first by eapply smem_grow_extension; eauto.
   unfold smem_grow in Hupd; remove_bools_options.
   resolve_store_inst_lookup; destruct m0; simpl in *; remove_bools_options; simpl in *.

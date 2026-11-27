@@ -278,14 +278,14 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       tf = (Tf [::T_num T_i32; T_vec T_v128] [::]) /\
         lookup_N (tc_mems C) 0%N = Some mt /\
         load_store_vec_lane_bounds width marg x
-  | BI_memory_size =>
+  | BI_memory_size x =>
       exists mt,
       tf = (Tf [::] [::T_num T_i32]) /\
-        lookup_N (tc_mems C) 0%N = Some mt
-  | BI_memory_grow =>
+        lookup_N (tc_mems C) x = Some mt
+  | BI_memory_grow x =>
       exists mt,
       tf = (Tf [::T_num T_i32] [::T_num T_i32]) /\
-        lookup_N (tc_mems C) 0%N = Some mt
+        lookup_N (tc_mems C) x = Some mt
   | BI_memory_fill =>
       exists mt,
       tf = (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::]) /\

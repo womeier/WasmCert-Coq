@@ -14,6 +14,29 @@ Proof. vm_compute. reflexivity. Qed.
 Lemma test_nop : check_toks (x01 :: nil) parse_be = Running.Singleton BI_nop.
 Proof. vm_compute. reflexivity. Qed.
 
+(** Memory indices are u32 LEBs, not reserved zero bytes. *)
+Lemma memory_size_index_round_trip :
+  run_parse_bes (binary_of_be (BI_memory_size 128%N)) =
+    Some (BI_memory_size 128%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memory_grow_index_round_trip :
+  run_parse_bes (binary_of_be (BI_memory_grow 4294967295%N)) =
+    Some (BI_memory_grow 4294967295%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memory_size_legacy_encoding :
+  run_parse_bes (x3f :: x00 :: nil) = Some (BI_memory_size 0%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memory_size_rejects_truncated_index :
+  run_parse_bes (x3f :: x80 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memory_grow_rejects_overflow_index :
+  run_parse_bes (x40 :: xff :: xff :: xff :: xff :: x10 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
 (** An example program. **)
 Definition test :=
   BI_if (BT_valtype None) (BI_testop T_i64 TO_eqz :: nil) (BI_testop T_i64 TO_eqz :: nil).

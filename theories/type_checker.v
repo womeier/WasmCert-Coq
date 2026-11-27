@@ -447,14 +447,14 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
               else None
           | None => None
           end
-      | BI_memory_size =>
-          match lookup_N C.(tc_mems) 0%N with
+      | BI_memory_size x =>
+          match lookup_N C.(tc_mems) x with
           | Some _ =>
               type_update ts [::] [::(T_num T_i32)]
           | None => None
           end
-      | BI_memory_grow =>
-          match lookup_N C.(tc_mems) 0%N with
+      | BI_memory_grow x =>
+          match lookup_N C.(tc_mems) x with
           | Some _ =>
               type_update ts [::(T_num T_i32)] [::(T_num T_i32)]
           | None => None

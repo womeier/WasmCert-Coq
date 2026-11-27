@@ -351,12 +351,12 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   lookup_N (tc_mems C) 0%N = Some mem ->
   load_store_vec_lane_bounds width m_arg x ->
   be_typing C [::BI_store_vec_lane width m_arg x] (Tf [::T_num T_i32; T_vec T_v128] [::])
-| bet_memory_size : forall C mem,
-  lookup_N (tc_mems C) 0%N = Some mem ->
-  be_typing C [::BI_memory_size] (Tf [::] [::T_num T_i32])
-| bet_memory_grow : forall C mem,
-  lookup_N (tc_mems C) 0%N = Some mem ->
-  be_typing C [::BI_memory_grow] (Tf [::T_num T_i32] [::T_num T_i32])
+| bet_memory_size : forall C x mem,
+  lookup_N (tc_mems C) x = Some mem ->
+  be_typing C [::BI_memory_size x] (Tf [::] [::T_num T_i32])
+| bet_memory_grow : forall C x mem,
+  lookup_N (tc_mems C) x = Some mem ->
+  be_typing C [::BI_memory_grow x] (Tf [::T_num T_i32] [::T_num T_i32])
 | bet_memory_fill : forall C mem,
   lookup_N (tc_mems C) 0%N = Some mem ->
   be_typing C [::BI_memory_fill] (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::])
