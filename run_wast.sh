@@ -20,7 +20,7 @@ fi
 
 exe="${EXE:-_build/default/src/wasm_coq_interpreter.exe}"
 if [[ ! -x "$exe" ]]; then
-  dune build
+  dune build -j 1
 fi
 
 results_dir=$(mktemp -d)
@@ -55,20 +55,26 @@ run_one() {
   local summary
   if (( rc != 0 )); then
     summary="CRASH: $base"
-    echo "0 0" > "$results_dir/$base"
+    echo "0 0 failed" > "$results_dir/$base"
   else
     local result_line
     if result_line=$(printf '%s' "$cleaned" | grep -m1 "Result: "); then
-      if [[ "$result_line" =~ Result:\ ([0-9]+)/([0-9]+) ]]; then
-        echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}" > "$results_dir/$base"
-        summary="DONE: $base — $result_line"
+      if [[ "$result_line" =~ Result:\ ([0-9]+)/([0-9]+)([[:space:]]|$) ]]; then
+        local passed="${BASH_REMATCH[1]}" total="${BASH_REMATCH[2]}"
+        if (( 10#$passed <= 10#$total )); then
+          echo "$passed $total ok" > "$results_dir/$base"
+          summary="DONE: $base — $result_line"
+        else
+          summary="PARSE ERROR: $base — passed count exceeds total"
+          echo "0 0 failed" > "$results_dir/$base"
+        fi
       else
         summary="PARSE ERROR: $base — could not parse result line"
-        echo "0 0" > "$results_dir/$base"
+        echo "0 0 failed" > "$results_dir/$base"
       fi
     else
       summary="NO RESULT: $base"
-      echo "0 0" > "$results_dir/$base"
+      echo "0 0 failed" > "$results_dir/$base"
     fi
   fi
 
@@ -90,13 +96,26 @@ printf '%s\n' "${files[@]}" | xargs -P "$jobs" -I {} bash -c 'run_one "$@"' _ {}
 # Aggregate results
 total_passed=0
 total_tests=0
-for f in "$results_dir"/*; do
-  read -r p t < "$f"
-  total_passed=$((total_passed + p))
-  total_tests=$((total_tests + t))
+failed_reports=0
+reports=( "$results_dir"/* )
+if (( ${#reports[@]} != ${#files[@]} )); then
+  echo "FAILED: expected ${#files[@]} result reports, found ${#reports[@]}." >&2
+  exit 1
+fi
+for f in "${reports[@]}"; do
+  read -r p t outcome < "$f"
+  total_passed=$((total_passed + 10#$p))
+  total_tests=$((total_tests + 10#$t))
+  if [[ "$outcome" != ok ]]; then
+    failed_reports=$((failed_reports + 1))
+  fi
 done
 
 echo "================"
+if (( failed_reports > 0 )); then
+  echo "FAILED: $failed_reports file(s) crashed or did not produce a valid result summary." >&2
+  exit 1
+fi
 if (( total_tests == 0 )); then
   echo "No tests run." >&2
   exit 1

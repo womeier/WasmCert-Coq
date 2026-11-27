@@ -218,7 +218,65 @@ Definition module_type_checker (m : module) : option ((list extern_type) * (list
 Definition external_type_checker (s : store_record) (v : extern_value): option extern_type :=
   ext_typing s v.
 
-(* Auxiliary definition for evaluating constant expressios, instead of using the full interpreter. *)
+Definition extended_global_type_checker (c : t_context) (g : module_global) : bool :=
+  extended_const_exprs c g.(modglob_init) &&
+  type_checker.b_e_type_checker c g.(modglob_init) (Tf nil [::g.(modglob_type).(tg_t)]).
+
+Fixpoint extended_globals_type_checker (c : t_context) (gs : list module_global) : bool :=
+  match gs with
+  | nil => true
+  | g :: gs' =>
+      extended_global_type_checker c g &&
+      extended_globals_type_checker (const_context_add_global c g.(modglob_type)) gs'
+  end.
+
+(* Stack head is the most recently produced value.  Unlike the full interpreter,
+   this evaluator needs no fuel: every recursive call consumes an instruction. *)
+Definition interp_const_step (s : store_record) (f : frame)
+    (e : basic_instruction) (vs : list value) : option (list value) :=
+      match e with
+      | BI_const_num v => Some (VAL_num v :: vs)
+      | BI_const_vec v => Some (VAL_vec v :: vs)
+      | BI_ref_null t => Some (VAL_ref (VAL_ref_null t) :: vs)
+      | BI_ref_func i =>
+          match lookup_N f.(f_inst).(inst_funcs) i with
+          | Some addr => Some (VAL_ref (VAL_ref_func addr) :: vs)
+          | None => None
+          end
+      | BI_global_get i =>
+          match sglob_val s f.(f_inst) i with
+          | Some v => Some (v :: vs)
+          | None => None
+          end
+      | BI_binop t op =>
+          if const_binop t op then
+            match vs with
+            | VAL_num v2 :: VAL_num v1 :: vs' =>
+                if binop_typecheck v1 v2 t op then
+                  match app_binop op v1 v2 with
+                  | Some v => Some (VAL_num v :: vs')
+                  | None => None
+                  end
+                else None
+            | _ => None
+            end
+          else None
+      | _ => None
+      end.
+
+Fixpoint interp_const_stack (s : store_record) (f : frame)
+    (es : list basic_instruction) (vs : list value) : option (list value) :=
+  match es with
+  | nil => Some vs
+  | e :: es' =>
+      match interp_const_step s f e vs with
+      | Some vs' => interp_const_stack s f es' vs'
+      | None => None
+      end
+  end.
+
+(* Auxiliary definition for evaluating constant expressions, instead of using
+   the full interpreter.  A complete initializer must produce exactly one value. *)
 Definition interp_get_const (s : store_record) (f : frame) (b_es : list basic_instruction) : option value :=
   match b_es with
   | [::BI_const_num v] => Some (VAL_num v)
@@ -229,9 +287,12 @@ Definition interp_get_const (s : store_record) (f : frame) (b_es : list basic_in
       | Some addr => Some (VAL_ref (VAL_ref_func addr))
       | None => None
       end
-  | [::BI_global_get i] =>
-      sglob_val s f.(f_inst) i
-  | _ => None
+  | [::BI_global_get i] => sglob_val s f.(f_inst) i
+  | _ =>
+      match interp_const_stack s f b_es nil with
+      | Some [::v] => Some v
+      | _ => None
+      end
   end.
 
 Definition interp_get_vref (s : store_record) (f: frame) (b_es : list basic_instruction) : option value_ref :=
@@ -248,6 +309,22 @@ Definition interp_get_i32 (s : store_record) (f: frame) (b_es : list basic_instr
 
 Definition get_global_inits (s: store_record) (f: frame) (gs: list module_global) : option (list value):=
   those (map (fun g => interp_get_const s f g.(modglob_init)) gs).
+
+Fixpoint interp_global_chain (s : store_record) (f : frame) (gs : list module_global)
+    : option (store_record * frame * list value) :=
+  match gs with
+  | nil => Some (s, f, nil)
+  | g :: gs' =>
+      match interp_get_const s f g.(modglob_init) with
+      | None => None
+      | Some v =>
+          let '(s1, addr) := alloc_glob s (g, v) in
+          match interp_global_chain s1 (const_frame_add_global f addr) gs' with
+          | None => None
+          | Some (s2, f2, vs) => Some (s2, f2, v :: vs)
+          end
+      end
+  end.
 
 Definition get_elem_inits (s: store_record) (f: frame) (els: list module_element) : option (list (list value_ref)):=
   those (map (fun el => those (map (fun e => interp_get_vref s f e) el.(modelem_init))) els).

@@ -308,6 +308,52 @@ Definition const_expr (c : t_context) (b_e : basic_instruction) : bool :=
 Definition const_exprs (c : t_context) (es : list basic_instruction) : bool :=
   seq.all (const_expr c) es.
 
+(* Wasm 3.0 extended-const whitelist.  The module-level switch to this
+   fragment also requires replacing the singleton-initializer characterization
+   in instantiation_properties. *)
+Definition const_binop (t : number_type) (op : binop) : bool :=
+  match t, op with
+  | T_i32, Binop_i BOI_add | T_i32, Binop_i BOI_sub | T_i32, Binop_i BOI_mul
+  | T_i64, Binop_i BOI_add | T_i64, Binop_i BOI_sub | T_i64, Binop_i BOI_mul => true
+  | _, _ => false
+  end.
+
+Definition extended_const_expr (c : t_context) (e : basic_instruction) : bool :=
+  match e with
+  | BI_binop t op => const_binop t op
+  | _ => const_expr c e
+  end.
+
+Definition extended_const_exprs (c : t_context) (es : list basic_instruction) : bool :=
+  seq.all (extended_const_expr c) es.
+
+Definition const_context_add_global (c : t_context) (gt : global_type) : t_context :=
+  {| tc_types := c.(tc_types);
+     tc_funcs := c.(tc_funcs);
+     tc_tables := c.(tc_tables);
+     tc_mems := c.(tc_mems);
+     tc_globals := c.(tc_globals) ++ [::gt];
+     tc_elems := c.(tc_elems);
+     tc_datas := c.(tc_datas);
+     tc_locals := c.(tc_locals);
+     tc_labels := c.(tc_labels);
+     tc_return := c.(tc_return);
+     tc_refs := c.(tc_refs) |}.
+
+Definition extended_global_typing (c : t_context) (g : module_global) : Prop :=
+  extended_const_exprs c g.(modglob_init) /\
+  be_typing c g.(modglob_init) (Tf nil [::g.(modglob_type).(tg_t)]).
+
+(* Check each initializer before exposing its own type.  Thus immutable
+   predecessors are visible, but self and forward references are not. *)
+Fixpoint extended_globals_typing (c : t_context) (gs : list module_global) : Prop :=
+  match gs with
+  | nil => True
+  | g :: gs' =>
+      extended_global_typing c g /\
+      extended_globals_typing (const_context_add_global c g.(modglob_type)) gs'
+  end.
+
 Definition module_global_typing (c : t_context) (g : module_global) (tg : global_type) : Prop :=
   let '{| modglob_type := tg'; modglob_init := es |} := g in
   const_exprs c es /\
@@ -547,6 +593,33 @@ Definition instantiate_globals f (hs : host_state) (s' : store_record) m (g_init
       opsem.reduce_trans (hs, s', f, to_e_list g.(modglob_init))
                          (hs, s', f, [::v_to_e v]))
     m.(mod_globals) g_inits.
+
+Definition const_frame_add_global (f : frame) (addr : globaladdr) : frame :=
+  let inst := f.(f_inst) in
+  Build_frame f.(f_locs)
+    {| inst_types := inst.(inst_types);
+       inst_funcs := inst.(inst_funcs);
+       inst_tables := inst.(inst_tables);
+       inst_mems := inst.(inst_mems);
+       inst_globals := inst.(inst_globals) ++ [::addr];
+       inst_elems := inst.(inst_elems);
+       inst_datas := inst.(inst_datas);
+       inst_exports := inst.(inst_exports) |}.
+
+(* Sequential allocation makes precisely the already initialized globals
+   available to the next initializer.  This relation is the execution-side
+   counterpart of [extended_globals_typing]. *)
+Inductive global_init_chain (hs : host_state) :
+    store_record -> frame -> list module_global ->
+    store_record -> frame -> list value -> Prop :=
+| global_init_chain_nil : forall s f,
+    global_init_chain hs s f nil s f nil
+| global_init_chain_cons : forall s f g gs v s1 addr s2 f2 vs,
+    reduce_trans (hs, s, f, to_e_list g.(modglob_init))
+                 (hs, s, f, [::v_to_e v]) ->
+    alloc_glob s (g, v) = (s1, addr) ->
+    global_init_chain hs s1 (const_frame_add_global f addr) gs s2 f2 vs ->
+    global_init_chain hs s f (g :: gs) s2 f2 (v :: vs).
 
 Definition instantiate_elems f (hs : host_state) (s' : store_record) m (r_inits: list (list value_ref)) : Prop :=
   List.Forall2
