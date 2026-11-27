@@ -48,29 +48,6 @@ Definition pp_vector_type (vt: vector_type) : string :=
     end in
   with_fg type_style s.
 
-Definition pp_reference_type (vt : reference_type) : string :=
-  let s :=
-    match vt with
-    | T_funcref => "funcref"
-    | T_externref => "externref"
-    end in
-  with_fg type_style s.
-
-Definition pp_value_type (vt: value_type) : string :=
-  match vt with
-  | T_num t => pp_number_type t
-  | T_vec t => pp_vector_type t
-  | T_ref t => pp_reference_type t
-  | T_bot => "Bot" (* Should not happen *)
-  end.
-
-Definition pp_value_types (vts : list value_type) : string :=
-  "[" ++ String.concat ", " (List.map pp_value_type vts) ++ "]".
-
-Definition pp_function_type (tf : function_type) : string :=
-  let '(Tf ts1 ts2) := tf in
-  pp_value_types ts1 ++ " -> " ++ pp_value_types ts2.
-
 Fixpoint string_of_uint (i : uint) : string :=
   match i with
   | Nil => ""
@@ -88,6 +65,40 @@ Fixpoint string_of_uint (i : uint) : string :=
 
 Definition pp_N (n: N) : string :=
   string_of_uint (N.to_uint n).
+
+Definition pp_heap_type (ht : heap_type) : string :=
+  match ht with
+  | HT_func => "func" | HT_extern => "extern"
+  | HT_any => "any" | HT_eq => "eq" | HT_i31 => "i31"
+  | HT_struct => "struct" | HT_array => "array"
+  | HT_none => "none" | HT_nofunc => "nofunc" | HT_noextern => "noextern"
+  | HT_exn => "exn" | HT_noexn => "noexn"
+  | HT_type i => pp_N i
+  end.
+
+Definition pp_reference_type (vt : reference_type) : string :=
+  with_fg type_style
+    (match vt with
+     | T_funcref => "funcref"
+     | T_externref => "externref"
+     | Ref_type n h =>
+         "(ref " ++ (if n then "null " else "") ++ pp_heap_type h ++ ")"
+     end).
+
+Definition pp_value_type (vt: value_type) : string :=
+  match vt with
+  | T_num t => pp_number_type t
+  | T_vec t => pp_vector_type t
+  | T_ref t => pp_reference_type t
+  | T_bot => "Bot" (* Should not happen *)
+  end.
+
+Definition pp_value_types (vts : list value_type) : string :=
+  "[" ++ String.concat ", " (List.map pp_value_type vts) ++ "]".
+
+Definition pp_function_type (tf : function_type) : string :=
+  let '(Tf ts1 ts2) := tf in
+  pp_value_types ts1 ++ " -> " ++ pp_value_types ts2.
 
 Definition pp_positive (p: positive) : string :=
   string_of_uint (Pos.to_uint p).
@@ -385,7 +396,7 @@ Definition pp_value_vec (v : value_vec) : string :=
 
 Definition pp_value_ref (v : value_ref) : string :=
   match v with
-  | VAL_ref_null t => pp_reference_type t ++ ".null" ++ newline
+  | VAL_ref_null t => pp_reference_type (Ref_type true t) ++ ".null" ++ newline
   | VAL_ref_func a => "funcref " ++ pp_addr a ++ newline
   | VAL_ref_extern a => "externref " ++ pp_addr a ++ newline
   end.
@@ -591,9 +602,13 @@ Fixpoint pp_basic_instruction (i : indentation) (be : basic_instruction) : strin
   | BI_drop => indent i (with_fg be_style "drop" ++ newline)
   | BI_select None => indent i (with_fg be_style "select" ++ newline)
   | BI_select (Some ts) => indent i (with_fg be_style "select " ++ pp_list pp_value_type ts ++ newline)
-  | BI_ref_null t => indent i (with_fg be_style "ref.null " ++ pp_reference_type t ++ newline)
+  | BI_ref_null t => indent i (with_fg be_style "ref.null " ++ pp_reference_type (Ref_type true t) ++ newline)
   | BI_ref_is_null => indent i (with_fg be_style "ref.is_null " ++ newline)
   | BI_ref_func addr => indent i (with_fg be_style "ref.func " ++ pp_addr addr ++ newline)
+  | BI_ref_as_non_null => indent i (with_fg be_style "ref.as_non_null" ++ newline)
+  | BI_call_ref x => indent i (with_fg be_style "call_ref " ++ pp_id x ++ newline)
+  | BI_return_call_ref x => indent i (with_fg be_style "return_call_ref " ++ pp_id x ++ newline)
+  | BI_br_on_non_null x => indent i (with_fg be_style "br_on_non_null " ++ pp_id x ++ newline)
   | BI_block tf bes =>
     indent i (with_fg be_style "block" ++ with_fg type_style (pp_block_type tf) ++ newline)
     ++ pp_basic_instructions bes (S i)

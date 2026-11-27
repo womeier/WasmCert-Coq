@@ -132,10 +132,21 @@ Reference types are opaque, meaning that neither their size nor their bit patter
 
 [https://www.w3.org/TR/wasm-core-2/syntax/types.html#reference-types]
 *)
-Inductive reference_type : Set := 
-| T_funcref
-| T_externref
-.
+(* Shared source heap syntax. HT_type denotes a module-local type index, NOT a
+   runtime type identity. Closing recursive declared types is a separate step
+   at the module/store boundary. *)
+Inductive heap_type : Set :=
+| HT_func | HT_extern
+| HT_any | HT_eq | HT_i31 | HT_struct | HT_array
+| HT_none | HT_nofunc | HT_noextern
+| HT_exn | HT_noexn
+| HT_type : typeidx -> heap_type.
+
+Record reference_type : Set := Ref_type {
+  ref_nullable : bool;
+  ref_heap : heap_type
+}.
+
 
 (** std-doc:
 
@@ -170,6 +181,11 @@ and outputs of instructions.
 Inductive function_type := (* tf *)
 | Tf : result_type -> result_type -> function_type
 .
+
+(* Source type declarations currently contain function signatures only.
+   GC must extend this declaration layer with recursive subtype groups.
+   An inst_types entry is not a globally allocated runtime identity. *)
+Definition type_context := list function_type.
 
 (* This is a definition for future extensions, where instruction types are no longer
 the same as function types. *)
@@ -273,6 +289,7 @@ Definition functype_valid (ft: function_type) : bool :=
 Definition table_limit_bound : N := (N.sub u32_bound 1%N).
 
 Definition tabletype_valid (tt: table_type) : bool :=
+  ref_nullable tt.(tt_elem_type) &&
   limit_valid_range tt.(tt_limits) table_limit_bound.
 
 Definition mem_limit_bound : N := 65536%N.
@@ -284,6 +301,9 @@ Definition globaltype_valid (gt: global_type) : bool :=
   true.
 
 End Types.
+
+Notation T_funcref := (Ref_type true HT_func).
+Notation T_externref := (Ref_type true HT_extern).
 
 
 Definition static_offset := (* off *) u32. 
@@ -516,7 +536,7 @@ Replace lanes: consume a v128 operand and a numeric value for a given lane, and 
 (** std-doc:
 Instructions in this group are concerned with accessing references.
 **)
-  | BI_ref_null : reference_type -> basic_instruction  
+  | BI_ref_null : heap_type -> basic_instruction
   | BI_ref_is_null
   | BI_ref_func : funcidx -> basic_instruction
 (** std-doc:
@@ -576,6 +596,10 @@ Instructions in this group affect the flow of control.
   | BI_call_indirect : tableidx -> typeidx -> basic_instruction
   | BI_return_call : funcidx -> basic_instruction                                          
   | BI_return_call_indirect : tableidx -> typeidx -> basic_instruction                                          
+  | BI_ref_as_non_null
+  | BI_call_ref : typeidx -> basic_instruction
+  | BI_return_call_ref : typeidx -> basic_instruction
+  | BI_br_on_non_null : labelidx -> basic_instruction
   .
 
 
@@ -598,7 +622,7 @@ const instructions and ref.null producing them.
 References other than null are represented with additional administrative instructions. They either are function references, pointing to a specific function address, or external references pointing to an uninterpreted form of extern address that can be defined by the embedder to represent its own objects.
 *)
 Inductive value_ref : Set :=
-| VAL_ref_null: reference_type -> value_ref
+| VAL_ref_null: heap_type -> value_ref
 | VAL_ref_func: funcaddr -> value_ref
 | VAL_ref_extern: externaddr -> value_ref
 .
@@ -793,7 +817,7 @@ as validation of an instruction sequence proceeds.
 Definition ok: Set := unit.
 
 Record t_context : Set := {
-  tc_types : list function_type;
+  tc_types : type_context;
   tc_funcs : list function_type;
   tc_tables : list table_type;
   tc_mems : list memory_type;
@@ -943,7 +967,7 @@ instance have different names.
 [https://www.w3.org/TR/wasm-core-2/exec/runtime.html#module-instances]
 *)
 Record moduleinst : Type := (* inst *) {
-  inst_types : list function_type;
+  inst_types : type_context;
   inst_funcs : list funcaddr;
   inst_tables : list tableaddr;
   inst_mems : list memaddr;

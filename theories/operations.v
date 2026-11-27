@@ -219,7 +219,8 @@ Definition default_val (t: value_type) : option value :=
   match t with
   | T_num t => Some (VAL_num (bitzero t))
   | T_vec t => Some (VAL_vec (VAL_vec128 SIMD.v128_default))
-  | T_ref t => Some (VAL_ref (VAL_ref_null t))
+  | T_ref t =>
+      if ref_nullable t then Some (VAL_ref (VAL_ref_null (ref_heap t))) else None
   | T_bot => None
   end.
 
@@ -1290,7 +1291,7 @@ Definition e_to_vref (e: administrative_instruction) : value_ref :=
   | AI_basic (BI_ref_null t) => VAL_ref_null t
   | AI_ref addr => VAL_ref_func addr
   | AI_ref_extern eaddr => VAL_ref_extern eaddr
-  | _ => VAL_ref_null T_funcref
+  | _ => VAL_ref_null HT_func
   end.
 
 Definition e_to_vref_opt (e: administrative_instruction) : option value_ref :=

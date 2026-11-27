@@ -145,20 +145,33 @@ Proof.
   - eapply abstract_heap_subtyping_trans; eassumption.
 Qed.
 
-(** Reuse the existing reference types at the compatibility boundary. *)
+(** Project shared references into this abstract fragment. Exception and
+    indexed heap types are outside the fragment, not aliases for a GC type. *)
 Definition abstract_reference_of_legacy (t : reference_type) :
-    abstract_reference_type :=
-  {| art_nullable := true;
-     art_heap := match t with
-                 | T_funcref => AH_func
-                 | T_externref => AH_extern
-                 end |}.
+    option abstract_reference_type :=
+  let heap :=
+    match ref_heap t with
+    | HT_func => Some AH_func | HT_extern => Some AH_extern
+    | HT_any => Some AH_any | HT_eq => Some AH_eq
+    | HT_i31 => Some AH_i31 | HT_struct => Some AH_struct
+    | HT_array => Some AH_array | HT_none => Some AH_none
+    | HT_nofunc => Some AH_nofunc | HT_noextern => Some AH_noextern
+    | HT_exn | HT_noexn | HT_type _ => None
+    end in
+  option_map
+    (fun h => {| art_nullable := ref_nullable t; art_heap := h |}) heap.
 
 Lemma abstract_reference_legacy_conservative a b :
-  abstract_reference_subtyping
-    (abstract_reference_of_legacy a) (abstract_reference_of_legacy b) =
-  value_subtyping (T_ref a) (T_ref b).
-Proof. destruct a, b; reflexivity. Qed.
+  (a = T_funcref \/ a = T_externref) ->
+  (b = T_funcref \/ b = T_externref) ->
+  exists ar br,
+    abstract_reference_of_legacy a = Some ar /\
+    abstract_reference_of_legacy b = Some br /\
+    abstract_reference_subtyping ar br = value_subtyping (T_ref a) (T_ref b).
+Proof.
+  intros [-> | ->] [-> | ->];
+    eexists; eexists; repeat split; reflexivity.
+Qed.
 
 (** Packed storage and fields are parameterized over the shared value-type
     representation, so they do not freeze the old Wasm 2.0 reference syntax.

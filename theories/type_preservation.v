@@ -139,7 +139,18 @@ Proof.
     + invert_e_typing.
       by resolve_e_typing.
     + by apply v_to_e_const.
+  - rewrite size_cat /= addn1 subn1 drop_size_cat in Hsub.
+    rewrite size_cat /= addn1 subn1 take_size_cat in Hprincipal.
+    instantiate (1 := extr).
+    instantiate (1 := nil) => /=.
+    Transparent instr_subtyping.
+    unfold instr_subtyping.
+    exists nil, nil, (extr ++ [::ts_value]), extr.
+    repeat split => //=; by resolve_subtyping.
+  Unshelve.
+  all: try by resolve_subtyping.
 Qed.
+Opaque instr_subtyping.
 
 (* Various properties preserved by a store extension *)
 Lemma ext_func_typing_extension: forall s s' a tf,
@@ -965,7 +976,7 @@ Proof.
   apply/andP; split; first by lias.
   unfold tab_size in *; simpl in *.
   erewrite nth_error_set_nth_length => //.
-  apply nth_error_nth with (x := (VAL_ref_null T_funcref)).
+  apply nth_error_nth with (x := (VAL_ref_null HT_func)).
   move/N.ltb_spec0 in Hif.
   by lias.
 Qed.
@@ -1055,7 +1066,9 @@ Proof.
     rewrite Hif3 List.length_app List.repeat_length.
     replace (_ == _) with true; last first.
     { symmetry; apply/eqP. by lias. }
-    { resolve_if_true_eq.
+    { move/andP: Hif0 => [Hnullable _].
+      rewrite Hnullable /=.
+      resolve_if_true_eq.
       rewrite all_cat.
       apply/andP; split => //.
       apply all_repeat.

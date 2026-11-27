@@ -63,8 +63,8 @@ run_one() {
     if result_line=$(printf '%s' "$cleaned" | grep "Result: "); then
       if [[ "$result_line" != *$'\n'* && "$result_line" =~ Result:\ ([0-9]+)/([0-9]+) ]]; then
         local passed="${BASH_REMATCH[1]}" total="${BASH_REMATCH[2]}"
-        if (( passed > total )); then
-          summary="PARSE ERROR: $base — passed count exceeds total"
+        if (( total == 0 || passed > total )); then
+          summary="PARSE ERROR: $base — empty or inconsistent result counts"
           echo "0 0 1" > "$results_dir/$base"
         else
           echo "$passed $total 0" > "$results_dir/$base"

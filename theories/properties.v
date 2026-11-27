@@ -1318,10 +1318,13 @@ Lemma default_value_typing: forall s t v,
     value_typing s v t.
 Proof.
   move => s t v Hval.
-  destruct t, v => //; simpl in *; try inversion Hval; subst => //=.
-  - by destruct n.
-  - by destruct v0.
-  - by destruct r.
+  destruct t as [n|w|[b h]|]; simpl in Hval.
+  - destruct n; inversion Hval; subst; by [].
+  - destruct w; inversion Hval; subst; by [].
+  - destruct b; simpl in Hval; try discriminate.
+    inversion Hval; subst.
+    by unfold value_typing; simpl; rewrite /value_subtyping eq_refl.
+  - discriminate.
 Qed.
 
 Lemma default_values_typing: forall s ts vs,
