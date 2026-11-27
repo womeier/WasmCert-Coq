@@ -492,3 +492,188 @@ Proof.
   apply run_of_prefix.
   now eapply vector_lane_prefix_round_trip with (code := code).
 Qed.
+
+Definition decode_or {A}
+  (p q: list byte -> option (A * list byte)) input :=
+  match p input with Some result => Some result | None => q input end.
+
+Definition scalar_memops :=
+  SM_i32_load :: SM_i64_load :: SM_f32_load :: SM_f64_load ::
+  SM_i32_load8_s :: SM_i32_load8_u :: SM_i32_load16_s :: SM_i32_load16_u ::
+  SM_i64_load8_s :: SM_i64_load8_u :: SM_i64_load16_s :: SM_i64_load16_u ::
+  SM_i64_load32_s :: SM_i64_load32_u ::
+  SM_i32_store :: SM_i64_store :: SM_f32_store :: SM_f64_store ::
+  SM_i32_store8 :: SM_i32_store16 :: SM_i64_store8 :: SM_i64_store16 ::
+  SM_i64_store32 :: nil.
+
+Definition decode_memory_instruction :=
+  List.fold_right decode_or (decode_indexed_memop IM_fill)
+    (List.map (fun op =>
+      decode_tagged_memarg (scalar_memop_tag op) (scalar_memop_build op))
+      scalar_memops ++
+     decode_vector_memory ::
+     decode_indexed_memop IM_size :: decode_indexed_memop IM_grow ::
+     decode_indexed_memop IM_init :: decode_indexed_memop IM_drop ::
+     decode_indexed_memop IM_copy :: nil).
+
+Theorem memory_instruction_prefix_correct :
+  prefix_semantics (fun n =>
+    (parse_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction n))
+    decode_memory_instruction.
+Proof.
+  unfold parse_memory_instruction, decode_memory_instruction, scalar_memops.
+  cbn [List.map List.app List.fold_right].
+  unfold decode_or.
+  do 23 (apply prefix_alt; [apply prefix_tagged_memarg|]).
+  apply prefix_alt; [apply vector_memory_prefix_correct|].
+  apply prefix_alt; [apply (indexed_memop_prefix_correct IM_size)|].
+  apply prefix_alt; [apply (indexed_memop_prefix_correct IM_grow)|].
+  apply prefix_alt; [apply (indexed_memop_prefix_correct IM_init)|].
+  apply prefix_alt; [apply (indexed_memop_prefix_correct IM_drop)|].
+  apply prefix_alt; [apply (indexed_memop_prefix_correct IM_copy)|].
+  apply (indexed_memop_prefix_correct IM_fill).
+Qed.
+
+Theorem scalar_memory_class_round_trip : forall op marg suffix bound
+  (Hbound: (List.length
+    (binary_of_be (scalar_memop_build op marg) ++ suffix) <= bound)%nat),
+  N.lt marg.(memarg_align) 64 ->
+  N.lt marg.(memarg_memory) u32_bound ->
+  N.lt marg.(memarg_offset) u32_bound ->
+  observe_prefix (runParser
+    (parse_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (binary_of_be (scalar_memop_build op marg) ++ suffix))) =
+    Some (scalar_memop_build op marg, suffix).
+Proof.
+  intros op marg suffix bound Hbound Ha Hm Ho.
+  rewrite memory_instruction_prefix_correct.
+  assert (Hbytes: binary_of_be (scalar_memop_build op marg) =
+    scalar_memop_tag op :: binary_of_memarg marg) by (destruct op; reflexivity).
+  rewrite Hbytes.
+  destruct op; unfold decode_memory_instruction, scalar_memops, decode_or,
+    decode_tagged_memarg, decode_exact_byte;
+    cbn -[binary_of_memarg decode_memarg decode_uint].
+  all: rewrite decode_binary_memarg_suffix by assumption.
+  all: reflexivity.
+Qed.
+
+Theorem indexed_memory_class_round_trip : forall op x y suffix bound
+  (Hbound: (List.length
+    (binary_of_be (indexed_memop_build op x y) ++ suffix) <= bound)%nat),
+  N.lt x u32_bound -> N.lt y u32_bound ->
+  observe_prefix (runParser
+    (parse_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (binary_of_be (indexed_memop_build op x y) ++ suffix))) =
+    Some (indexed_memop_build op x y, suffix).
+Proof.
+  intros op x y suffix bound Hbound Hx Hy.
+  rewrite memory_instruction_prefix_correct.
+  destruct op; unfold decode_memory_instruction, scalar_memops, decode_or,
+    decode_tagged_memarg, decode_exact_byte;
+    cbn -[binary_of_u32 decode_uint].
+  all: unfold binary_of_memidx, binary_of_dataidx, binary_of_idx,
+    decode_indexed_memop, decode_fc_prefix, decode_sequence,
+    decode_assert_u32, decode_two_indices, decode_map, decode_vector_memory.
+  all: cbn -[binary_of_u32 decode_uint].
+  all: repeat rewrite <- List.app_assoc.
+  all: repeat (rewrite decode_small_u32_byte by reflexivity;
+    cbn -[binary_of_u32 decode_uint]).
+  all: repeat (rewrite decode_binary_u32_suffix by assumption;
+    cbn -[binary_of_u32 decode_uint]).
+  all: reflexivity.
+Qed.
+
+Theorem vector_memarg_class_round_trip : forall code build marg suffix bound
+  (Hbound: (List.length (binary_of_be (build marg) ++ suffix) <= bound)%nat),
+  vector_memory_opcode code = Some (VMI_memarg build) ->
+  N.lt marg.(memarg_align) 64 ->
+  N.lt marg.(memarg_memory) u32_bound ->
+  N.lt marg.(memarg_offset) u32_bound ->
+  observe_prefix (runParser
+    (parse_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (binary_of_be (build marg) ++ suffix))) =
+    Some (build marg, suffix).
+Proof.
+  intros code build marg suffix bound Hbound Hcode Ha Hm Ho.
+  pose proof (vector_memarg_prefix_round_trip code build marg suffix bound
+    Hbound Hcode Ha Hm Ho) as Hvec.
+  rewrite vector_memory_prefix_correct in Hvec.
+  rewrite memory_instruction_prefix_correct.
+  rewrite (vector_memarg_print _ _ _ Hcode) in Hvec |- *.
+  cbn [List.app] in Hvec.
+  unfold decode_memory_instruction, scalar_memops, decode_or,
+    decode_tagged_memarg, decode_exact_byte.
+  cbn -[binary_of_u32 binary_of_memarg decode_memarg decode_uint decode_vector_memory].
+  rewrite Hvec. reflexivity.
+Qed.
+
+Theorem vector_lane_class_round_trip : forall code build marg lane suffix bound
+  (Hbound: (List.length (binary_of_be (build marg lane) ++ suffix) <= bound)%nat),
+  vector_memory_opcode code = Some (VMI_lane build) ->
+  N.lt marg.(memarg_align) 64 ->
+  N.lt marg.(memarg_memory) u32_bound ->
+  N.lt marg.(memarg_offset) u32_bound ->
+  N.lt lane 256 ->
+  observe_prefix (runParser
+    (parse_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (binary_of_be (build marg lane) ++ suffix))) =
+    Some (build marg lane, suffix).
+Proof.
+  intros code build marg lane suffix bound Hbound Hcode Ha Hm Ho Hl.
+  pose proof (vector_lane_prefix_round_trip code build marg lane suffix bound
+    Hbound Hcode Ha Hm Ho Hl) as Hvec.
+  rewrite vector_memory_prefix_correct in Hvec.
+  rewrite memory_instruction_prefix_correct.
+  rewrite (vector_lane_print _ _ _ _ Hcode) in Hvec |- *.
+  cbn [List.app] in Hvec.
+  unfold decode_memory_instruction, scalar_memops, decode_or,
+    decode_tagged_memarg, decode_exact_byte.
+  cbn -[binary_of_u32 binary_of_memarg binary_of_laneidx
+    decode_memarg decode_uint decode_vector_memory].
+  rewrite Hvec. reflexivity.
+Qed.
+
+(** Encodability is separate from validation: e.g. an excessive alignment can
+    be syntactically encodable but correctly rejected by the type checker. *)
+Inductive encodable_memory_instruction : basic_instruction -> Prop :=
+| EMI_scalar : forall op marg,
+    N.lt marg.(memarg_align) 64 ->
+    N.lt marg.(memarg_memory) u32_bound ->
+    N.lt marg.(memarg_offset) u32_bound ->
+    encodable_memory_instruction (scalar_memop_build op marg)
+| EMI_indexed : forall op x y,
+    N.lt x u32_bound -> N.lt y u32_bound ->
+    encodable_memory_instruction (indexed_memop_build op x y)
+| EMI_vector : forall code build marg,
+    vector_memory_opcode code = Some (VMI_memarg build) ->
+    N.lt marg.(memarg_align) 64 ->
+    N.lt marg.(memarg_memory) u32_bound ->
+    N.lt marg.(memarg_offset) u32_bound ->
+    encodable_memory_instruction (build marg)
+| EMI_lane : forall code build marg lane,
+    vector_memory_opcode code = Some (VMI_lane build) ->
+    N.lt marg.(memarg_align) 64 ->
+    N.lt marg.(memarg_memory) u32_bound ->
+    N.lt marg.(memarg_offset) u32_bound ->
+    N.lt lane 256 ->
+    encodable_memory_instruction (build marg lane).
+
+Theorem memory_instruction_run_round_trip : forall be,
+  encodable_memory_instruction be ->
+  binary_format_parser.run (binary_of_be be)
+    (fun n => (parse_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction n)) = Some be.
+Proof.
+  intros be Henc. rewrite <- (List.app_nil_r (binary_of_be be)).
+  apply run_of_prefix.
+  destruct Henc.
+  - now apply scalar_memory_class_round_trip.
+  - now apply indexed_memory_class_round_trip.
+  - now eapply vector_memarg_class_round_trip with (code := code).
+  - now eapply vector_lane_class_round_trip with (code := code).
+Qed.
