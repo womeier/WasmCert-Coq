@@ -3,3 +3,8 @@
      (package coq-wasm)
      (glob_files *.wasm))
 )
+
+(rule
+ (alias runtest)
+ (deps run_wast_tests.sh ../run_wast.sh)
+ (action (run bash %{dep:run_wast_tests.sh} %{dep:../run_wast.sh})))
