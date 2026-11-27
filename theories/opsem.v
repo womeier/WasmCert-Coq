@@ -332,15 +332,19 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
     reduce hs s f [:: AI_basic (BI_table_size x)] hs s f
       [::$VN (Addressing.value_of_address tab.(tableinst_type).(tt_address_type) (N.of_nat sz))]
 | r_table_grow_success :
-  forall x n sz tabinit s f s' hs,
-    stab_grow s f.(f_inst) x (Wasm_int.N_of_uint i32m n) tabinit = Some (s', sz) ->
-    reduce hs s f [::v_to_e (VAL_ref tabinit); $VN (VAL_int32 n); AI_basic (BI_table_grow x)]
-      hs s' f [::$VN (VAL_int32 (Wasm_int.int_of_Z i32m (Z.of_nat sz)))]
+  forall x v n sz tab tabinit s f s' hs,
+    stab s f.(f_inst) x = Some tab ->
+    Addressing.address_of_value tab.(tableinst_type).(tt_address_type) v = Some n ->
+    stab_grow s f.(f_inst) x n tabinit = Some (s', sz) ->
+    reduce hs s f [::v_to_e (VAL_ref tabinit); $VN v; AI_basic (BI_table_grow x)]
+      hs s' f [::$VN (Addressing.value_of_address tab.(tableinst_type).(tt_address_type) (N.of_nat sz))]
 | r_table_grow_failure :
-  forall x n tabinit s f hs,
-    stab_grow s f.(f_inst) x (Wasm_int.N_of_uint i32m n) tabinit = None ->
-    reduce hs s f [::v_to_e (VAL_ref tabinit); $VN (VAL_int32 n); AI_basic (BI_table_grow x)]
-      hs s f [::$VN (VAL_int32 int32_minus_one)]
+  forall x v n tab tabinit s f hs,
+    stab s f.(f_inst) x = Some tab ->
+    Addressing.address_of_value tab.(tableinst_type).(tt_address_type) v = Some n ->
+    stab_grow s f.(f_inst) x n tabinit = None ->
+    reduce hs s f [::v_to_e (VAL_ref tabinit); $VN v; AI_basic (BI_table_grow x)]
+      hs s f [::$VN (Addressing.grow_failure tab.(tableinst_type).(tt_address_type))]
 | r_table_fill_bound :
   forall x i n tab tabv s f hs,
     let i_z := Wasm_int.Z_of_uint i32m i in

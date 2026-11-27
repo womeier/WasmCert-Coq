@@ -963,17 +963,47 @@ the condition that all values should live in the operand stack. *)
 
     (* AI_basic (BI_table_grow x) *)
     - destruct vs0 as [|v2 [|v1 vs0]]; try by no_args.
-      (* Takes an i32 and a reference value *)
-      assert_i32 v2.
+      assert_value_num v2.
       assert_value_ref v1.
-      destruct (stab_grow s fc.(FC_frame).(f_inst) x ($nou32 v2) v1) as [[s' sz]|] eqn:Hstabgrow.
-      + apply <<hs, (s', (fc, lcs) :: ccs', ((VAL_num (VAL_int32 ($u32oz (Z.of_nat sz)))) :: vs0, es0), None), d>> => //.
-        resolve_reduce_ctx vs0 es0.
-        by eapply r_table_grow_success; eauto.
-      (* None *)
-      + apply <<hs, (s, (fc, lcs) :: ccs', ((VAL_num (VAL_int32 int32_minus_one)) :: vs0, es0), None), d>> => //.
-        resolve_reduce_ctx vs0 es0.
-        by eapply r_table_grow_failure; eauto.
+      destruct (stab s fc.(FC_frame).(f_inst) x) as [tab|] eqn:Htable.
+      + destruct (Addressing.address_of_value tab.(tableinst_type).(tt_address_type) v2)
+          as [count|] eqn:Haddress.
+        * destruct (stab_grow s fc.(FC_frame).(f_inst) x count v1)
+            as [[s' sz]|] eqn:Hstabgrow.
+          { apply <<hs, (s', (fc, lcs) :: ccs',
+              (VAL_num (Addressing.value_of_address tab.(tableinst_type).(tt_address_type)
+                (N.of_nat sz)) :: vs0, es0), None), d>> => //.
+            resolve_reduce_ctx vs0 es0.
+            by eapply r_table_grow_success; eauto.
+          }
+          { apply <<hs, (s, (fc, lcs) :: ccs',
+              (VAL_num (Addressing.grow_failure tab.(tableinst_type).(tt_address_type))
+                :: vs0, es0), None), d>> => //.
+            resolve_reduce_ctx vs0 es0.
+            by eapply r_table_grow_failure; eauto.
+          }
+        * resolve_invalid_typing.
+          unfold_frame_type Hftype.
+          match goal with
+          | Hit: inst_typing s _ = Some ?C,
+            Hlookup: lookup_N (tc_tables ?C) x = Some ?tt |- _ =>
+              pose proof (stab_type_context Hit Hlookup Htable) as Htt;
+              subst tt
+          end.
+          destruct (tt_address_type (tableinst_type tab)); destruct v2;
+            cbn [Addressing.address_of_value] in Haddress; try discriminate;
+            unfold Addressing.address_value_type in *;
+            resolve_invalid_value.
+      + resolve_invalid_typing.
+        unfold_frame_type Hftype.
+        match goal with
+        | Hit: inst_typing s _ = Some ?C,
+          Hlookup: lookup_N (tc_tables ?C) x = Some ?tt |- _ =>
+            destruct (inst_typing_table_lookup_inv Hit Hlookup) as [a [Htype Hindex]];
+            unfold stab in Htable; rewrite Hindex in Htable;
+            unfold ext_table_typing in Htype;
+            destruct (lookup_N (s_tables s) a); discriminate
+        end.
 
     (* AI_basic (BI_table_fill x) *)
     - destruct vs0 as [|v3 [|v2 [|v1 vs0]]]; try by no_args.

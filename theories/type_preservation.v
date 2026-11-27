@@ -548,6 +548,12 @@ Proof.
     unfold table_agree in Hagree; move/andP in Hagree.
     destruct Hagree as [_ Haddr]. move/eqP in Haddr.
     rewrite Haddr. by eapply bet_table_size.
+  (* table grow *)
+  - destruct (context_agree_table_type Hext H) as [tabt [Hnth Hagree]].
+    unfold table_agree in Hagree; move/andP in Hagree.
+    destruct Hagree as [Helem Haddr].
+    move/eqP in Helem; move/eqP in Haddr.
+    rewrite Haddr. eapply bet_table_grow; eauto. congruence.
   (* table_copy *)
   - rewrite_context_agree.
     eapply context_agree_table_type in H as [tabt [Hnth Hagree]]; eauto.

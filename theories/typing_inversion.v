@@ -223,7 +223,8 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
         lookup_N (tc_tables C) x = Some tabt
   | BI_table_grow x =>
       exists tabt t,
-      tf = (Tf [::T_ref t; T_num T_i32] [::T_num T_i32]) /\
+      tf = (Tf [::T_ref t; Addressing.address_value_type tabt.(tt_address_type)]
+               [::Addressing.address_value_type tabt.(tt_address_type)]) /\
         lookup_N (tc_tables C) x = Some tabt /\
         tabt.(tt_elem_type) = t
   | BI_table_fill x =>

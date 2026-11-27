@@ -1317,7 +1317,12 @@ Proof.
       * eapply bet_table_size. eassumption.
       * by resolve_subtyping.
     (* Table_grow *)
-    + by resolve_tc_be_typing.
+    + apply bet_weakening.
+      eapply bet_subtyping.
+      * eapply bet_table_grow; eauto.
+      * unfold Addressing.address_value_type in *.
+        resolve_subtyping.
+        by apply instr_subtyping_eq.
     (* Table_fill *)
     + by resolve_tc_be_typing.
     (* Table_copy *)

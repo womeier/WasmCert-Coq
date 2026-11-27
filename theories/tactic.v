@@ -265,6 +265,17 @@ Ltac resolve_e_typing :=
           (unfold smem; rewrite Hindex Hdata; reflexivity);
         pose proof (smem_type_context Hit Hcontext Hmemory) as Hmemtype;
         progress rewrite Hmemtype
+    | Hit: inst_typing ?s ?inst = Some ?C,
+      Hindex: lookup_N (inst_tables ?inst) ?x = Some ?a,
+      Hdata: lookup_N (s_tables ?s) ?a = Some ?tab,
+      Hcontext: lookup_N (tc_tables ?C) ?x = Some ?tt |-
+        context [tt_address_type (tableinst_type ?tab)] =>
+        let Htable := fresh "Htable" in
+        let Htabletype := fresh "Htabletype" in
+        assert (Htable: stab s inst x = Some tab) by
+          (unfold stab; rewrite Hindex Hdata; reflexivity);
+        pose proof (stab_type_context Hit Hcontext Htable) as Htabletype;
+        progress rewrite Htabletype
     (* This is usually required and should be applied at highest priority *)
     | H: is_true (?ts1 <ts: ?ts2) |-
         e_typing _ _ _ (Tf ?ts1 ?ts2) =>

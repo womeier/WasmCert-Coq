@@ -308,7 +308,9 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 | bet_table_grow : forall C x tabtype t,
   lookup_N (tc_tables C) x = Some tabtype ->
   tabtype.(tt_elem_type) = t ->
-  be_typing C [::BI_table_grow x] (Tf [::T_ref t; T_num T_i32] [::T_num T_i32])
+  be_typing C [::BI_table_grow x]
+    (Tf [::T_ref t; Addressing.address_value_type tabtype.(tt_address_type)]
+        [::Addressing.address_value_type tabtype.(tt_address_type)])
 | bet_table_fill : forall C x tabtype t,
   lookup_N (tc_tables C) x = Some tabtype ->
   tabtype.(tt_elem_type) = t ->

@@ -239,6 +239,40 @@ let () =
          [BI_const_num (value A.AT_i32 "1"); BI_memory_grow z]) []
   in
   check "core validator rejects i32 delta for memory64.grow" (bad_delta = None);
+  let table_delta s = [BI_ref_null T_funcref; delta64 s; BI_table_grow z] in
+  check "actual core table64.grow returns previous size as i64"
+    (execute_storage_module
+       (storage_program T_i64 [] [core_tt64] (table_delta "1")) =
+       [Utility.vali64_of_Z one]);
+  check "actual core table64.grow updates table size"
+    (execute_storage_module
+       (storage_program T_i64 [] [core_tt64]
+          (table_delta "1" @ [BI_drop; BI_table_size z])) =
+       [Utility.vali64_of_Z (n "2")]);
+  check "actual core table64.grow failure returns i64 minus one"
+    (execute_storage_module
+       (storage_program T_i64 [] [core_tt64] (table_delta "2")) =
+       [Utility.vali64_of_Z (n "-1")]);
+  check "actual core table64.grow does not narrow large delta"
+    (execute_storage_module
+       (storage_program T_i64 [] [core_tt64] (table_delta "4294967296")) =
+       [Utility.vali64_of_Z (n "-1")]);
+  check "actual core table64.grow rejects u64 address overflow"
+    (execute_storage_module
+       (storage_program T_i64 [] [core_tt64] (table_delta "18446744073709551615")) =
+       [Utility.vali64_of_Z (n "-1")]);
+  let bad_table_delta, _ =
+    Runner.interp_instantiate_wrapper (Obj.repr ()) Runner.empty_store_record
+      (storage_program T_i64 [] [core_tt64]
+         [BI_ref_null T_funcref; BI_const_num (value A.AT_i32 "1"); BI_table_grow z]) []
+  in
+  check "core validator rejects i32 delta for table64.grow" (bad_table_delta = None);
+  let bad_table_init, _ =
+    Runner.interp_instantiate_wrapper (Obj.repr ()) Runner.empty_store_record
+      (storage_program T_i64 [] [core_tt64]
+         [BI_ref_null T_externref; delta64 "1"; BI_table_grow z]) []
+  in
+  check "core table64.grow retains reference-type checks" (bad_table_init = None);
   let byte s = Byte.repr (n s) in
   let fill_one data at b = some "memory64 fill"
       (U.fill memory_instance data (value A.AT_i64 at)

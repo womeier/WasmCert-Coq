@@ -2310,6 +2310,20 @@ Proof.
   by exists a.
 Qed.
 
+Lemma stab_type_context s inst C x tt tab :
+  inst_typing s inst = Some C ->
+  lookup_N C.(tc_tables) x = Some tt ->
+  stab s inst x = Some tab ->
+  tab.(tableinst_type) = tt.
+Proof.
+  move => Hinst Hlookup Htab.
+  destruct (inst_typing_table_lookup_inv Hinst Hlookup) as [a [Htype Hindex]].
+  unfold stab in Htab. rewrite Hindex in Htab.
+  unfold ext_table_typing in Htype.
+  destruct (lookup_N (s_tables s) a) eqn:Hdata => //.
+  inversion Htab; inversion Htype. congruence.
+Qed.
+
 Lemma inst_typing_mem_lookup_inv: forall s inst C n t,
     inst_typing s inst = Some C ->
     lookup_N C.(tc_mems) n = Some t ->

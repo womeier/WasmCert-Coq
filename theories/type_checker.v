@@ -362,7 +362,9 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           match lookup_N (tc_tables C) x with
           | None => None 
           | Some tabt =>
-              type_update ts [::T_num T_i32; (T_ref tabt.(tt_elem_type))] [::T_num T_i32]
+              type_update ts
+                [::Addressing.address_value_type tabt.(tt_address_type); T_ref tabt.(tt_elem_type)]
+                [::Addressing.address_value_type tabt.(tt_address_type)]
           end
       | BI_table_fill x =>
           match lookup_N (tc_tables C) x with
