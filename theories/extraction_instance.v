@@ -75,6 +75,7 @@ Module Utility.
     Definition decode_reference := decode_abstract_reference.
     Definition encode_packed := encode_packed_type.
     Definition decode_packed := decode_packed_type.
+    Definition decode_typeidx := run_parse_heap_typeidx.
   End GC.
   
   Definition vali32_of_Z (z: Z) : value :=

@@ -204,6 +204,43 @@ Section IntegerGuards.
         9223372036854775807)%Z. lia.
     - split; [lia |]. rewrite <- S. now apply N.leb_le.
   Qed.
+
+  Lemma parse_s33_guards s :
+    runParser (@parse_s33 Toks _ option _ _ _ _ _ _ n)
+      bound input = Some s ->
+    (-4294967296 <= Success.value s <= 4294967295)%Z /\
+    (N.of_nat (m - Success.size s) <= 5)%N.
+  Proof.
+    unfold parse_s33. intro Hparse.
+    apply guardM_option_success in Hparse.
+    destruct Hparse as [r [R [V S]]].
+    destruct (andb (Z.leb (-4294967296) (Success.value r))
+              (Z.leb (Success.value r) 4294967295)) eqn:B;
+      [|discriminate].
+    apply Bool.andb_true_iff in B. destruct B as [Lower Upper].
+    apply Z.leb_le in Lower. apply Z.leb_le in Upper.
+    inversion V.
+    apply assert_sized_option_correct in R. destruct R as [_ W].
+    split; [lia |]. rewrite <- S. now apply N.leb_le.
+  Qed.
+
+  Lemma parse_heap_typeidx_guards s :
+    runParser (@parse_heap_typeidx Toks _ option _ _ _ _ _ _ n)
+      bound input = Some s ->
+    (Success.value s <= 4294967295)%N /\
+    (N.of_nat (m - Success.size s) <= 5)%N.
+  Proof.
+    unfold parse_heap_typeidx. intro Hparse.
+    apply guardM_option_success in Hparse.
+    destruct Hparse as [r [R [V S]]].
+    destruct (Z.leb 0 (Success.value r)) eqn:B; [|discriminate].
+    apply Z.leb_le in B.
+    inversion V.
+    apply parse_s33_guards in R. destruct R as [Range Width].
+    split.
+    - apply N2Z.inj_le. rewrite Z2N.id; lia.
+    - rewrite <- S. exact Width.
+  Qed.
 End IntegerGuards.
 
 Section VectorLengths.
@@ -306,6 +343,16 @@ Proof.
   intros [s [R [V S]]].
   unfold parse_typeidx in R.
   apply parse_u32_as_N_guards in R.
+  rewrite V, S, Nat.sub_0_r in R. exact R.
+Qed.
+
+Lemma run_heap_typeidx_guards bs x :
+  run_parse_heap_typeidx bs = Some x ->
+  (x <= 4294967295)%N /\ (N.of_nat (List.length bs) <= 5)%N.
+Proof.
+  unfold run_parse_heap_typeidx. rewrite run_option_correct.
+  intros [s [R [V S]]].
+  apply parse_heap_typeidx_guards in R.
   rewrite V, S, Nat.sub_0_r in R. exact R.
 Qed.
 

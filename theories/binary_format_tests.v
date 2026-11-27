@@ -35,6 +35,40 @@ Lemma overflowing_type_vector_length_rejected :
       (x01 :: x05 :: x80 :: x80 :: x80 :: x80 :: x10 :: nil)) = None.
 Proof. vm_compute. reflexivity. Qed.
 
+(** Heap indices are unsigned indices encoded with signed LEB128. *)
+Lemma heap_index_64 :
+  run_parse_heap_typeidx (xc0 :: x00 :: nil) = Some 64%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_64_requires_positive_sign :
+  run_parse_heap_typeidx (x40 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_u32_max :
+  run_parse_heap_typeidx (xff :: xff :: xff :: xff :: x0f :: nil) =
+  Some 4294967295%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_padded_zero :
+  run_parse_heap_typeidx (x80 :: x80 :: x80 :: x80 :: x00 :: nil) = Some 0%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_overlong_zero_rejected :
+  run_parse_heap_typeidx (x80 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_overflow_rejected :
+  run_parse_heap_typeidx (x80 :: x80 :: x80 :: x80 :: x10 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_abstract_type_rejected :
+  run_parse_heap_typeidx (x70 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_leftovers_rejected :
+  run_parse_heap_typeidx (x00 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
 Open Scope string_scope.
 Import Stdlib.Strings.String.StringSyntax.
 Open Scope list_scope.

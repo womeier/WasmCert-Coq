@@ -105,4 +105,31 @@ let () =
       check "module truncated vector count rejected"
         (run_parse_module (section id ['\x80']) = None))
     [1; 2; 3; 4; 5; 6; 7; 9; 10; 11];
+  List.iter
+    (fun (bytes, expected) ->
+      let expected = Stdlib.Option.map BigZ.of_string expected in
+      let actual = decode_typeidx bytes in
+      check "signed-33 heap index"
+        (match actual, expected with
+         | Some x, Some y -> BigZ.equal x y
+         | None, None -> true
+         | _, _ -> false))
+    [ ['\x00'], Some "0";
+      ['\x3f'], Some "63";
+      ['\xc0'; '\x00'], Some "64";
+      ['\xff'; '\x00'], Some "127";
+      ['\x80'; '\x01'], Some "128";
+      ['\xff'; '\xff'; '\xff'; '\xff'; '\x07'], Some "2147483647";
+      ['\xff'; '\xff'; '\xff'; '\xff'; '\x0f'], Some "4294967295";
+      ['\x80'; '\x80'; '\x80'; '\x80'; '\x00'], Some "0";
+      ['\xc0'; '\x80'; '\x80'; '\x80'; '\x00'], Some "64";
+      ['\x40'], None;
+      ['\x70'], None;
+      ['\x7f'], None;
+      ['\x80'; '\x80'; '\x80'; '\x80'; '\x10'], None;
+      ['\x80'; '\x80'; '\x80'; '\x80'; '\x70'], None;
+      ['\x80'; '\x80'; '\x80'; '\x80'; '\x80'; '\x00'], None;
+      ['\x80'], None;
+      ['\x00'; '\x00'], None;
+      [], None ];
   Printf.printf "GC extraction: %d/%d checks passed\n" !checks !checks

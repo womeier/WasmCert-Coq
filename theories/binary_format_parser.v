@@ -76,7 +76,22 @@ Definition parse_s64 {n} : byte_parser Wasm_int.Int64.int n :=
                  (Z.leb (-9223372036854775808)%Z x)) then
                   Some (Wasm_int.Int64.repr x)
                 else None)
-    (assert_sized (extract parse_signed n) (fun sz => N.leb sz 10)).
+   (assert_sized (extract parse_signed n) (fun sz => N.leb sz 10)).
+
+(** Heap type indices use s33, not u32: this keeps all u32 indices available
+    while reserving negative single-byte encodings for abstract heap types.
+    Keep this integer decoder separate from the shared heap-type syntax. *)
+Definition parse_s33 {n} : byte_parser Z n :=
+  guardM
+    (fun z =>
+       if andb (Z.leb (-4294967296) z) (Z.leb z 4294967295)
+       then Some z else None)
+    (assert_sized (extract parse_signed n) (fun sz => N.leb sz 5)).
+
+Definition parse_heap_typeidx {n} : byte_parser typeidx n :=
+  guardM
+    (fun z => if Z.leb 0 z then Some (Z.to_N z) else None)
+    parse_s33.
 
 Definition parse_vec_length {n} : byte_parser N n :=
   parse_u32_as_N.
@@ -1342,6 +1357,9 @@ End Run.
 
 Definition run_parse_be (bs : list byte) : option basic_instruction :=
   run bs parse_be.
+
+Definition run_parse_heap_typeidx (bs : list byte) : option typeidx :=
+  run bs (fun _ => parse_heap_typeidx).
 
 Definition run_parse_expr (bs : list byte) : option (list basic_instruction) :=
   run bs (fun n => parse_expr).
