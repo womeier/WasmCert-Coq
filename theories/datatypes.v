@@ -954,9 +954,10 @@ Record moduleinst : Type := (* inst *) {
   inst_elems : list elemaddr;
   inst_datas : list dataaddr;
   inst_exports: list exportinst;  
+  inst_tags : list tagaddr;
   }.
 
-Definition empty_moduleinst := Build_moduleinst nil nil nil nil nil nil nil nil.
+Definition empty_moduleinst := Build_moduleinst nil nil nil nil nil nil nil nil nil.
 
 
 (** We assume a family of host functions. **)
@@ -1006,6 +1007,9 @@ Record store_record : Type := (* s *) {
   s_globals : list globalinst;
   s_elems: list eleminst;
   s_datas: list datainst;
+  (** A tag instance contains its parameter types; it has no result types.
+      Identity is its position in this separate store component. *)
+  s_tags : list result_type;
 }.
 
                             

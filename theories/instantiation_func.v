@@ -269,6 +269,7 @@ Definition interp_alloc_module (s : store_record) (m : module) (imps : list exte
   let i_gs := iota_N (length s.(s_globals)) (length m.(mod_globals)) in
   let i_es := iota_N (length s.(s_elems)) (length m.(mod_elems)) in
   let i_ds := iota_N (length s.(s_datas)) (length m.(mod_datas)) in
+  let i_tags := iota_N (length s.(s_tags)) (length m.(mod_tags)) in
   let inst := {|
     inst_types := m.(mod_types);
     inst_funcs := (ext_funcs imps ++ i_fs);
@@ -277,14 +278,16 @@ Definition interp_alloc_module (s : store_record) (m : module) (imps : list exte
     inst_globals := (ext_globals imps ++ i_gs);
     inst_elems := (i_es);
     inst_datas := (i_ds);
-    inst_exports := (map (get_exportinst (Build_moduleinst nil (ext_funcs imps ++ i_fs) (ext_tables imps ++ i_ts) (ext_mems imps ++ i_ms) (ext_globals imps ++ i_gs) nil nil nil)) m.(mod_exports))
+    inst_tags := i_tags;
+    inst_exports := (map (get_exportinst (Build_moduleinst nil (ext_funcs imps ++ i_fs) (ext_tables imps ++ i_ts) (ext_mems imps ++ i_ms) (ext_globals imps ++ i_gs) nil nil nil nil)) m.(mod_exports))
   |} in
   let '(s1, _) := alloc_funcs s m.(mod_funcs) inst in
   let '(s2, _) := alloc_tabs s1 (map modtab_type m.(mod_tables)) in
   let '(s3, _) := alloc_mems s2 (map modmem_type m.(mod_mems)) in
   let '(s4, i_gs) := alloc_globs s3 m.(mod_globals) gvs in
   let '(s5, i_es) := alloc_elems s4 m.(mod_elems) rvs in
-  let '(s', i_ds) := alloc_datas s5 m.(mod_datas) in
+   let '(s6, i_ds) := alloc_datas s5 m.(mod_datas) in
+   let '(s', i_tags) := alloc_tags s6 m.(mod_types) m.(mod_tags) in
   (s', inst).
 
 (* Use a monad for error reporting at some point? *)
@@ -304,6 +307,7 @@ Definition interp_instantiate (hs: host_state) (s : store_record) (m : module) (
                 inst_globals := ext_globals v_imps;
                 inst_elems := nil;
                 inst_datas := nil;
+                inst_tags := nil;
                 inst_exports := nil;
               |} in
             let f_init := Build_frame nil inst_init in

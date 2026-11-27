@@ -207,19 +207,28 @@ Proof.
   destruct (alloc_globs _ _) as [s4 igs] eqn:Hallocglobs.
   destruct (alloc_elems _ _) as [s5 ies] eqn:Hallocelems.
   destruct (alloc_datas _ _) as [s6 ids] eqn:Hallocdatas.
+  destruct (alloc_tags _ _ _) as [s7 itags] eqn:Halloctags.
+
+  pose proof (alloc_funcs_tags Hallocfuncs) as HT1.
+  pose proof (alloc_tabs_tags Halloctabs) as HT2.
+  pose proof (alloc_mems_tags Hallocmems) as HT3.
+  pose proof (alloc_globs_tags Hallocglobs) as HT4.
+  pose proof (alloc_elems_tags Hallocelems) as HT5.
+  pose proof (alloc_datas_tags Hallocdatas) as HT6.
 
   injection Halloc as <-<-.
-  rewrite Hallocfuncs Halloctabs Hallocmems Hallocglobs Hallocelems Hallocdatas => /=.
+  rewrite Hallocfuncs Halloctabs Hallocmems Hallocglobs Hallocelems Hallocdatas Halloctags => /=.
   apply alloc_func_iota_N in Hallocfuncs.
   apply alloc_table_iota_N in Halloctabs.
   apply alloc_mem_iota_N in Hallocmems.
   apply alloc_global_iota_N in Hallocglobs; last assumption.
   apply alloc_elem_iota_N in Hallocelems; last assumption.
   apply alloc_data_iota_N in Hallocdatas.
+  apply alloc_tags_iota_N in Halloctags.
 
   extract_premise.
 
-  destruct s, s1, s2, s3, s4, s5, s6; simpl in *.
+  destruct s, s1, s2, s3, s4, s5, s6, s7; simpl in *.
   subst.
   repeat rewrite List.length_map.
   by repeat rewrite eq_refl => /=.
@@ -310,7 +319,8 @@ Proof.
   destruct (alloc_mems _ _) as [s3 ims] eqn:Hallocmems.
   destruct (alloc_globs _ _) as [s4 igs] eqn:Hallocglobs.
   destruct (alloc_elems _ _) as [s5 ies] eqn:Hallocelems.
-  destruct (alloc_datas _ _) as [s6 ids] eqn:Hallocdatas.
+  destruct (alloc_datas _ _) as [s_data ids] eqn:Hallocdatas.
+  destruct (alloc_tags _ _ _) as [s6 itags] eqn:Halloctags.
 
   injection Halloc as <- Heqinst.
   specialize (alloc_func_iota_N Hallocfuncs) as Hfuncaddrs.
@@ -319,10 +329,11 @@ Proof.
   specialize (alloc_global_iota_N Hallocglobs Hgvs_len) as Hglobaladdrs.
   specialize (alloc_elem_iota_N Hallocelems Hrvs_len) as Helemaddrs.
   specialize (alloc_data_iota_N Hallocdatas) as Hdataaddrs.
+  specialize (alloc_tags_iota_N Halloctags) as Htagaddrs.
 
   extract_premise.
 
-  destruct s, s1, s2, s3, s4, s5, s6; simpl in *.
+  destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *.
   repeat split => //.
   - (* subtyping *)
     by eapply Forall2_all2_impl; eauto.

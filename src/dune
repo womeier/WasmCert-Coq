@@ -6,9 +6,21 @@
 )
 
 
+(library
+  (name wasmcert_runtime)
+  (wrapped false)
+  (modules (:standard \ wasm_coq_interpreter tag_allocation_test))
+  (libraries cmdliner wasm unix parray zarith))
+
+(test
+  (name tag_allocation_test)
+  (modules tag_allocation_test)
+  (libraries wasmcert_runtime))
+
 (executable
   (name wasm_coq_interpreter)
-  (libraries cmdliner wasm unix parray zarith)
+  (modules wasm_coq_interpreter)
+  (libraries wasmcert_runtime cmdliner)
   (modes (best exe))
   (public_name wasm_coq_interpreter)
   (promote (into ../))
@@ -25,4 +37,3 @@
 ; - 20: this argument will not be used by the function.
 ; - 34: unused type
 ; - 32: unused value.
-

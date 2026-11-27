@@ -14,6 +14,18 @@ Proof. vm_compute. reflexivity. Qed.
 Lemma test_nop : check_toks (x01 :: nil) parse_be = Running.Singleton BI_nop.
 Proof. vm_compute. reflexivity. Qed.
 
+Lemma laneidx_is_a_byte :
+  check_toks (xff :: nil) (fun n => parse_laneidx (n := n)) = Running.Singleton 255%N.
+Proof. vm_compute; reflexivity. Qed.
+
+Lemma alignment_exponent_31_parses :
+  check_toks (x1f :: nil) (fun n => parse_alignment_exponent (n := n)) = Running.Singleton 31%N.
+Proof. vm_compute; reflexivity. Qed.
+
+Lemma alignment_exponent_32_rejected :
+  check_toks (x20 :: nil) (fun n => parse_alignment_exponent (n := n)) = False.
+Proof. vm_compute; reflexivity. Qed.
+
 (** An example program. **)
 Definition test :=
   BI_if (BT_valtype None) (BI_testop T_i64 TO_eqz :: nil) (BI_testop T_i64 TO_eqz :: nil).

@@ -39,6 +39,7 @@ Definition globals_of_externals (evs : list extern_value) : list globaladdr :=
   seq.pmap (fun ev => match ev with | EV_global ta => Some ta | _ => None end) evs.
 
 Definition add_func (s : store_record) funcinst := {|
+  s_tags := s.(s_tags);
   s_funcs := cat s.(s_funcs) [::funcinst];
   s_tables := s.(s_tables);
   s_mems := s.(s_mems);
@@ -67,6 +68,7 @@ Definition alloc_funcs (s : store_record) (m_fs : list module_func) (mi : module
   alloc_Xs (fun s m_f => alloc_func s m_f mi) s m_fs.
 
 Definition add_table (s : store_record) (ti : tableinst) : store_record := {|
+  s_tags := s.(s_tags);
   s_funcs := s.(s_funcs);
   s_tables := cat s.(s_tables) [::ti];
   s_mems := s.(s_mems);
@@ -100,6 +102,7 @@ Definition gen_mem_instance (lim : limits) : meminst :=
   |}.
 
 Definition add_mem (s : store_record) (m_m : meminst) : store_record := {|
+  s_tags := s.(s_tags);
   s_funcs := s.(s_funcs);
   s_tables := s.(s_tables);
   s_mems := cat s.(s_mems) [::m_m];
@@ -118,6 +121,7 @@ Definition alloc_mems (s : store_record) (m_mts : list memory_type) : store_reco
   alloc_Xs alloc_mem s m_mts.
 
 Definition add_glob (s : store_record) (m_g : globalinst) : store_record := {|
+  s_tags := s.(s_tags);
   s_funcs := s.(s_funcs);
   s_tables := s.(s_tables);
   s_mems := s.(s_mems);
@@ -142,6 +146,7 @@ Definition alloc_globs s m_gs vs :=
   alloc_Xs alloc_glob s (List.combine m_gs vs).
 
 Definition add_elem (s : store_record) (m_e : eleminst) : store_record := {|
+  s_tags := s.(s_tags);
   s_funcs := s.(s_funcs);
   s_tables := s.(s_tables);
   s_mems := s.(s_mems);
@@ -161,6 +166,7 @@ Definition alloc_elems (s : store_record) (m_es : list module_element) (elem_ini
   alloc_Xs alloc_elem s (List.combine m_es elem_inits).
 
 Definition add_data (s : store_record) (m_d : datainst) : store_record := {|
+  s_tags := s.(s_tags);
   s_funcs := s.(s_funcs);
   s_tables := s.(s_tables);
   s_mems := s.(s_mems);
@@ -176,6 +182,19 @@ Definition alloc_data (s: store_record) (m_d: module_data) : store_record * data
 
 Definition alloc_datas (s : store_record) (m_d: list module_data) : store_record * list dataaddr :=
   alloc_Xs alloc_data s m_d.
+
+Definition gen_tag_instance (types : list function_type) (x : typeidx) : result_type :=
+  match lookup_N types x with
+  | Some (Tf ps nil) => ps
+  | _ => nil (* unreachable after module validation, as for gen_func_instance *)
+  end.
+
+Definition alloc_tag (s : store_record) (ps : result_type) : store_record * tagaddr :=
+  (upd_s_tags s (s.(s_tags) ++ [::ps]), N.of_nat (length s.(s_tags))).
+
+Definition alloc_tags (s : store_record) (types : list function_type)
+    (tags : list typeidx) : store_record * list tagaddr :=
+  alloc_Xs (fun s x => alloc_tag s (gen_tag_instance types x)) s tags.
 
 Definition export_get_v_ext (inst : moduleinst) (exp : module_export_desc) : extern_value :=
   (* we circumvent partiality by providing 0 as a default. This is fine as the module_typing
@@ -263,7 +282,8 @@ Definition alloc_module (s : store_record) (m : module) (imps : list extern_valu
   let '(s3, i_ms) := alloc_mems s2 (map modmem_type m.(mod_mems)) in
   let '(s4, i_gs) := alloc_globs s3 m.(mod_globals) gvs in
   let '(s5, i_es) := alloc_elems s4 m.(mod_elems) rvs in
-  let '(s', i_ds) := alloc_datas s5 m.(mod_datas) in
+   let '(s6, i_ds) := alloc_datas s5 m.(mod_datas) in
+   let '(s', i_tags) := alloc_tags s6 m.(mod_types) m.(mod_tags) in
   (s'_goal = s') /\
   (inst.(inst_types) = m.(mod_types)) /\
   (inst.(inst_funcs) = ((ext_funcs imps) ++ i_fs)) /\
@@ -272,7 +292,8 @@ Definition alloc_module (s : store_record) (m : module) (imps : list extern_valu
   (inst.(inst_globals) = ((ext_globals imps) ++ i_gs)) /\
   (inst.(inst_elems) = i_es) /\
   (inst.(inst_datas) = i_ds) /\
-  (inst.(inst_exports) = (map (get_exportinst inst) m.(mod_exports))).
+   (inst.(inst_exports) = (map (get_exportinst inst) m.(mod_exports))) /\
+   (inst.(inst_tags) = i_tags).
 
 Definition dummy_table : tableinst := {| tableinst_elem := nil; tableinst_type := Build_table_type (Build_limits N0 None) T_funcref |}.
 
@@ -637,7 +658,7 @@ Definition instantiate (s : store_record) (m : module) (v_imps : list extern_val
     List.Forall2 (external_typing s) v_imps t_imps /\
     List.Forall2 import_subtyping t_imps t_imps_mod /\
     alloc_module s m v_imps g_inits r_inits (s_end, inst) /\
-    let inst_init := Build_moduleinst nil inst.(inst_funcs) nil nil (ext_globals v_imps) nil nil nil in
+    let inst_init := Build_moduleinst nil inst.(inst_funcs) nil nil (ext_globals v_imps) nil nil nil nil in
     let f_init := Build_frame nil inst_init in
     (* Init values *)
     instantiate_globals f_init hs' s_end m g_inits /\

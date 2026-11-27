@@ -142,7 +142,7 @@ Definition parse_dataidx {n} : byte_parser dataidx n :=
   parse_u32_as_N.
 
 Definition parse_laneidx {n} : byte_parser laneidx n :=
-  parse_u8_as_N.
+  Byte.to_N <$> anyTok.
 
 Definition parse_number_type {n} : byte_parser number_type n :=
   (exact_byte x7f $> T_i32) <|>
@@ -311,7 +311,7 @@ Definition parse_table_instruction {n}: byte_parser basic_instruction n :=
   parse_table_fill.
 
 Definition parse_alignment_exponent {n} : byte_parser N n :=
-  parse_u32_as_N.
+  guardM (fun a => if N.ltb a 32 then Some a else None) parse_u32_as_N.
 
 Definition parse_static_offset {n} : byte_parser N n :=
   parse_u32_as_N.

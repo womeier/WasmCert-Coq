@@ -878,6 +878,10 @@ Ltac resolve_store_extension :=
       rewrite -> component_extension_same_refl with (f := elem_extension); last by apply elem_extension_refl
   | |- context [ component_extension data_extension ?x ?x ] =>
       rewrite -> component_extension_same_refl with (f := data_extension); last by apply data_extension_refl
+  | |- context [ component_extension (fun (ps ps': seq value_type) => ps == ps') ?x ?x ] =>
+      rewrite -> component_extension_same_refl
+        with (f := fun (ps ps': seq value_type) => ps == ps');
+        last by move => ps; rewrite eq_refl
     | _ => repeat rewrite andbT
     end; cbn.
 

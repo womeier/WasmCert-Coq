@@ -2036,6 +2036,10 @@ Proof.
   move => Hext1 Hext2.
   unfold store_extension, operations.store_extension in *.
   remove_bools_options.
+  apply/andP; split; last first.
+  { eapply component_extension_trans; eauto.
+    move => x y z /eqP -> /eqP ->; by rewrite eq_refl.
+  }
   apply/andP; split; last by eapply component_extension_trans; eauto; apply data_extension_trans.
   apply/andP; split; last by eapply component_extension_trans; eauto; apply elem_extension_trans.
   apply/andP; split; last by eapply component_extension_trans; eauto; apply global_extension_trans.
@@ -2055,6 +2059,7 @@ Proof.
   + by apply all2_global_extension_same.
   + by apply all2_elem_extension_same.
   + by apply all2_data_extension_same.
+  + apply reflexive_all2_same; move => x; by rewrite eq_refl.
 Qed.
 
 Lemma component_extension_lookup {T: Type} (l1 l2: list T) f n x:
@@ -2082,6 +2087,18 @@ Proof.
   unfold component_extension.
   apply/andP; split; first by rewrite List.length_app; lias.
   by rewrite length_is_size take_size_cat.
+Qed.
+
+Lemma store_extension_lookup_tag: forall s s' n ps,
+    store_extension s s' ->
+    lookup_N (s_tags s) n = Some ps ->
+    lookup_N (s_tags s') n = Some ps.
+Proof.
+  move => s s' n ps Hext Hlookup.
+  unfold store_extension in Hext.
+  move/andP in Hext; destruct Hext as [_ Htags].
+  destruct (component_extension_lookup Htags Hlookup) as [ps' [Hlookup' Heq]].
+  move/eqP in Heq; by subst ps'.
 Qed.
 
 Lemma store_extension_lookup_func: forall s s' n cl,

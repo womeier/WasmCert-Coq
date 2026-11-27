@@ -235,6 +235,91 @@ Proof.
     + by rewrite catA => /=.
 Qed.
 
+Lemma alloc_Xs_preserves {A B C: Type}
+    (f: store_record -> A -> store_record * B) (project: store_record -> C)
+    s xs s' ys :
+  (forall s x, project (fst (f s x)) = project s) ->
+  alloc_Xs f s xs = (s', ys) ->
+  project s' = project s.
+Proof.
+  move => Hf Halloc.
+  eapply alloc_Xs_IP with
+    (R := fun si se _ _ => project se = project si) in Halloc; eauto => //.
+  move => se si x xs' ys' sprev y Heq Hr.
+  specialize (Hf sprev x).
+  rewrite -Heq in Hf => /=.
+  by rewrite Hf Hr.
+Qed.
+
+Lemma alloc_funcs_tags s fs inst s' addrs :
+  alloc_funcs s fs inst = (s', addrs) -> s_tags s' = s_tags s.
+Proof.
+  unfold alloc_funcs; apply alloc_Xs_preserves.
+  by move => st x; unfold alloc_func, add_func.
+Qed.
+
+Lemma alloc_tabs_tags s ts s' addrs :
+  alloc_tabs s ts = (s', addrs) -> s_tags s' = s_tags s.
+Proof.
+  unfold alloc_tabs; apply alloc_Xs_preserves.
+  move => st [lim rt]; destruct lim; reflexivity.
+Qed.
+
+Lemma alloc_mems_tags s ms s' addrs :
+  alloc_mems s ms = (s', addrs) -> s_tags s' = s_tags s.
+Proof.
+  unfold alloc_mems; apply alloc_Xs_preserves.
+  move => st [lo hi]; reflexivity.
+Qed.
+
+Lemma alloc_globs_tags s gs vs s' addrs :
+  alloc_globs s gs vs = (s', addrs) -> s_tags s' = s_tags s.
+Proof.
+  unfold alloc_globs; apply alloc_Xs_preserves.
+  by move => st [g v]; unfold alloc_glob, add_glob.
+Qed.
+
+Lemma alloc_elems_tags s es vs s' addrs :
+  alloc_elems s es vs = (s', addrs) -> s_tags s' = s_tags s.
+Proof.
+  unfold alloc_elems; apply alloc_Xs_preserves.
+  by move => st [e rs]; unfold alloc_elem, add_elem.
+Qed.
+
+Lemma alloc_datas_tags s ds s' addrs :
+  alloc_datas s ds = (s', addrs) -> s_tags s' = s_tags s.
+Proof.
+  unfold alloc_datas; apply alloc_Xs_preserves.
+  by move => st d; unfold alloc_data, add_data.
+Qed.
+
+Lemma alloc_tags_iota_N types tags s s' addrs :
+  alloc_tags s types tags = (s', addrs) ->
+  addrs = iota_N (length s.(s_tags)) (length tags) /\
+  s'.(s_tags) = s.(s_tags) ++ map (gen_tag_instance types) tags /\
+  s.(s_funcs) = s'.(s_funcs) /\
+  s.(s_tables) = s'.(s_tables) /\
+  s.(s_mems) = s'.(s_mems) /\
+  s.(s_globals) = s'.(s_globals) /\
+  s.(s_elems) = s'.(s_elems) /\
+  s.(s_datas) = s'.(s_datas).
+Proof.
+  unfold alloc_tags; move => Halloc.
+  eapply alloc_Xs_IP with
+    (R := fun si se xs ys =>
+       ys = iota_N (length si.(s_tags)) (length xs) /\ _)
+    in Halloc; eauto => //=.
+  - unfold iota_N => /=; repeat split.
+    by rewrite cats0.
+  - move => se si x xs' ys' sprev y Heq [Hys [Htags [? [? [? [? [??]]]]]]].
+    repeat rewrite -> iota_N_iota_N in *.
+    unfold alloc_tag, upd_s_tags in Heq; injection Heq as ->; subst => /=.
+    rewrite List.length_app map_cat iota_N_extend Htags => /=.
+    repeat split => //=.
+    + by rewrite List.length_app List.length_map.
+    + by rewrite catA.
+Qed.
+
 Lemma alloc_table_iota_N modtables ws ws' l:
   alloc_tabs ws modtables = (ws', l) ->
   l = iota_N (length (s_tables ws)) (length modtables) /\
@@ -262,6 +347,47 @@ Proof.
     repeat split => //=.
     + by rewrite List.length_app List.length_map => /=.
     + by rewrite catA => /=.
+Qed.
+
+Lemma alloc_tags_lookup types tags s s' addrs n x ps :
+  alloc_tags s types tags = (s', addrs) ->
+  List.nth_error tags n = Some x ->
+  lookup_N types x = Some (Tf ps nil) ->
+  exists a, List.nth_error addrs n = Some a /\
+            lookup_N s'.(s_tags) a = Some ps.
+Proof.
+  move => Halloc Hnth Htype.
+  destruct (alloc_tags_iota_N Halloc) as [Haddrs [Htags _]].
+  exists (N.of_nat (length s.(s_tags) + n)); split.
+  - rewrite Haddrs; apply iota_N_lookup.
+    apply nth_error_Some_length in Hnth; by lias.
+  - rewrite Htags; unfold lookup_N; rewrite Nnat.Nat2N.id.
+    rewrite List.nth_error_app2; last by lias.
+    replace (length s.(s_tags) + n - length s.(s_tags))%coq_nat
+      with n by lias.
+    rewrite nth_error_map' Hnth => /=.
+    by unfold gen_tag_instance; rewrite Htype.
+Qed.
+
+Lemma alloc_module_tags_lookup s m imps gvs rvs s' inst n x ps :
+  alloc_module s m imps gvs rvs (s', inst) ->
+  List.nth_error m.(mod_tags) n = Some x ->
+  lookup_N m.(mod_types) x = Some (Tf ps nil) ->
+  exists a, List.nth_error inst.(inst_tags) n = Some a /\
+            lookup_N s'.(s_tags) a = Some ps.
+Proof.
+  unfold alloc_module.
+  destruct (alloc_funcs _ _ _) as [s1 ifs].
+  destruct (alloc_tabs _ _) as [s2 its].
+  destruct (alloc_mems _ _) as [s3 ims].
+  destruct (alloc_globs _ _) as [s4 igs].
+  destruct (alloc_elems _ _) as [s5 ies].
+  destruct (alloc_datas _ _) as [s6 ids].
+  destruct (alloc_tags _ _ _) as [s7 itags] eqn:Halloctags.
+  move => [Hstore [Htypes [Hfuncs [Htables [Hmems [Hglobals
+    [Helems [Hdatas [Hexports Htags]]]]]]]]] Hnth Htype.
+  subst s'; rewrite Htags.
+  by eapply alloc_tags_lookup; eauto.
 Qed.
 
 Lemma alloc_mem_iota_N modmems ws ws' l:

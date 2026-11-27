@@ -178,6 +178,7 @@ Definition empty_store_record : store_record := {|
     s_globals := nil;
     s_elems := nil;
     s_datas := nil;
+    s_tags := nil;
   |}.
 
 (* Provide a unit host state and convert the starting expression to administrative *)

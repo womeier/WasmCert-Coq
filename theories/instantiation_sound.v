@@ -84,7 +84,15 @@ Proof.
   destruct (alloc_mems _ _) as [s3 ims] eqn:Hallocmems.
   destruct (alloc_globs _ _) as [s4 igs] eqn:Hallocglobs.
   destruct (alloc_elems _ _) as [s5 ies] eqn:Hallocelems.
-  destruct (alloc_datas _ _) as [s6 ids] eqn:Hallocdatas.
+  destruct (alloc_datas _ _) as [s_data ids] eqn:Hallocdatas.
+  destruct (alloc_tags _ _ _) as [s6 itags] eqn:Halloctags.
+
+  pose proof (alloc_funcs_tags Hallocfuncs) as HT1.
+  pose proof (alloc_tabs_tags Halloctabs) as HT2.
+  pose proof (alloc_mems_tags Hallocmems) as HT3.
+  pose proof (alloc_globs_tags Hallocglobs) as HT4.
+  pose proof (alloc_elems_tags Hallocelems) as HT5.
+  pose proof (alloc_datas_tags Hallocdatas) as HT6.
 
   remove_bools_options.
 
@@ -94,12 +102,13 @@ Proof.
   apply alloc_global_iota_N in Hallocglobs; last by apply List.Forall2_length in Hinstglob.
   apply alloc_elem_iota_N in Hallocelems; last by apply List.Forall2_length in Hinstelem.
   apply alloc_data_iota_N in Hallocdatas.
+  apply alloc_tags_iota_N in Halloctags.
 
   (* Important to prove the goals first separately as there is some sort of dependency *)
   assert (store_extension s s') as Hstoreext.
   { 
     extract_premise.
-    destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
+    destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
     unfold store_extension => /=.
     erewrite component_extension_extend; eauto; last by apply all2_func_extension_same.
     erewrite component_extension_extend; eauto; last by apply all2_table_extension_same.
@@ -107,6 +116,8 @@ Proof.
     erewrite component_extension_extend; eauto; last by apply all2_global_extension_same.
     erewrite component_extension_extend; eauto; last by apply all2_elem_extension_same.
     erewrite component_extension_extend; eauto; last by apply all2_data_extension_same.
+    erewrite component_extension_extend; eauto.
+    move => l; apply reflexive_all2_same; move => x; by rewrite eq_refl.
   }
 
   destruct m; unfold module_typing in Hmodtype; simpl in *.
@@ -152,7 +163,7 @@ Proof.
         eapply Forall2_nth_impl' in Hmfunctype as [x [Hnthm Hmap]]; eauto.
         rewrite iota_N_lookup => /=; last by apply nth_error_Some_length in Hnthm; lias.
         unfold ext_func_typing.
-        destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
+        destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
         unfold lookup_N; rewrite Nnat.Nat2N.id.
         rewrite List.nth_error_app2; last by lias.
         rewrite nth_error_map' => /=.
@@ -183,7 +194,7 @@ Proof.
         unfold external_typing, ext_typing in Hexttype.
         remove_bools_options => /=.
         rewrite Hnthextv.
-        destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
+        destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
         unfold ext_table_typing in *; remove_bools_options; simpl in *.
         unfold lookup_N in *.
         by erewrite nth_error_app_Some; eauto.
@@ -199,7 +210,7 @@ Proof.
         eapply Forall2_nth_impl' in Hmtabletype as [x [Hnthm Hmap]]; eauto.
         rewrite iota_N_lookup => /=; last by apply nth_error_Some_length in Hnthm; lias.
         unfold ext_table_typing.
-        destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
+        destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
         unfold lookup_N; rewrite Nnat.Nat2N.id.
         rewrite List.nth_error_app2; last by lias.
         do 2 rewrite nth_error_map' => /=.
@@ -230,7 +241,7 @@ Proof.
         unfold external_typing, ext_typing in Hexttype.
         remove_bools_options => /=.
         rewrite Hnthextv.
-        destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
+        destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
         unfold ext_mem_typing in *; remove_bools_options; simpl in *.
         unfold lookup_N in *.
         by erewrite nth_error_app_Some; eauto.
@@ -246,7 +257,7 @@ Proof.
         eapply Forall2_nth_impl' in Hmmemtype as [x [Hnthm Hmap]]; eauto.
         rewrite iota_N_lookup => /=; last by apply nth_error_Some_length in Hnthm; lias.
         unfold ext_mem_typing.
-        destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
+        destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
         unfold lookup_N; rewrite Nnat.Nat2N.id.
         rewrite List.nth_error_app2; last by lias.
         do 2 rewrite nth_error_map' => /=.
@@ -277,7 +288,7 @@ Proof.
         unfold external_typing, ext_typing in Hexttype.
         remove_bools_options => /=.
         rewrite Hnthextv.
-        destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
+        destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
         unfold ext_global_typing in *; remove_bools_options; simpl in *.
         unfold lookup_N in *.
         by erewrite nth_error_app_Some; eauto.
@@ -293,7 +304,7 @@ Proof.
         eapply Forall2_nth_impl' in Hmglobaltype as [x [Hnthm Hmap]]; eauto.
         rewrite iota_N_lookup => /=; last by apply nth_error_Some_length in Hnthm; lias.
         unfold ext_global_typing.
-        destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
+        destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
         unfold lookup_N; rewrite Nnat.Nat2N.id.
         rewrite List.nth_error_app2; last by lias.
         rewrite nth_error_map' => /=.
@@ -324,7 +335,7 @@ Proof.
         rewrite nth_error_map'.
         eapply Forall2_nth_impl' in Hmelemtype as [x [Hnthm Hmap]]; eauto.
         rewrite iota_N_lookup => /=; last by apply nth_error_Some_length in Hnthm; lias.
-        replace (s_elems s6) with (s_elems s4 ++ map (fun '(elem, refs) => Build_eleminst (modelem_type elem) refs) (List.combine mod_elems r_inits)); last by destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
+        replace (s_elems s6) with (s_elems s4 ++ map (fun '(elem, refs) => Build_eleminst (modelem_type elem) refs) (List.combine mod_elems r_inits)); last by destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
         unfold lookup_N; rewrite Nnat.Nat2N.id.
         rewrite List.nth_error_app2; last by lias.
         rewrite nth_error_map' => /=.
@@ -343,7 +354,7 @@ Proof.
         eapply Forall_lookup in Hconstbet as [Hconst Hbet]; eauto.
         eapply init_value_typing; eauto.
         { move => m addr /= Hnth'.
-          destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
+          destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
           rewrite List.length_app List.length_map.
           apply cat_lookup in Hnth' as [Hnth' | Hnth'].
           - apply ext_funcs_lookup_exist in Hnth' as [k Hnthaddr].
@@ -358,7 +369,7 @@ Proof.
         }
         { move => gidx v gt /= Hsglob Hntht.
           unfold sglob_val, sglob, sglob_ind in Hsglob.
-          destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
+          destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
           remove_bools_options.
           eapply import_subtyping_globs_impl' in Hsubtype as [gt' [Hnthsub Hsub]]; eauto.
           unfold import_global_subtyping in Hsub; remove_bools_options; subst.
@@ -396,7 +407,7 @@ Proof.
         rewrite nth_error_map'.
         eapply Forall2_nth_impl' in Hmdatatype as [x [Hnthm Hmap]]; eauto.
         rewrite iota_N_lookup => /=; last by apply nth_error_Some_length in Hnthm; lias.
-        replace (s_datas s6) with (s_datas s5 ++ map (fun md => Build_datainst (moddata_init md)) mod_datas); last (destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst).
+        replace (s_datas s6) with (s_datas s5 ++ map (fun md => Build_datainst (moddata_init md)) mod_datas); last by destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
         unfold lookup_N; rewrite Nnat.Nat2N.id.
         rewrite List.nth_error_app2; last by lias.
         rewrite nth_error_map' => /=.
@@ -415,7 +426,7 @@ Proof.
   assert (store_typing s') as HST'.
   {
     extract_premise.
-    destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
+    destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
     destruct HST as [Hsfunctype [Hstabletype [Hsmemtype [Hsglobaltype [Hselemtype Hsdatatype]]]]].
     repeat split => //.
     (* Functions *)

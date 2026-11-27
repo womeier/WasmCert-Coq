@@ -792,6 +792,7 @@ Definition cl_type (cl : funcinst) : function_type :=
 
 Definition upd_s_func (s : store_record) (fs: list funcinst) : store_record :=
   {|
+    s_tags := s.(s_tags);
     s_funcs := fs;
     s_tables := s.(s_tables);
     s_mems := s.(s_mems);
@@ -802,6 +803,7 @@ Definition upd_s_func (s : store_record) (fs: list funcinst) : store_record :=
 
 Definition upd_s_table (s : store_record) (ts: list tableinst) : store_record :=
   {|
+    s_tags := s.(s_tags);
     s_funcs := s.(s_funcs);
     s_tables := ts;
     s_mems := s.(s_mems);
@@ -812,6 +814,7 @@ Definition upd_s_table (s : store_record) (ts: list tableinst) : store_record :=
 
 Definition upd_s_mem (s : store_record) (ms : list meminst) : store_record :=
   {|
+    s_tags := s.(s_tags);
     s_funcs := s.(s_funcs);
     s_tables := s.(s_tables);
     s_mems := ms;
@@ -822,6 +825,7 @@ Definition upd_s_mem (s : store_record) (ms : list meminst) : store_record :=
 
 Definition upd_s_global (s : store_record) (gs : list globalinst) : store_record :=
   {|
+    s_tags := s.(s_tags);
     s_funcs := s.(s_funcs);
     s_tables := s.(s_tables);
     s_mems := s.(s_mems);
@@ -832,6 +836,7 @@ Definition upd_s_global (s : store_record) (gs : list globalinst) : store_record
 
 Definition upd_s_elem (s : store_record) (es : list eleminst) : store_record :=
   {|
+    s_tags := s.(s_tags);
     s_funcs := s.(s_funcs);
     s_tables := s.(s_tables);
     s_mems := s.(s_mems);
@@ -842,6 +847,7 @@ Definition upd_s_elem (s : store_record) (es : list eleminst) : store_record :=
 
 Definition upd_s_data (s : store_record) (ds : list datainst) : store_record :=
   {|
+    s_tags := s.(s_tags);
     s_funcs := s.(s_funcs);
     s_tables := s.(s_tables);
     s_mems := s.(s_mems);
@@ -849,6 +855,15 @@ Definition upd_s_data (s : store_record) (ds : list datainst) : store_record :=
     s_elems := s.(s_elems);
     s_datas := ds;
   |}.
+
+Definition upd_s_tags (s : store_record) (tags : list result_type) : store_record :=
+  {| s_funcs := s.(s_funcs);
+     s_tables := s.(s_tables);
+     s_mems := s.(s_mems);
+     s_globals := s.(s_globals);
+     s_elems := s.(s_elems);
+     s_datas := s.(s_datas);
+     s_tags := tags |}.
 
 Definition iota_N (offset: nat) (len: nat) : list N :=
   map N.of_nat (iota offset len).
@@ -918,7 +933,7 @@ Definition stab_update (s: store_record) (inst: moduleinst) (x: tableidx) (i: el
             let: tab' := {| tableinst_type := tab.(tableinst_type);
                            tableinst_elem := set_nth tabv tab.(tableinst_elem) (N.to_nat i) tabv |} in
             let: tabs' := set_nth tab' s.(s_tables) (N.to_nat tabaddr) tab' in
-            Some (Build_store_record (s_funcs s) tabs' (s_mems s) (s_globals s) (s_elems s) (s_datas s))
+            Some (Build_store_record (s_funcs s) tabs' (s_mems s) (s_globals s) (s_elems s) (s_datas s) (s_tags s))
           else None
       | None => None
       end
@@ -1106,7 +1121,7 @@ Definition stab_grow (s: store_record) (inst: moduleinst) (x: tableidx) (n: N) (
           match growtable tab n tabinit with
           | Some tab' => 
               let tabs' := (set_nth tab' s.(s_tables) (N.to_nat tabaddr) tab') in
-              Some ((Build_store_record (s_funcs s) tabs' (s_mems s) (s_globals s) (s_elems s) (s_datas s)), tab_size tab)
+              Some ((Build_store_record (s_funcs s) tabs' (s_mems s) (s_globals s) (s_elems s) (s_datas s) (s_tags s)), tab_size tab)
           | None => None
           end
       | None => None
@@ -1130,7 +1145,7 @@ Definition selem_drop (s: store_record) (inst: moduleinst) (x: elemidx) : option
       | Some elem =>
           let empty_elem := {| eleminst_type := elem.(eleminst_type); eleminst_elem := [::] |} in
           let: elems' := set_nth empty_elem s.(s_elems) (N.to_nat eaddr) empty_elem in
-          Some (Build_store_record (s_funcs s) (s_tables s) (s_mems s) (s_globals s) elems' (s_datas s))
+          Some (Build_store_record (s_funcs s) (s_tables s) (s_mems s) (s_globals s) elems' (s_datas s) (s_tags s))
       | None => None
       end
   | None => None
@@ -1152,7 +1167,7 @@ Definition sdata_drop (s: store_record) (inst: moduleinst) (x: dataidx) : option
       | Some data =>
           let empty_data := {| datainst_data := [::] |} in
           let: datas' := set_nth empty_data s.(s_datas) (N.to_nat daddr) empty_data in
-          Some (Build_store_record (s_funcs s) (s_tables s) (s_mems s) (s_globals s) (s_elems s) datas')
+          Some (Build_store_record (s_funcs s) (s_tables s) (s_mems s) (s_globals s) (s_elems s) datas' (s_tags s))
       | None => None
       end
   | None => None
@@ -1163,7 +1178,7 @@ Definition supdate_glob_s (s : store_record) (k : globaladdr) (v : value) : opti
     (fun g =>
       let: g' := Build_globalinst (g_type g) v in
       let: gs' := set_nth g' (s_globals s) (N.to_nat k) g' in
-      Build_store_record (s_funcs s) (s_tables s) (s_mems s) gs' (s_elems s) (s_datas s))
+      Build_store_record (s_funcs s) (s_tables s) (s_mems s) gs' (s_elems s) (s_datas s) (s_tags s))
     (lookup_N (s_globals s) k).
 
 Definition supdate_glob (s : store_record) (i : moduleinst) (j : globalidx) (v : value) : option store_record :=
@@ -1233,7 +1248,8 @@ Definition store_extension (s s' : store_record) : bool :=
   component_extension mem_extension s.(s_mems) s'.(s_mems) &&
   component_extension global_extension s.(s_globals) s'.(s_globals) &&
   component_extension elem_extension s.(s_elems) s'.(s_elems) &&
-  component_extension data_extension s.(s_datas) s'.(s_datas).
+  component_extension data_extension s.(s_datas) s'.(s_datas) &&
+  component_extension (fun ps ps' => ps == ps') s.(s_tags) s'.(s_tags).
 
 Definition to_e_list (bes : list basic_instruction) : seq administrative_instruction :=
   map AI_basic bes.
