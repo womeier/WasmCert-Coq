@@ -173,3 +173,38 @@ check(b"\x41\x00\x2d" + arg, 42, imports=(provider_memory,))
 active_oob = b"\x02\x00\x41\x00\x0b\x01\x2a"
 fixture = module(b"\x41\x00", memories=(0, 1), data=(active_oob,))
 print(f'(assert_trap (module binary {escaped(fixture)}) "out of bounds memory access")')
+
+# Every scalar-free SIMD load shape selects memory 1, including extending,
+# splatting and zeroing loads. Memory 0 is empty, so misselection traps.
+for opcode in (*range(11), 0x5C, 0x5D):
+    check(
+        b"\x41\x00\xfd" + uleb(opcode) + arg1 + b"\xfd\x16\x00",
+        42, memories=(0, 1), data=(active,),
+    )
+for load_opcode, store_opcode in zip(range(0x54, 0x58), range(0x58, 0x5C)):
+    check(
+        b"\x41\x00\xfd\x0c" + bytes(16)
+        + b"\xfd" + uleb(load_opcode) + arg1 + b"\x00\xfd\x16\x00",
+        42, memories=(0, 1), data=(active,),
+    )
+    check(
+        b"\x41\x00\xfd\x0c" + bytes([42] * 16)
+        + b"\xfd" + uleb(store_opcode) + arg1 + b"\x00"
+        + b"\x41\x00\x2d" + arg1,
+        42, memories=(0, 1),
+    )
+
+# Bounds must use the selected source and destination, not one shared length.
+for memories in ((0, 1), (1, 0)):
+    fixture = module(
+        b"\x41\x00\x41\x00\x41\x01\xfc\x0a\x01\x00\x41\x00",
+        memories=memories,
+    )
+    print(f"(module binary {escaped(fixture)})")
+    print('(assert_trap (invoke "run") "out of bounds memory access")')
+
+# Growing one imported alias is visible through the other, not the definition.
+check(
+    b"\x41\x01\x40\x00\x1a\x3f\x01\x3f\x02\x6a", 3,
+    imports=(spectest_memory, spectest_memory),
+)
