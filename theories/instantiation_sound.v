@@ -36,7 +36,7 @@ Proof.
   repeat rewrite length_is_size in Hglen.
   repeat (apply/andP; split) => //; rewrite all2_cat => //; (apply/andP; split; last by apply reflexive_all2_same; move => ?; apply/eqP); apply all2_spec => //; move => n t1 t2 Hnth1 Hnth2.
   { eapply Forall2_lookup in Hfsub as [t [Hnth Hsub]]; eauto.
-    by unfold import_func_subtyping in Hsub; remove_bools_options; simplify_multieq; subst; apply/eqP.
+    by apply import_func_subtyping_eq in Hsub; simplify_multieq; subst; apply/eqP.
   }
   { eapply Forall2_lookup in Htsub as [t [Hnth Hsub]]; eauto.
     by unfold import_table_subtyping in Hsub; remove_bools_options; simplify_multieq; subst; apply/eqP.
@@ -441,7 +441,8 @@ Proof.
         unfold module_func_typing in Hmftype; destruct mf, tf; simpl in *.
         destruct Hmftype as [Hnthmf [Hbet Hdefaultable]].
         unfold gen_func_instance => /=.
-        rewrite Hnthmf; split => //.
+        rewrite Hnthmf; split.
+        { exact (Forall_lookup Hmtypes Hnthmf). }
         rewrite HIT /= Hconjl1 Hnthmf Hfunclen; repeat split => //=.
         unfold upd_local_label_return in *; simpl in *.
         eapply bet_import_subtyping; eauto.

@@ -22,6 +22,13 @@ Section Operations.
 Definition lookup_N {T: Type} (l: list T) (n: N) : option T :=
   List.nth_error l (N.to_nat n).
 
+Definition resolve_defined_type (C : type_context) (i : typeidx)
+    : option defined_type :=
+  match lookup_N C i with
+  | Some ft => close_defined_type ft
+  | None => None
+  end.
+
 Definition empty_t_context := Build_t_context nil nil nil nil nil nil nil nil nil None nil.
 
 (** read `len` bytes from `m` starting at `start_idx` *)
@@ -790,6 +797,9 @@ Definition cl_type (cl : funcinst) : function_type :=
   | FC_func_native tf _ _ => tf
   | FC_func_host tf _ => tf
   end.
+
+Definition funcinst_defined_type (cl : funcinst) : option defined_type :=
+  close_defined_type (cl_type cl).
 
 Definition upd_s_func (s : store_record) (fs: list funcinst) : store_record :=
   {|

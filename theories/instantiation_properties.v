@@ -608,6 +608,18 @@ Proof.
   destruct a, e; simpl in H2; remove_bools_options => //=; repeat split; try by f_equal.
 Qed.
 
+Lemma import_func_subtyping_eq t1 t2 :
+  import_func_subtyping t1 t2 -> t1 = t2.
+Proof.
+  unfold import_func_subtyping.
+  destruct (close_defined_type t1) as [d1|] eqn:E1;
+    destruct (close_defined_type t2) as [d2|] eqn:E2; try discriminate.
+  move => H.
+  apply defined_type_match_bidir in H. subst d2.
+  apply close_defined_type_expands in E1, E2.
+  by congruence.
+Qed.
+
 Lemma import_subtyping_comp_len t_imps1 t_imps2:
   List.Forall2 import_subtyping t_imps1 t_imps2->
   (length (ext_t_funcs t_imps1) = length (ext_t_funcs t_imps2) /\

@@ -24,6 +24,13 @@ Definition ext_func_typing (s: store_record) (addr: funcaddr) : option function_
   | None => None
   end.
 
+Definition ext_func_defined_type (s : store_record) (addr : funcaddr)
+    : option defined_type :=
+  match lookup_N s.(s_funcs) addr with
+  | Some cl => funcinst_defined_type cl
+  | None => None
+  end.
+
 Definition ext_table_typing (s: store_record) (addr: tableaddr) : option table_type :=
   match lookup_N s.(s_tables) addr with
   | Some x => Some (tableinst_type x)

@@ -1,4 +1,5 @@
-From Wasm Require Import datatypes operations typing function_references.
+From Wasm Require Import datatypes operations typing function_references
+                         instantiation_func.
 From Stdlib Require Import List NArith.
 Import ListNotations FunctionReferences.
 
@@ -128,3 +129,59 @@ Lemma core_null_principal_heap s h :
 Proof. reflexivity. Qed.
 
 End Runtime.
+
+Definition closed_i32_function : defined_type :=
+  Def_func (@Closed_function_type (Tf [] [T_num T_i32]) eq_refl).
+
+Definition closed_i64_function : defined_type :=
+  Def_func (@Closed_function_type (Tf [] [T_num T_i64]) eq_refl).
+
+Example closed_function_expansion :
+  expand_function_type closed_i32_function = Some (Tf [] [T_num T_i32]).
+Proof. reflexivity. Qed.
+
+Example closed_function_matching :
+  defined_type_match closed_i32_function closed_i32_function = true.
+Proof. vm_compute. reflexivity. Qed.
+
+Example different_closed_function_results :
+  defined_type_match closed_i32_function closed_i64_function = false.
+Proof. vm_compute. reflexivity. Qed.
+
+Example closing_without_an_environment_rejects_a_free_index :
+  close_defined_type (Tf [T_ref (Ref_type true (HT_type 0%N))] []) = None.
+Proof. reflexivity. Qed.
+
+Example resolving_flat_defined_type :
+  match resolve_defined_type [Tf [] [T_num T_i32]] 0%N with
+  | Some dt => expand_function_type dt = Some (Tf [] [T_num T_i32])
+  | None => False
+  end.
+Proof. reflexivity. Qed.
+
+Section HostMetadata.
+Context `{ho : host}.
+Variable hf : host_function.
+
+Definition metadata_store (ft : function_type) : store_record :=
+  Build_store_record [FC_func_host ft hf] [] [] [] [] [].
+
+Example closed_host_import_type :
+  external_type_checker (metadata_store (Tf [] [T_num T_i32])) (EV_func 0%N) =
+    Some (ET_func (Tf [] [T_num T_i32])).
+Proof. reflexivity. Qed.
+
+Example free_host_type_index_rejected :
+  external_type_checker
+    (metadata_store (Tf [T_ref (Ref_type true (HT_type 0%N))] []))
+    (EV_func 0%N) = None.
+Proof. reflexivity. Qed.
+
+Example closed_runtime_function_identity :
+  match ext_func_defined_type (metadata_store (Tf [] [T_num T_i32])) 0%N with
+  | Some dt => expand_function_type dt = Some (Tf [] [T_num T_i32])
+  | None => False
+  end.
+Proof. reflexivity. Qed.
+
+End HostMetadata.

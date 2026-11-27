@@ -182,6 +182,40 @@ Inductive function_type := (* tf *)
 | Tf : result_type -> result_type -> function_type
 .
 
+(* The supported closed-definition profile is flat function declarations.
+   In particular, no module-local HT_type may escape as a runtime identity.
+   Recursive groups must extend this layer, rather than certify a free index
+   by comparing it with the same numeric index in another module. *)
+Definition heap_type_closed (h : heap_type) : bool :=
+  match h with HT_type _ => false | _ => true end.
+
+Definition value_type_closed (t : value_type) : bool :=
+  match t with T_ref r => heap_type_closed (ref_heap r) | _ => true end.
+
+Definition function_type_closed (ft : function_type) : bool :=
+  let '(Tf args results) := ft in
+  List.forallb value_type_closed args && List.forallb value_type_closed results.
+
+Record closed_function_type := Closed_function_type {
+  closed_function_body : function_type;
+  closed_function_certificate : function_type_closed closed_function_body = true
+}.
+
+Inductive defined_type :=
+| Def_func : closed_function_type -> defined_type.
+
+Definition expand_function_type (dt : defined_type) : option function_type :=
+  match dt with Def_func ft => Some (closed_function_body ft) end.
+
+Definition close_function_type (ft : function_type) : option closed_function_type :=
+  match Bool.bool_dec (function_type_closed ft) true with
+  | left H => Some (@Closed_function_type ft H)
+  | right _ => None
+  end.
+
+Definition close_defined_type (ft : function_type) : option defined_type :=
+  option_map Def_func (close_function_type ft).
+
 (* Source type declarations currently contain function signatures only.
    GC must extend this declaration layer with recursive subtype groups.
    An inst_types entry is not a globally allocated runtime identity. *)
@@ -284,7 +318,7 @@ Most types are universally valid. However, restrictions apply to limits, which m
 **)
 
 Definition functype_valid (ft: function_type) : bool :=
-  true.
+  function_type_closed ft.
 
 Definition table_limit_bound : N := (N.sub u32_bound 1%N).
 

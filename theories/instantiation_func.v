@@ -195,7 +195,8 @@ Definition module_type_checker (m : module) : option ((list extern_type) * (list
       tc_return := None;
       tc_refs := c.(tc_refs)
     |} in
-    if seq.all (module_func_type_checker c) fs &&
+    if seq.all functype_valid tfs &&
+       seq.all (module_func_type_checker c) fs &&
        seq.all (module_table_type_checker c) ts &&
        seq.all (module_mem_type_checker c) ms &&
        wasm_2_memory_count_check ms ims &&  
@@ -216,7 +217,14 @@ Definition module_type_checker (m : module) : option ((list extern_type) * (list
   end.
 
 Definition external_type_checker (s : store_record) (v : extern_value): option extern_type :=
-  ext_typing s v.
+  match v with
+  | EV_func a =>
+      match ext_func_defined_type s a with
+      | Some dt => option_map ET_func (expand_function_type dt)
+      | None => None
+      end
+  | _ => ext_typing s v
+  end.
 
 (* Auxiliary definition for evaluating constant expressios, instead of using the full interpreter. *)
 Definition interp_get_const (s : store_record) (f : frame) (b_es : list basic_instruction) : option value :=

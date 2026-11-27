@@ -24,7 +24,7 @@ Proof.
                                                                                destruct (module_imports_typer mod_types mod_imports) as [impts | ] eqn:Hmitypes => //.
   destruct (gather_m_e_types (ext_t_tables impts ++ map modtab_type mod_tables) mod_elems) as [ets | ] eqn:Hmetypes => //.
   destruct (gather_m_d_types (ext_t_mems impts ++ map modmem_type mod_mems) mod_datas) as [dts | ] eqn:Hmdtypes => //.
-  destruct (all _ _ && _ && _ && _ && _ && _ && _ && _ && _) eqn:Hallcond => //.
+  destruct (all _ _ && _ && _ && _ && _ && _ && _ && _ && _ && _) eqn:Hallcond => //.
   destruct (module_exports_typer _ mod_exports) eqn:Hmexptypes => //.
   move/andP in Hallcond; destruct Hallcond as [Hallcond Hnameunique].
   move/andP in Hallcond; destruct Hallcond as [Hallcond Hstartcheck].
@@ -34,6 +34,7 @@ Proof.
   move/andP in Hallcond; destruct Hallcond as [Hallcond Hmemcountcheck].
   move/andP in Hallcond; destruct Hallcond as [Hallcond Hmemcheck].
   move/andP in Hallcond; destruct Hallcond as [Hfunccheck Htablecheck].
+  move/andP in Hfunccheck; destruct Hfunccheck as [Htypescheck Hfunccheck].
   unfold module_typing.
   injection Hmodcheck as ->->.
   
@@ -41,7 +42,7 @@ Proof.
   repeat split => //.
 
   (* types *)
-  { by apply Forall_spec => //. }
+  { by apply Forall_all. }
   
   (* funcs *)
   { clear - Hfunccheck Hmftypes hfc.
@@ -178,8 +179,13 @@ Lemma external_type_checker_sound: forall s ext t,
   external_typing s ext t.
 Proof.
   move => s ext t Hextcheck.
-  unfold external_type_checker in Hextcheck; move/eqP in Hextcheck.
-  by destruct ext; destruct t => //; remove_bools_options; subst.
+  destruct ext as [a|a|a|a]; simpl in Hextcheck; try exact Hextcheck.
+  unfold ext_func_defined_type, funcinst_defined_type in Hextcheck.
+  destruct (lookup_N (s_funcs s) a) as [cl|] eqn:Hlookup; try discriminate.
+  destruct (close_defined_type (cl_type cl)) as [dt|] eqn:Hclose; try discriminate.
+  rewrite (close_defined_type_expands Hclose) in Hextcheck.
+  inversion Hextcheck; subst.
+  by unfold external_typing, ext_typing, ext_func_typing; rewrite Hlookup.
 Qed.
 
 Lemma interp_alloc_sound: forall s m v_imps g_inits r_inits s' inst,

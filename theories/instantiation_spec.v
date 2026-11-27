@@ -600,7 +600,10 @@ Definition limits_subtyping (l1 l2: limits) : bool :=
     end.
 
 Definition import_func_subtyping (t1 t2: function_type) : bool :=
-  t1 == t2.
+  match close_defined_type t1, close_defined_type t2 with
+  | Some d1, Some d2 => defined_type_match d1 d2 && defined_type_match d2 d1
+  | _, _ => false
+  end.
 
 Definition import_table_subtyping (t1 t2: table_type) : bool :=
   (t1.(tt_elem_type) == t2.(tt_elem_type)) &&
