@@ -188,6 +188,40 @@ let load_wast_module verbosity hs s ovar moddef mod_counter =
   | _ -> error "Exception raised in loading module"
   end
 
+(* Assertion stages are distinct: an invalid module must decode successfully,
+   and a malformed module must fail decoding, not merely fail instantiation.
+   Do not turn unexpected runtime exceptions into successful assertions. *)
+let decode_wast_module verbosity moddef =
+  try
+    match moddef.it with
+    | Textual ast_module ->
+      Parse.parse_module verbosity false (Wasm.Encode.encode ast_module)
+    | Encoded (_, bytes) -> Parse.parse_module verbosity false bytes
+    | Quoted (_, text) -> Parse.parse_module verbosity true text
+  with Wasm.Parse_error.Syntax (_, msg) -> error ("Text syntax error: " ^ msg)
+
+let valid_wast_module m =
+  match Extract.module_type_checker m with
+  | (Some (impts, _), _) -> pure impts
+  | (None, msg) -> error ("Unexpected validation failure: " ^ msg)
+
+let wast_imports_linkable hs s m impts =
+  let (exports, _) = hs in
+  let imports = List.map (fun (name, item) ->
+    match StringMap.find_opt name exports with
+    | None -> None
+    | Some values -> StringMap.find_opt item values
+  ) (get_import_path m) in
+  List.length imports = List.length impts &&
+  List.for_all2 (fun ext expected ->
+    match ext with
+    | None -> false
+    | Some v ->
+      match Extract.external_type_checker Host.hfc Extract.memory_instance s v with
+      | None -> false
+      | Some actual -> Extract.import_subtyping actual expected
+  ) imports impts
+
 let print_wast_command cmd = 
   let cmd_sexpr = Wasm.Arrange.script `Textual [cmd] in
   let cmd_string = String.concat "" (List.map (Wasm.Sexpr.to_string 200) cmd_sexpr) in
@@ -313,41 +347,40 @@ let run_wast_command verbosity max_call_depth cmd hs s mod_counter default_modul
         error "Unsupported wast action: Get"
       end
     | AssertInvalid (moddef, _str) ->
-      (* very ugly... *)
-      let res = (load_wast_module verbosity hs s None moddef mod_counter) in
-      begin match to_out res with
-      (* AssertInvalid shouldn't enter execution stage, so any OK result is counted as a failure *)
-      | OK _ -> 
-        error "Unexpected successful instantiation of an invalid module"
-      (* Trap still needs to update the store*)
-      | Error _ -> 
+      let* m = decode_wast_module verbosity moddef in
+      begin match Extract.module_type_checker m with
+      | (Some _, _) ->
+        error "Unexpected successful validation of an invalid module"
+      | (None, _) ->
         debug_info verbosity stage (fun _ -> "Test passed: correctly rejected an invalid module\n");
         pure (hs, s, mod_counter, default_module_name, Verdict_OK)
       end
-    (* The following three assertiosn are grouped into one *)
-    | AssertMalformed (moddef, _str)
-    | AssertUnlinkable (moddef, _str)
-    | AssertUninstantiable (moddef, _str) ->
-      let res = (load_wast_module verbosity hs s None moddef mod_counter) in
-      begin match to_out res with
-      | OK _ ->
-        (* This is really stupid. Is there a better way to match on host_event? *)
-        let* res_result = res in 
-        begin match res_result with
-        (* Only an OK with Cfg_res represents a successful instantiation *)
-        | (_, _, Cfg_res _, _, _) -> 
-          error "Unexpected successful instantiation of a malformed module"
-        (* OK with a trap is a failure which passes the test, but the store needs to be updated *)
-        | (_, _, Cfg_trap (s', _), _, _) -> 
-          debug_info verbosity stage (fun _ -> "Test passed: post-instantiation initialisation trapped, leading to instantiation failure correctly\n");
-          pure (hs, s', mod_counter, default_module_name, Verdict_OK)
-        | _ ->
-          error "Unexpected post-instantiation initialisation error"
-        end
-      | _ -> 
-        debug_info verbosity stage (fun _ -> "Test passed: correctly rejected a malformed/unlinkable/uninstantiable module\n");
+    | AssertMalformed (moddef, _str) ->
+      begin match to_out (decode_wast_module verbosity moddef) with
+      | OK _ -> error "Unexpected successful decoding of a malformed module"
+      | Error _ ->
+        debug_info verbosity stage (fun _ -> "Test passed: correctly rejected a malformed module\n");
         pure (hs, s, mod_counter, default_module_name, Verdict_OK)
       end
+    | AssertUnlinkable (moddef, _str) ->
+      let* m = decode_wast_module verbosity moddef in
+      let* impts = valid_wast_module m in
+      if wast_imports_linkable hs s m impts then
+        error "Unexpected successful linking of an unlinkable module"
+      else
+        pure (hs, s, mod_counter, default_module_name, Verdict_OK)
+    | AssertUninstantiable (moddef, _str) ->
+      let* m = decode_wast_module verbosity moddef in
+      let* impts = valid_wast_module m in
+      if not (wast_imports_linkable hs s m impts) then
+        error "Unexpected linking failure of an uninstantiable module"
+      else
+        let* res = load_wast_module verbosity hs s None moddef mod_counter in
+        begin match res with
+        | (_, _, Cfg_trap (s', _), _, _) ->
+          pure (hs, s', mod_counter, default_module_name, Verdict_OK)
+        | _ -> error "Expected an instantiation trap"
+        end
     end
   | Register (newname_utf8, ovar) ->
     let newname = wasm_name_to_raw_string newname_utf8 in

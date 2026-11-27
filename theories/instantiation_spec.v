@@ -291,12 +291,20 @@ Definition module_table_typing (c: t_context) (t : module_table) (tabt: table_ty
 Definition module_mem_typing (c: t_context) (m : module_mem) (mt: memory_type) : bool :=
   memtype_valid m.(modmem_type) && (m.(modmem_type) == mt).
 
+Definition const_binop (t : number_type) (op : binop) : bool :=
+  match t, op with
+  | T_i32, Binop_i BOI_add | T_i32, Binop_i BOI_sub | T_i32, Binop_i BOI_mul
+  | T_i64, Binop_i BOI_add | T_i64, Binop_i BOI_sub | T_i64, Binop_i BOI_mul => true
+  | _, _ => false
+  end.
+
 Definition const_expr (c : t_context) (b_e : basic_instruction) : bool :=
   match b_e with
   | BI_const_num _ => true
   | BI_const_vec _ => true
   | BI_ref_null _ => true
   | BI_ref_func _ => true
+  | BI_binop t op => const_binop t op
   | BI_global_get k =>
       match lookup_N c.(tc_globals) k with
       | None => false
@@ -308,21 +316,8 @@ Definition const_expr (c : t_context) (b_e : basic_instruction) : bool :=
 Definition const_exprs (c : t_context) (es : list basic_instruction) : bool :=
   seq.all (const_expr c) es.
 
-(* Wasm 3.0 extended-const whitelist.  The module-level switch to this
-   fragment also requires replacing the singleton-initializer characterization
-   in instantiation_properties. *)
-Definition const_binop (t : number_type) (op : binop) : bool :=
-  match t, op with
-  | T_i32, Binop_i BOI_add | T_i32, Binop_i BOI_sub | T_i32, Binop_i BOI_mul
-  | T_i64, Binop_i BOI_add | T_i64, Binop_i BOI_sub | T_i64, Binop_i BOI_mul => true
-  | _, _ => false
-  end.
-
 Definition extended_const_expr (c : t_context) (e : basic_instruction) : bool :=
-  match e with
-  | BI_binop t op => const_binop t op
-  | _ => const_expr c e
-  end.
+  const_expr c e.
 
 Definition extended_const_exprs (c : t_context) (es : list basic_instruction) : bool :=
   seq.all (extended_const_expr c) es.

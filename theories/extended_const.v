@@ -1,7 +1,7 @@
 (** Correctness of the terminating extended-constant evaluator. *)
 From mathcomp Require Import ssreflect ssrbool ssrnat eqtype seq.
-From Wasm Require Import instantiation_func type_checker_reflects_typing.
-From Stdlib Require Import Relations Relation_Operators.
+From Wasm Require Import instantiation_func type_checker_reflects_typing type_preservation.
+From Stdlib Require Import Relations Relation_Operators NArith.
 
 Set SsrOldRewriteGoalsOrder.
 
@@ -15,6 +15,147 @@ Lemma const_binop_total t op v1 v2 :
 Proof.
   destruct t, op as [op|op]; destruct op => //;
     destruct v1, v2 => //=; eauto.
+Qed.
+
+(* This syntactic invariant deliberately includes all binary numeric operations
+   and traps: preservation does not require totality, and a failed numeric
+   operation still preserves typing.  Control and state-changing instructions
+   are excluded. *)
+Definition const_admin (e : administrative_instruction) : bool :=
+  match e with
+  | AI_basic (BI_const_num _) | AI_basic (BI_const_vec _)
+  | AI_basic (BI_ref_null _) | AI_basic (BI_ref_func _)
+  | AI_basic (BI_global_get _) | AI_basic (BI_binop _ _)
+  | AI_ref _ | AI_ref_extern _ | AI_trap => true
+  | _ => false
+  end.
+
+Lemma const_admin_values vs : all const_admin (v_to_e_list vs).
+Proof.
+  apply/allP => e.
+  rewrite /v_to_e_list => /mapP [v _ ->].
+  by destruct v as [v|v|v]; destruct v.
+Qed.
+
+Lemma const_admin_preservation hs s f es hs' s' f' es' :
+  reduce hs s f es hs' s' f' es' ->
+  forall C tf,
+  all const_admin es ->
+  e_typing s C es tf ->
+  (forall n addr, List.nth_error f.(f_inst).(inst_funcs) n = Some addr ->
+     (addr < N.of_nat (length s.(s_funcs)))%N) ->
+  (forall gidx v gt, sglob_val s f.(f_inst) gidx = Some v ->
+     lookup_N C.(tc_globals) gidx = Some gt ->
+     value_typing s v gt.(tg_t)) ->
+  hs' = hs /\ s' = s /\ f' = f /\
+  all const_admin es' /\ e_typing s C es' tf.
+Proof.
+  move => Hred.
+  induction Hred; move => C tf Hcode Htype Hfunc Hglob;
+    subst; try (by repeat rewrite all_cat in Hcode; simpl in Hcode;
+                   rewrite ?andbF ?andFb in Hcode).
+  - (* simple *)
+    repeat split => //; last by eapply t_simple_preservation; eauto.
+    inversion H; subst; simpl in Hcode;
+      try (by repeat rewrite all_cat in Hcode; simpl in Hcode;
+                   rewrite ?andbF ?andFb in Hcode).
+  - (* ref.func *)
+    repeat split => //.
+    destruct tf as [tx ty].
+    invert_e_typing.
+    assert (exists cl, lookup_N (s_funcs s) addr = Some cl) as [cl Hcl].
+    { unfold lookup_N in *.
+      destruct (List.nth_error (s_funcs s) (N.to_nat addr)) as [cl|] eqn:Hcl.
+      - by eexists.
+      - apply List.nth_error_None in Hcl.
+        apply Hfunc in H.
+        exfalso; lias.
+    }
+    eapply ety_subtyping; last eauto.
+    eapply ety_ref.
+    by unfold ext_func_typing; rewrite Hcl.
+  - (* global.get *)
+    repeat split => //.
+    + exact: (const_admin_values [::v]).
+    + destruct tf as [tx ty].
+      invert_e_typing.
+      eapply et_value_typing'; eauto.
+  - (* evaluation context: nonzero-depth contexts contain a label, which
+       cannot occur in this fragment. *)
+    destruct lh as [vs tail|k vs n body lh tail].
+    + simpl in *.
+      rewrite !all_cat in Hcode.
+      move/andP: Hcode => [Hvs /andP [Hes Htail]].
+      destruct tf as [tx ty].
+      invert_e_typing.
+      specialize (IHHred _ _ Hes H1_comp0 Hfunc Hglob)
+        as [-> [-> [-> [Hes' Htype']]]].
+      repeat split => //.
+      * by rewrite !all_cat Hvs Hes' Htail.
+      * eapply et_composition'; first by eapply et_values_typing'; eauto.
+        by eapply et_composition'; eauto.
+    + simpl in Hcode.
+      rewrite all_cat /= andbF in Hcode.
+      done.
+Qed.
+
+Lemma const_admin_trans_preservation x y :
+  reduce_trans x y ->
+  let '(hs, s, f, es) := x in
+  let '(hs', s', f', es') := y in
+  forall C tf,
+  all const_admin es ->
+  e_typing s C es tf ->
+  (forall n addr, List.nth_error f.(f_inst).(inst_funcs) n = Some addr ->
+     (addr < N.of_nat (length s.(s_funcs)))%N) ->
+  (forall gidx v gt, sglob_val s f.(f_inst) gidx = Some v ->
+     lookup_N C.(tc_globals) gidx = Some gt ->
+     value_typing s v gt.(tg_t)) ->
+  hs' = hs /\ s' = s /\ f' = f /\
+  all const_admin es' /\ e_typing s C es' tf.
+Proof.
+  move => Hred.
+  induction Hred.
+  - destruct x as [[[hs s] f] es], y as [[[hs' s'] f'] es'].
+    by apply const_admin_preservation.
+  - destruct x as [[[hs s] f] es] => C tf Hcode Htype Hfunc Hglob.
+    by repeat split.
+  - destruct x as [[[hs s] f] es], y as [[[hs1 s1] f1] es1],
+      z as [[[hs2 s2] f2] es2].
+    move => C tf Hcode Htype Hfunc Hglob.
+    specialize (IHHred1 C tf Hcode Htype Hfunc Hglob)
+      as [-> [-> [-> [Hcode1 Htype1]]]].
+    by apply IHHred2.
+Qed.
+
+Lemma extended_const_exprs_admin c es :
+  extended_const_exprs c es -> all const_admin (to_e_list es).
+Proof.
+  induction es as [|e es IH] => //=.
+  move/andP => [He Hes].
+  rewrite IH // andbT.
+  by destruct e.
+Qed.
+
+Theorem extended_init_value_typing C hs s f bes v t :
+  reduce_trans (hs, s, f, to_e_list bes) (hs, s, f, [::v_to_e v]) ->
+  extended_const_exprs C bes ->
+  be_typing C bes (Tf nil [::t]) ->
+  (forall n addr, List.nth_error f.(f_inst).(inst_funcs) n = Some addr ->
+     (addr < N.of_nat (length s.(s_funcs)))%N) ->
+  (forall gidx v gt, sglob_val s f.(f_inst) gidx = Some v ->
+     lookup_N C.(tc_globals) gidx = Some gt ->
+     value_typing s v gt.(tg_t)) ->
+  value_typing s v t.
+Proof.
+  move => Hred Hconst Hbet Hfunc Hglob.
+  apply extended_const_exprs_admin in Hconst.
+  apply (ety_a s) in Hbet.
+  specialize (const_admin_trans_preservation _ _ Hred C _ Hconst Hbet Hfunc Hglob)
+    as [_ [_ [_ [_ Htype]]]].
+  invert_e_typing.
+  eapply value_typing_trans; eauto.
+  by simplify_subtyping.
 Qed.
 
 Theorem extended_global_type_checker_reflects c g :
@@ -170,6 +311,61 @@ Proof.
   destruct ws as [|w [|w' ws]] => //.
   move => [<-].
   by apply (interp_const_stack_sound hs _ _ _ _ _ Heval).
+Qed.
+
+Lemma interp_const_step_store_extension s s' f e vs ws :
+  (forall i v, sglob_val s f.(f_inst) i = Some v ->
+     sglob_val s' f.(f_inst) i = Some v) ->
+  interp_const_step s f e vs = Some ws ->
+  interp_const_step s' f e vs = Some ws.
+Proof.
+  move => Hglob.
+  destruct e => //=.
+  destruct (sglob_val s (f_inst f) g) as [v|] eqn:Hget => //.
+  by rewrite (Hglob _ _ Hget).
+Qed.
+
+Lemma interp_const_stack_store_extension s s' f es vs ws :
+  (forall i v, sglob_val s f.(f_inst) i = Some v ->
+     sglob_val s' f.(f_inst) i = Some v) ->
+  interp_const_stack s f es vs = Some ws ->
+  interp_const_stack s' f es vs = Some ws.
+Proof.
+  move => Hglob.
+  move: vs ws.
+  induction es as [|e es IH]; move => vs ws //=.
+  destruct (interp_const_step s f e vs) as [vs'|] eqn:Hstep => //.
+  erewrite interp_const_step_store_extension; eauto.
+Qed.
+
+Lemma interp_get_const_store_extension s s' f es v :
+  (forall i v, sglob_val s f.(f_inst) i = Some v ->
+     sglob_val s' f.(f_inst) i = Some v) ->
+  interp_get_const s f es = Some v ->
+  interp_get_const s' f es = Some v.
+Proof.
+  move => Hglob.
+  rewrite !interp_get_const_stack.
+  destruct (interp_const_stack s f es nil) as [ws|] eqn:Heval => //.
+  erewrite interp_const_stack_store_extension; eauto.
+Qed.
+
+Lemma interp_get_const_sound_global_extension hs s s' f es v gs :
+  s'.(s_globals) = s.(s_globals) ++ gs ->
+  interp_get_const s f es = Some v ->
+  reduce_trans (hs, s', f, to_e_list es) (hs, s', f, [::v_to_e v]).
+Proof.
+  move => Hgs Heval.
+  apply interp_get_const_sound.
+  eapply (interp_get_const_store_extension s s' f es v); last exact Heval.
+  move => i w.
+  unfold sglob_val, sglob, sglob_ind.
+  destruct (lookup_N (inst_globals (f_inst f)) i) as [addr|] => //.
+  rewrite Hgs.
+  unfold lookup_N.
+  destruct (List.nth_error (s_globals s) (N.to_nat addr)) as [g|] eqn:Hget => //.
+  rewrite List.nth_error_app1; first by rewrite Hget.
+  by apply List.nth_error_Some; rewrite Hget.
 Qed.
 
 Theorem interp_global_chain_sound hs s f gs s' f' vs :

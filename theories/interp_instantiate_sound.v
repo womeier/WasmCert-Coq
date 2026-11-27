@@ -3,7 +3,7 @@
     in the evaluation of various initialisers. **)
 
 From mathcomp Require Import ssreflect ssrbool ssrnat eqtype seq.
-From Wasm Require Import interpreter_ctx instantiation_func instantiation_properties type_checker_reflects_typing.
+From Wasm Require Import interpreter_ctx instantiation_func instantiation_properties type_checker_reflects_typing extended_const.
 From Stdlib Require Import Program.
 
 (* see common.v *)
@@ -322,83 +322,26 @@ Proof.
     apply Forall2_spec => //.
     move => n mglob gv Hnth1 Hnth2.
     eapply those_map_lookup in Hglobinit as [gi [Hmap Hnth]]; last by eauto.
-    apply module_typecheck_glob_aux in Hmodcheck as [C Hmodcheck].
-    unfold module_global_type_checker in Hmodcheck.
-    eapply all_projection in Hmodcheck; eauto.
-    destruct mglob.
-    move/andP in Hmodcheck.
-    destruct Hmodcheck as [Hconstexpr Hbetype].
-    move/b_e_type_checker_reflects_typing in Hbetype.
-    eapply const_exprs_impl in Hconstexpr; last by eauto.
-    destruct Hconstexpr as [e [-> Hconst]].
-    unfold const_expr in Hconst.
-    destruct e => //; subst; simpl in Hmap.
-    1,2,3: (* const_num/const_vec/ref_null *)
-      injection Hmap as <-;
-      simpl in *;
-      simplify_multieq;
-      by constructor.
-    { (* ref_func *)
-      remove_bools_options; simplify_multieq.
-      by constructor; apply r_ref_func => /=.
-    }
-    { (* global_get *)
-      remove_bools_options; simplify_multieq.
-      constructor; apply r_global_get => /=.
-      unfold sglob_val, sglob, sglob_ind in *; simpl in *.
-      remove_bools_options.
-      unfold lookup_N in *.
-      by erewrite nth_error_app_Some; eauto.
-    }
+    simplify_multieq.
+    eapply interp_get_const_sound_global_extension; last exact Hmap.
+    by subst.
   - subst.
     unfold instantiate_elems.
     apply Forall2_spec => //.
     move => n melem vs Hnth1 Hnth2.
     eapply those_map_lookup in Heleminit as [ei [Hmap Hnth]]; last by eauto.
-    apply module_typecheck_elem_aux in Hmodcheck as [C Hmodcheck].
-    unfold module_elem_type_checker in Hmodcheck.
-    eapply all_projection in Hmodcheck; eauto.
-    destruct melem.
-    move/andP in Hmodcheck; destruct Hmodcheck as [Hmodcheck Hmode].
-    move/andP in Hmodcheck; destruct Hmodcheck as [Hconstexpr Hbetype].
     simplify_multieq.
     apply Forall2_spec => //=.
     + apply those_length in Hmap.
       by rewrite List.length_map in Hmap; simpl in Hmap.
     + move => i bes vref Hnthinit Hnthei.
-      eapply all_projection in Hbetype; eauto.
-      eapply all_projection in Hconstexpr; eauto.
       eapply those_map_lookup in Hmap as [vref' [Hmap Hnth']]; eauto.
-      move/b_e_type_checker_reflects_typing in Hbetype.
-      eapply const_exprs_impl in Hconstexpr; last by eauto.
-      destruct Hconstexpr as [e [-> Hconst]].
-      unfold const_expr in Hconst.
-      destruct e => //; subst; simpl in Hmap.
-      { (* ref_null *)
-        injection Hmap as <-.
-        simpl in *.
-        simplify_multieq.
-        by constructor.
-      }
-      { (* ref_func *)
-        remove_bools_options; simplify_multieq.
-        constructor => /=.
-        unfold interp_get_vref in Hmap.
-        simpl in Hmap; remove_bools_options.
-        by apply r_ref_func.
-      }
-      { (* global_get *)
-        unfold interp_get_vref in Hmap; simpl in Hmap.
-        remove_bools_options; simplify_multieq; destruct v => //.
-        injection Hmap as ->.
-        constructor.
-        replace (vref_to_e vref') with (v_to_e (VAL_ref vref')) => //.
-        eapply r_global_get => /=.
-        unfold sglob_val, sglob, sglob_ind in *; simpl in *.
-        remove_bools_options.
-        unfold lookup_N in *.
-        by erewrite nth_error_app_Some; eauto.
-      }
+      unfold interp_get_vref in Hmap.
+      destruct (interp_get_const _ _ bes) as [[v|v|v]|] eqn:Heval => //.
+      injection Hmap as <-.
+      simplify_multieq.
+      eapply interp_get_const_sound_global_extension with (v := VAL_ref v); last exact Heval.
+      by subst.
 Qed.
 
 End Host.
