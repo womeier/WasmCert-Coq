@@ -251,6 +251,13 @@ Example production_memory64_codec_round_trip :
     (fun n => parse_memory_type (n := n)) = Running.Singleton mt.
 Proof. vm_compute. reflexivity. Qed.
 
+Example production_table64_codec_round_trip :
+  let tt := {| tt_limits := lim 18446744073709551615 (Some 18446744073709551615);
+               tt_elem_type := T_funcref; tt_address_type := AT_i64 |} in
+  check_toks (binary_of_table_type tt)
+    (fun n => parse_table_type (n := n)) = Running.Singleton tt.
+Proof. vm_compute. reflexivity. Qed.
+
 Example production_wide_memarg_codec_round_trip :
   let marg := Build_memarg 18446744073709551615 0 1 in
   check_toks (binary_of_memarg marg)

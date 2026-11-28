@@ -535,9 +535,20 @@ Definition binary_of_limits (l : limits) : list byte :=
     leb128.encode_unsigned max
   end.
 
+Definition binary_of_address_limits (width: address_type) (lims: limits) : list byte :=
+  match width with
+  | AT_i32 => binary_of_limits lims
+  | AT_i64 =>
+      match lims.(lim_max) with
+      | None => x04 :: leb128.encode_unsigned lims.(lim_min)
+      | Some max => x05 :: leb128.encode_unsigned lims.(lim_min) ++
+                           leb128.encode_unsigned max
+      end
+  end.
+
 Definition binary_of_table_type (t_ty : table_type) : list byte :=
   binary_of_reference_type t_ty.(tt_elem_type) ::
-  binary_of_limits t_ty.(tt_limits).
+  binary_of_address_limits t_ty.(tt_address_type) t_ty.(tt_limits).
 
 Definition binary_of_mutability (m : mutability) : list byte :=
   match m with
@@ -550,15 +561,7 @@ Definition binary_of_global_type (g_ty : global_type) : list byte :=
   binary_of_mutability g_ty.(tg_mut).
 
 Definition binary_of_memory_type (m : memory_type) : list byte :=
-  match m.(mt_address_type) with
-  | AT_i32 => binary_of_limits m
-  | AT_i64 =>
-      match m.(mt_limits).(lim_max) with
-      | None => x04 :: leb128.encode_unsigned m.(mt_limits).(lim_min)
-      | Some max => x05 :: leb128.encode_unsigned m.(mt_limits).(lim_min) ++
-                           leb128.encode_unsigned max
-      end
-  end.
+  binary_of_address_limits m.(mt_address_type) m.(mt_limits).
 
 Definition binary_of_import_desc (imp_desc : module_import_desc) : list byte :=
   match imp_desc with

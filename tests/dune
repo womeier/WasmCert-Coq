@@ -10,6 +10,21 @@
    (libraries wasmcert_extracted parray zarith))
 
 (rule
+ (target table64_binary.wast)
+ (deps table64_binary.py)
+ (action
+  (with-stdout-to %{target}
+   (run python3 %{dep:table64_binary.py}))))
+
+(rule
+ (alias runtest)
+ (deps table64_binary.wast ../run_wast.sh)
+ (action
+  (setenv EXE %{exe:../src/wasm_coq_interpreter.exe}
+   (setenv JOBS 1
+    (run bash %{dep:../run_wast.sh} . table64_binary)))))
+
+(rule
  (alias runtest)
  (deps wast_to_binary.py wast_to_binary_test.py)
  (action (run python3 %{dep:wast_to_binary_test.py})))

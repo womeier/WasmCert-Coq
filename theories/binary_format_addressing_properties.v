@@ -62,7 +62,18 @@ Theorem binary_memory_type_encoding mt :
   encode_limits (datatypes.mt_address_type mt) (datatypes.mt_limits mt).
 Proof.
   destruct mt as [[minimum maximum] width].
-  destruct width, maximum; unfold binary_of_memory_type, binary_of_limits,
+  destruct width, maximum; unfold binary_of_memory_type, binary_of_address_limits, binary_of_limits,
     encode_limits, encode_limits_flag; cbn; try reflexivity.
+  all: now rewrite app_nil_r.
+Qed.
+
+Theorem binary_table_type_encoding tt :
+  binary_of_table_type tt =
+  binary_of_reference_type (datatypes.tt_elem_type tt) ::
+    encode_limits (datatypes.tt_address_type tt) (datatypes.tt_limits tt).
+Proof.
+  destruct tt as [[minimum maximum] elem width].
+  destruct width, maximum; unfold binary_of_table_type, binary_of_address_limits,
+    binary_of_limits, encode_limits, encode_limits_flag; cbn; try reflexivity.
   all: now rewrite app_nil_r.
 Qed.

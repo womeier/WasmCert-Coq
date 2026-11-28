@@ -894,19 +894,22 @@ Definition parse_limits {n} : byte_parser limits n :=
   exact_byte x00 &> ((fun min => {| lim_min := min; lim_max := None |}) <$> parse_u32_as_N) <|>
   (exact_byte x01 &> ((fun min max => {| lim_min := min; lim_max := Some max |}) <$> parse_u32_as_N) <*> parse_u32_as_N).
 
+Definition parse_address_limits {n} : byte_parser (address_type * limits) n :=
+  ((fun lims => (AT_i32, lims)) <$> parse_limits) <|>
+  (exact_byte x04 &>
+    ((fun min => (AT_i64, {| lim_min := min; lim_max := None |})) <$> parse_u64_as_N)) <|>
+  (exact_byte x05 &>
+    ((fun min max => (AT_i64, {| lim_min := min; lim_max := Some max |})) <$> parse_u64_as_N)
+      <*> parse_u64_as_N).
+
 Definition parse_table_type {n} : byte_parser table_type n :=
-  ((fun ety lims => {| tt_limits := lims; tt_elem_type := ety;
-                       tt_address_type := AT_i32 |}) <$> parse_reference_type) <*> parse_limits.
+  ((fun ety '(width, lims) =>
+    {| tt_limits := lims; tt_elem_type := ety; tt_address_type := width |})
+      <$> parse_reference_type) <*> parse_address_limits.
 
 Definition parse_memory_type {n} : byte_parser memory_type n :=
-  (memory_type32 <$> parse_limits) <|>
-  (exact_byte x04 &>
-    ((fun min => {| mt_limits := {| lim_min := min; lim_max := None |};
-                    mt_address_type := AT_i64 |}) <$> parse_u64_as_N)) <|>
-  (exact_byte x05 &>
-    ((fun min max => {| mt_limits := {| lim_min := min; lim_max := Some max |};
-                        mt_address_type := AT_i64 |}) <$> parse_u64_as_N)
-      <*> parse_u64_as_N).
+  (fun '(width, lims) => {| mt_limits := lims; mt_address_type := width |})
+    <$> parse_address_limits.
 
 Definition parse_mut {n} : byte_parser mutability n :=
   exact_byte x00 $> MUT_const <|>
