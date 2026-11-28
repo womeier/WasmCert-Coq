@@ -163,3 +163,37 @@ reject("invalid", i64(0) + b"\x11\x00\x00", tables=(tt(64, 1, ref=0x6f),))
 for malformed in (b"\x80" * 9 + b"\x02", b"\x80" * 10 + b"\x00", b""):
     reject("malformed", i32(0), tables=(b"\x70\x04" + malformed,))
 reject("malformed", i32(0), tables=(b"\x70\x06\x00",))
+
+# Active initialization traps at instantiation, not validation or decoding.
+print(f'(assert_trap (module binary {escaped(module(i32(0), elements=(active(i64(-1)),)))}) "out of bounds table access")')
+
+# Width-bearing imported types use the same binary grammar and core matcher.
+exported_table = (b"\x00asm\x01\x00\x00\x00"
+                  + sec(4, vec([tt(64, 2**32 + 1)]))
+                  + sec(7, b"\x01\x01t\x01\x00"))
+print(f"(module binary {escaped(exported_table)})")
+print('(register "M")')
+
+
+def imported_table(table_type):
+    body = b"\x00" + i64(2**32) + get + is_null + b"\x0b"
+    return (b"\x00asm\x01\x00\x00\x00"
+            + sec(1, b"\x01\x60\x00\x01\x7f")
+            + sec(2, b"\x01\x01M\x01t\x01" + table_type)
+            + sec(3, b"\x01\x00")
+            + sec(7, b"\x01\x03run\x00\x00")
+            + sec(10, vec([uleb(len(body)) + body])))
+
+
+print(f"(module binary {escaped(imported_table(tt(64, 2**32 + 1)))})")
+print('(assert_return (invoke "run") (i32.const 1))')
+# For the wrong-width link check, use an i32 body so the module itself is valid.
+wrong_body = b"\x00" + i32(0) + get + is_null + b"\x0b"
+wrong_width = (b"\x00asm\x01\x00\x00\x00"
+               + sec(1, b"\x01\x60\x00\x01\x7f")
+               + sec(2, b"\x01\x01M\x01t\x01" + tt(32, 0))
+               + sec(3, b"\x01\x00") + sec(7, b"\x01\x03run\x00\x00")
+               + sec(10, vec([uleb(len(wrong_body)) + wrong_body])))
+for binary in (wrong_width, imported_table(tt(64, 2**32 + 2)),
+               imported_table(tt(64, 0, 2**32 + 1))):
+    print(f'(assert_unlinkable (module binary {escaped(binary)}) "incompatible import type")')
