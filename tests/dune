@@ -74,6 +74,26 @@
     (run bash %{dep:../run_wast.sh} . final_memarg_binary)))))
 
 (rule
+ (target binary_register_aliases.wast)
+ (deps binary_register_aliases.py binary_fixtures.py)
+ (action
+  (with-stdout-to %{target}
+   (run python3 %{dep:binary_register_aliases.py}))))
+
+(rule
+ (alias runtest)
+ (deps binary_register_aliases.wast ../run_wast.sh)
+ (action
+  (setenv EXE %{exe:../src/wasm_coq_interpreter.exe}
+   (setenv JOBS 1
+    (run bash %{dep:../run_wast.sh} . binary_register_aliases)))))
+
+(rule
+ (alias runtest)
+ (deps binary_projection_test.py binary_wast.py)
+ (action (run python3 %{dep:binary_projection_test.py})))
+
+(rule
  (alias runtest)
  (deps run_wast_test.sh ../run_wast.sh)
  (action (run bash %{dep:run_wast_test.sh} %{dep:../run_wast.sh})))
