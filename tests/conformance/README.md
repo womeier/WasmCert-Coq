@@ -28,9 +28,33 @@ It also covers zero-count entries in nonempty local vectors and aggregate local
 count overflow with individually valid u32 counts.
 Nonempty-local bodies exercise a multibyte local count, both wrong-size
 directions, and an executed tail transfer from a caller with 64 locals.
+Indexed-memory tail calls use explicit flag 65 with nonzero memory selection;
+registration regressions preserve named binary modules and earlier aliases.
 Both `dune test` and CI run the checked-in fixtures without requiring wasm-tools.
 Binary invalid assertions must decode then fail validation; binary malformed
 assertions must fail decoding.
+
+## Complete non-text multi-memory profile
+
+The root suite predates multi-memory. Its historical malformed reserved-zero
+fields and multiple-memory invalid assertions are not final-format expectations.
+Keep running the unchanged root suite separately; do not rewrite its assertions.
+Prepare the entire core plus all official multi-memory replacements/additions
+at the same testsuite pin with:
+
+```sh
+python3 tests/prepare_multi_memory_binary.py \
+  --wasm-tools /path/to/wasm-tools \
+  --output /tmp/opencode/multi-memory-binary-profile
+JOBS=2 bash run_wast.sh /tmp/opencode/multi-memory-binary-profile
+```
+
+The output must be a new or empty directory. The generator reports every
+same-name replacement and every excluded text-only malformed assertion with
+its source line. `provenance.json` records the testsuite revision, encoder
+version and source hashes. No binary-scope command is filtered or reclassified.
+This uses the existing external fixture encoder, not a new production text
+frontend. Use wasm-tools 1.263.0 to reproduce the pinned projection.
 
 ## Scope and provenance
 

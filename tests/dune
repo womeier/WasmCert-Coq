@@ -1,7 +1,7 @@
 (mdx
   (deps 
      (package coq-wasm)
-     (glob_files *.wasm))
+      (glob_files *.wasm))
 )
 
 (rule
@@ -25,5 +25,37 @@
  (alias runtest)
  (deps function_references_binary.py)
  (action
-  (run python3 %{dep:function_references_binary.py}
+   (run python3 %{dep:function_references_binary.py}
+    %{exe:../src/wasm_coq_interpreter.exe})))
+
+(test
+  (name addressing_extracted)
+  (modules addressing_extracted)
+  (libraries wasmcert_extracted parray zarith))
+
+(rule
+ (alias runtest)
+ (deps run_wast_test.sh ../run_wast.sh)
+ (action (run bash %{dep:run_wast_test.sh} %{dep:../run_wast.sh})))
+
+(rule
+ (target multi_memory_binary.wast)
+ (deps multi_memory_binary.py)
+ (action
+  (with-stdout-to %{target}
+   (run python3 %{dep:multi_memory_binary.py}))))
+
+(rule
+ (alias runtest)
+ (deps multi_memory_binary.wast ../run_wast.sh)
+ (action
+  (setenv EXE %{exe:../src/wasm_coq_interpreter.exe}
+   (setenv JOBS 1
+    (run bash %{dep:../run_wast.sh} . multi_memory_binary)))))
+
+(rule
+ (alias runtest)
+ (deps wast_assertion_phases_test.sh ../run_wast.sh)
+ (action
+  (run bash %{dep:wast_assertion_phases_test.sh} %{dep:../run_wast.sh}
    %{exe:../src/wasm_coq_interpreter.exe})))

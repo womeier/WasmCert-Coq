@@ -264,3 +264,84 @@ Proof.
     rewrite Hraw. reflexivity.
   - apply Hsecond_at. reflexivity.
 Qed.
+
+Lemma parser_bind_prefix : forall A B n m (Hle : (m <= n)%nat)
+    (first : Parser (SizedList byte) byte option A n)
+    (next : A -> Parser (SizedList byte) byte option B n)
+    (input : SizedList byte m) a middle b suffix,
+    option_map observe_reader (runParser first Hle input) =
+      Some (a, middle) ->
+    (forall k (Hkn : (k <= n)%nat) (tokens : SizedList byte k),
+      @Sized.value _ _ _ tokens = middle ->
+      option_map observe_reader (runParser (next a) Hkn tokens) =
+        Some (b, suffix)) ->
+    option_map observe_reader
+      (runParser (Combinators.bind first next) Hle input) =
+      Some (b, suffix).
+Proof.
+  intros A B n m Hle first next input a middle b suffix Hfirst Hnext.
+  unfold Combinators.bind, Combinators.andbind, Combinators.map.
+  cbn [runParser].
+  destruct (runParser first Hle input) as [result|]; [|discriminate].
+  destruct result as [v remaining Hsmall [rest Hlength]].
+  cbn [observe_reader Success.value Success.leftovers Sized.value] in Hfirst.
+  inversion Hfirst; subst v rest.
+  cbn [Combinators.box le_close Combinators.le_lower call runParser].
+  cbn.
+  match goal with
+  | |- context [runParser ?parser ?bound ?tokens] =>
+      pose proof (Hnext _ bound tokens eq_refl) as Hafter;
+      change (option_map observe_reader (runParser parser bound tokens) =
+        Some (b, suffix)) in Hafter;
+      destruct (runParser parser bound tokens) as [result|]
+  end; [|discriminate].
+  destruct result as [v after Hafter_small [rest Hafter_length]].
+  cbn [observe_reader Success.value Success.leftovers Sized.value] in Hafter.
+  inversion Hafter; subst v rest.
+  reflexivity.
+Qed.
+
+Lemma parser_bind_prefix_sound : forall A B n
+    (first : Parser (SizedList byte) byte option A n)
+    (next : A -> Parser (SizedList byte) byte option B n)
+    (first_grammar : list byte -> A -> list byte -> Prop)
+    (next_grammar : A -> list byte -> B -> list byte -> Prop),
+    (forall m (Hle : (m <= n)%nat) (input : SizedList byte m) value suffix,
+      option_map observe_reader (runParser first Hle input) =
+        Some (value, suffix) ->
+      first_grammar (@Sized.value _ _ _ input) value suffix) ->
+    (forall a m (Hle : (m <= n)%nat) (input : SizedList byte m) value suffix,
+      option_map observe_reader (runParser (next a) Hle input) =
+        Some (value, suffix) ->
+      next_grammar a (@Sized.value _ _ _ input) value suffix) ->
+    forall m (Hle : (m <= n)%nat) (input : SizedList byte m) value suffix,
+    option_map observe_reader
+      (runParser (Combinators.bind first next) Hle input) =
+      Some (value, suffix) ->
+    exists a middle, first_grammar (@Sized.value _ _ _ input) a middle /\
+      next_grammar a middle value suffix.
+Proof.
+  intros A B n first next first_grammar next_grammar Hfirst Hnext
+    m Hle input value suffix Hobs.
+  unfold Combinators.bind, Combinators.andbind, Combinators.map in Hobs.
+  cbn [runParser] in Hobs.
+  destruct (runParser first Hle input) as [result|] eqn:Hraw; [|discriminate].
+  destruct result as [a remaining Hsmall [middle Hlength]].
+  cbn [Combinators.box le_close Combinators.le_lower call runParser] in Hobs.
+  cbn in Hobs.
+  match goal with
+  | Hobs : context [runParser ?parser ?bound ?tokens] |- _ =>
+      pose proof (Hnext a _ bound tokens) as Hafter;
+      change (forall v rest,
+        option_map observe_reader (runParser parser bound tokens) =
+          Some (v, rest) -> next_grammar a middle v rest) in Hafter;
+      destruct (runParser parser bound tokens) as [result|]
+  end; [|discriminate].
+  destruct result as [v after Hafter_small [rest Hafter_length]].
+  change (Some (v, rest) = Some (value, suffix)) in Hobs.
+  inversion Hobs; subst v rest.
+  exists a, middle. split.
+  - apply Hfirst with (Hle := Hle) (input := input).
+    rewrite Hraw. reflexivity.
+  - apply Hafter. reflexivity.
+Qed.

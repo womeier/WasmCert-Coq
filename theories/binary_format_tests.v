@@ -194,6 +194,161 @@ Lemma reject_table_reserved_byte :
     (fun n => parse_module_table (n := n)) = False.
 Proof. vm_compute. reflexivity. Qed.
 
+(** Memory indices are u32 LEBs, not reserved zero bytes. *)
+Lemma memory_size_index_round_trip :
+  run_parse_bes (binary_of_be (BI_memory_size 128%N)) =
+    Some (BI_memory_size 128%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memory_grow_index_round_trip :
+  run_parse_bes (binary_of_be (BI_memory_grow 4294967295%N)) =
+    Some (BI_memory_grow 4294967295%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memory_size_legacy_encoding :
+  run_parse_bes (x3f :: x00 :: nil) = Some (BI_memory_size 0%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memory_size_rejects_truncated_index :
+  run_parse_bes (x3f :: x80 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memory_grow_rejects_overflow_index :
+  run_parse_bes (x40 :: xff :: xff :: xff :: xff :: x10 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Definition indexed_memarg := Build_memarg 1234%N 0%N 128%N.
+
+Definition indexed_memory_instructions :=
+  BI_load T_i32 None indexed_memarg ::
+  BI_load T_i64 (Some (Tp_i32, SX_U)) indexed_memarg ::
+  BI_store T_f64 None indexed_memarg ::
+  BI_store T_i32 (Some Tp_i8) indexed_memarg ::
+  List.map (fun lv => BI_load_vec lv indexed_memarg)
+    (LVA_none ::
+     LVA_extend (8%N, 8%N) SX_S :: LVA_extend (8%N, 8%N) SX_U ::
+     LVA_extend (16%N, 4%N) SX_S :: LVA_extend (16%N, 4%N) SX_U ::
+     LVA_extend (32%N, 2%N) SX_S :: LVA_extend (32%N, 2%N) SX_U ::
+     LVA_splat 8%N :: LVA_splat 16%N ::
+     LVA_splat 32%N :: LVA_splat 64%N ::
+     LVA_zero 32%N :: LVA_zero 64%N :: nil) ++
+  BI_store_vec indexed_memarg ::
+  List.concat (List.map (fun width =>
+    BI_load_vec_lane width indexed_memarg 0%N ::
+    BI_store_vec_lane width indexed_memarg 0%N :: nil)
+    (8%N :: 16%N :: 32%N :: 64%N :: nil)).
+
+Lemma indexed_scalar_simd_round_trips :
+  List.map (fun be => run_parse_bes (binary_of_be be)) indexed_memory_instructions =
+    List.map (fun be => Some (be :: nil)) indexed_memory_instructions.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma indexed_memarg_encoding :
+  (* The shared LEB encoder emits a legal padded encoding of flags 64. *)
+  binary_of_memarg indexed_memarg = xc0 :: x00 :: x80 :: x01 :: xd2 :: x09 :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma explicit_zero_memory_index_accepted :
+  run_parse_bes (x28 :: x40 :: x00 :: x00 :: nil) =
+    Some (BI_load T_i32 None (Build_memarg 0%N 0%N 0%N) :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memarg_rejects_reserved_flags :
+  run_parse_bes (x28 :: x80 :: x01 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memarg_rejects_truncated_memory_index :
+  run_parse_bes (x28 :: x40 :: x80 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+(** Final Bmemarg has a u64 offset even for a memory32 instruction. *)
+Lemma memarg_u64_offset_max_decodes :
+  run_parse_bes
+    (x28 :: x00 :: xff :: xff :: xff :: xff :: xff ::
+      xff :: xff :: xff :: xff :: x01 :: nil) =
+    Some (BI_load T_i32 None
+      (Build_memarg 18446744073709551615%N 0%N 0%N) :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memarg_explicit_index_u64_offset_decodes :
+  run_parse_bes
+    (x28 :: x41 :: x01 :: x80 :: x80 :: x80 :: x80 :: x10 :: nil) =
+    Some (BI_load T_i32 None
+      (Build_memarg 4294967296%N 1%N 1%N) :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memarg_rejects_u64_offset_overflow :
+  run_parse_bes
+    (x28 :: x00 :: xff :: xff :: xff :: xff :: xff ::
+      xff :: xff :: xff :: xff :: x02 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memarg_rejects_u64_offset_overlong_zero :
+  run_parse_bes
+    (x28 :: x40 :: x00 ::
+      x80 :: x80 :: x80 :: x80 :: x80 :: x80 ::
+      x80 :: x80 :: x80 :: x80 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memory_init_index_order :
+  run_parse_bes (xfc :: x08 :: x07 :: x02 :: nil) =
+    Some (BI_memory_init 2%N 7%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memory_init_indices_round_trip :
+  run_parse_bes (binary_of_be (BI_memory_init 128%N 256%N)) =
+    Some (BI_memory_init 128%N 256%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memory_copy_indices_round_trip :
+  run_parse_bes (binary_of_be (BI_memory_copy 128%N 256%N)) =
+    Some (BI_memory_copy 128%N 256%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memory_fill_index_round_trip :
+  run_parse_bes (binary_of_be (BI_memory_fill 128%N)) =
+    Some (BI_memory_fill 128%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memory_copy_index_order :
+  run_parse_bes (xfc :: x0a :: x02 :: x07 :: nil) =
+    Some (BI_memory_copy 2%N 7%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+(** Lane indices are raw bytes, including syntactically valid indices which
+    validation must reject. They must not consume the following opcode. *)
+Lemma simd_lane_byte_255_parses :
+  run_parse_bes (xfd :: x54 :: x40 :: x01 :: x00 :: xff :: nil) =
+    Some (BI_load_vec_lane 8%N (Build_memarg 0%N 0%N 1%N) 255%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma simd_lane_byte_255_prints :
+  binary_of_load_vec_lane 8%N (Build_memarg 0%N 0%N 0%N) 255%N =
+    xfd :: x54 :: x00 :: x00 :: xff :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+(** Legacy-compatible encodings are selected by index zero, independently of
+    how many other memories the containing module declares. *)
+Lemma memory_zero_scalar_legacy_bytes :
+  binary_of_be (BI_load T_i32 None (Build_memarg 0%N 2%N 0%N)) =
+    x28 :: x02 :: x00 :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memory_zero_store_legacy_bytes :
+  binary_of_be (BI_store T_i32 None (Build_memarg 0%N 2%N 0%N)) =
+    x36 :: x02 :: x00 :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memory_zero_size_grow_legacy_bytes :
+  (binary_of_be (BI_memory_size 0%N), binary_of_be (BI_memory_grow 0%N)) =
+    (x3f :: x00 :: nil, x40 :: x00 :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma memory_zero_simd_compact_bytes :
+  binary_of_be (BI_load_vec LVA_none (Build_memarg 0%N 4%N 0%N)) =
+    xfd :: x00 :: x04 :: x00 :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
 (** An example program. **)
 Definition test :=
   BI_if (BT_valtype None) (BI_testop T_i64 TO_eqz :: nil) (BI_testop T_i64 TO_eqz :: nil).
@@ -272,6 +427,71 @@ Definition empty_module := {|
 |}.
 
 Lemma empty_module_round_trip : run_parse_module (binary_of_module empty_module) = Some empty_module.
+Proof. vm_compute. reflexivity. Qed.
+
+Definition two_memory_legacy_access := {|
+  mod_types := Tf nil (T_num T_i32 :: nil) :: nil;
+  mod_funcs := {|
+    modfunc_type := 0%N;
+    modfunc_locals := nil;
+    modfunc_body :=
+      BI_const_num (VAL_int32 Wasm_int.Int32.zero) ::
+      BI_load T_i32 None (Build_memarg 0%N 2%N 0%N) :: nil
+  |} :: nil;
+  mod_tables := nil;
+  mod_mems :=
+    {| modmem_type := {| lim_min := 1%N; lim_max := None |} |} ::
+    {| modmem_type := {| lim_min := 1%N; lim_max := None |} |} :: nil;
+  mod_globals := nil;
+  mod_elems := nil;
+  mod_datas := nil;
+  mod_start := None;
+  mod_imports := nil;
+  mod_exports := nil;
+|}.
+
+Lemma memory_zero_in_multimemory_uses_legacy_bytes :
+  binary_of_module two_memory_legacy_access =
+    x00 :: x61 :: x73 :: x6d :: x01 :: x00 :: x00 :: x00 ::
+    x01 :: x05 :: x01 :: x60 :: x00 :: x01 :: x7f ::
+    x03 :: x02 :: x01 :: x00 ::
+    x05 :: x05 :: x02 :: x00 :: x01 :: x00 :: x01 ::
+    x0a :: x09 :: x01 :: x07 :: x00 :: x41 :: x00 :: x28 :: x02 :: x00 :: x0b :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma two_memory_module_round_trip :
+  run_parse_module (binary_of_module two_memory_legacy_access) =
+    Some two_memory_legacy_access.
+Proof. vm_compute. reflexivity. Qed.
+
+Definition two_memory_data_init := {|
+  mod_types := Tf nil nil :: nil;
+  mod_funcs := {|
+    modfunc_type := 0%N;
+    modfunc_locals := nil;
+    modfunc_body :=
+      BI_block (BT_valtype None)
+        (BI_const_num (VAL_int32 Wasm_int.Int32.zero) ::
+         BI_const_num (VAL_int32 Wasm_int.Int32.zero) ::
+         BI_const_num (VAL_int32 Wasm_int.Int32.one) ::
+         BI_memory_init 1%N 0%N :: nil) :: nil
+  |} :: nil;
+  mod_tables := nil;
+  mod_mems := two_memory_legacy_access.(mod_mems);
+  mod_globals := nil;
+  mod_elems := nil;
+  mod_datas := {|
+    moddata_init := compcert_byte_of_byte x2a :: nil;
+    moddata_mode := MD_passive
+  |} :: nil;
+  mod_start := None;
+  mod_imports := nil;
+  mod_exports := nil;
+|}.
+
+Lemma indexed_init_module_round_trip_includes_data_count :
+  run_parse_module (binary_of_module two_memory_data_init) =
+    Some two_memory_data_init.
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_type := {|

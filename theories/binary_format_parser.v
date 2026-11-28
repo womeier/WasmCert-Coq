@@ -3,7 +3,8 @@
    gallais.github.io/pdf/agdarsec18.pdf
 *)
 
-From Wasm Require Import datatypes_properties typing leb128 utf8 binary_uleb128.
+From Wasm Require Import datatypes_properties typing leb128 utf8 binary_uleb128
+  addressing addressing_parseque.
 From compcert Require Import Integers.
 From parseque Require Import Parseque.
 From Stdlib Require Import Strings.Byte ZArith.
@@ -53,6 +54,9 @@ Definition parse_u8_as_N {n} : byte_parser N n :=
 
 Definition parse_u32_as_N {n} : byte_parser N n :=
   parse_bounded_u32.
+
+Definition parse_u64_as_N {n} : byte_parser N n :=
+  AddressingParseque.parse_address Addressing.AT_i64.
 
 Definition assert_u32 {n} (k: N) : byte_parser N n :=
   guardM
@@ -142,7 +146,7 @@ Definition parse_dataidx {n} : byte_parser dataidx n :=
   parse_u32_as_N.
 
 Definition parse_laneidx {n} : byte_parser laneidx n :=
-  parse_u8_as_N.
+  Stdlib.Strings.Byte.to_N <$> anyTok.
 
 Definition parse_number_type {n} : byte_parser number_type n :=
   (exact_byte x7f $> T_i32) <|>
@@ -332,14 +336,20 @@ Definition parse_alignment_exponent {n} : byte_parser N n :=
   parse_u32_as_N.
 
 Definition parse_static_offset {n} : byte_parser N n :=
-  parse_u32_as_N.
+  parse_u64_as_N.
+
+Definition parse_memarg_payload {n} (a : N) : byte_parser memarg n :=
+    match decode_memarg_flags a with
+    | Some (align, false) =>
+      (fun o => Build_memarg o align 0%N) <$> parse_static_offset
+    | Some (align, true) =>
+      (fun '(x, o) => Build_memarg o align x) <$>
+        (parse_memidx <&> parse_static_offset)
+    | None => fail
+    end.
 
 Definition parse_memarg {n} : byte_parser memarg n :=
-  (fun ao =>
-     match ao with
-     | (a, o) => {| memarg_offset := o; memarg_align := a |}
-     end) <$>
-    (parse_alignment_exponent <&> parse_static_offset).
+  parse_alignment_exponent >>= (fun a => parse_memarg_payload a).
 
 Definition parse_i32_load {n} : byte_parser basic_instruction n :=
   exact_byte x28 &> ((BI_load T_i32 None) <$> parse_memarg).
@@ -411,23 +421,23 @@ Definition parse_i64_store32 {n} : byte_parser basic_instruction n :=
   exact_byte x3e &> ((BI_store T_i64 (Some Tp_i32)) <$> parse_memarg).
 
 Definition parse_memory_size {n} : byte_parser basic_instruction n :=
-  exact_byte x3f &> (exact_byte x00 $> BI_memory_size).
+  exact_byte x3f &> (BI_memory_size <$> parse_memidx).
 
 Definition parse_memory_grow {n} : byte_parser basic_instruction n :=
-  exact_byte x40 &> (exact_byte x00 $> BI_memory_grow).
+  exact_byte x40 &> (BI_memory_grow <$> parse_memidx).
 
 Definition parse_memory_init {n} : byte_parser basic_instruction n :=
-  exact_byte xfc &> assert_u32 8%N &> (((fun x _ => BI_memory_init x) <$> parse_dataidx) <*> exact_byte x00).
+  exact_byte xfc &> assert_u32 8%N &> (((fun y x => BI_memory_init x y) <$> parse_dataidx) <*> parse_memidx).
 
 Definition parse_data_drop {n} : byte_parser basic_instruction n :=
   exact_byte xfc &> assert_u32 9%N &> ((fun x => BI_data_drop x) <$> parse_dataidx).
 
 (* Defined in this way so that it's easier to add multimemory in the future *)
 Definition parse_memory_copy {n} : byte_parser basic_instruction n :=
-  exact_byte xfc &> assert_u32 10%N &> (((fun _ _ => BI_memory_copy) <$> exact_byte x00) <*> exact_byte x00).
+  exact_byte xfc &> assert_u32 10%N &> ((BI_memory_copy <$> parse_memidx) <*> parse_memidx).
 
 Definition parse_memory_fill {n} : byte_parser basic_instruction n :=
-  exact_byte xfc &> assert_u32 11%N &> ((fun _ => BI_memory_fill) <$> exact_byte x00).
+  exact_byte xfc &> assert_u32 11%N &> (BI_memory_fill <$> parse_memidx).
 
 Definition parse_v128_load {n} : byte_parser basic_instruction n :=
   assert_u32 0%N &> (BI_load_vec (LVA_none) <$> parse_memarg).
@@ -1215,30 +1225,6 @@ Definition datacount_agree (len: N) (ocount: option N) : bool :=
   | None => true
   end.
 
-(* If any of the function code contains memory.init or data.drop, then the data count section is required for the module to be valid. This is in order for a single-pass validation to process the module (despite not being the case here). *)
-
-Fixpoint be_datacount_required (be: basic_instruction) :=
-  let bes_datacount_required bes :=
-    List.fold_left orb (List.map be_datacount_required bes) false in
-  match be with
-  | BI_memory_init _
-  | BI_data_drop _ => true
-  | BI_block _ bes => bes_datacount_required bes
-  | BI_loop _ bes => bes_datacount_required bes
-  | BI_if _ bes1 bes2 =>
-      if bes_datacount_required bes1 then true
-      else bes_datacount_required bes2
-  | _ => false
-  end.
-
-Fixpoint bes_datacount_required (bes: expr) :=
-  match bes with
-  | nil => false
-  | cons be bes' =>
-      if be_datacount_required be then true
-      else bes_datacount_required bes'
-  end.
-  
 Definition code_datacount_required (code: module_func_without_type) :=
   match code with
   | (_, bes) =>

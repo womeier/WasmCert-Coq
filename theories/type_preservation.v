@@ -564,7 +564,11 @@ Proof.
   - rewrite_context_agree.
     econstructor; first by eauto.
     + by rewrite - Htableagree.
-    + by rewrite_context_agree.
+     + by rewrite_context_agree.
+  (* memory copy: both memory types may change independently. *)
+  - destruct (context_agree_mem_type Hext H) as [mt_dst [Hdst Hagree_dst]].
+    destruct (context_agree_mem_type Hext H0) as [mt_src [Hsrc Hagree_src]].
+    by eapply bet_memory_copy; eauto.
 Qed.
 
 (* Two agreeing contexts respect typing of each other *)
@@ -1226,14 +1230,14 @@ Proof.
       }
 Qed.
 
-Lemma smem_store_extension: forall s f n off v s' C t mt,
+Lemma smem_store_extension: forall s f x n off v s' C t mt,
   store_typing s ->
-  smem_store s (f_inst f) n off v t = Some s' ->
+  smem_store s (f_inst f) x n off v t = Some s' ->
   inst_typing s (f_inst f) = Some C -> 
-  lookup_N (tc_mems C) 0%N = Some mt ->
+  lookup_N (tc_mems C) x = Some mt ->
   store_extension s s'.
 Proof.
-  move => s f n off v s' C t mt Hst Hupd Hit Hnth.
+  move => s f x n off v s' C t mt Hst Hupd Hit Hnth.
   unfold store_extension; unfold_store_operations => /=; resolve_store_extension; resolve_store_inst_lookup; remove_bools_options => /=.
   rewrite Hnth in Hnthmt; injection Hnthmt as ->.
   destruct m0; simpl in *; remove_bools_options; simpl in *.
@@ -1241,14 +1245,14 @@ Proof.
   by apply mem_extension_store in Hoption1.
 Qed.
 
-Lemma smem_store_typing: forall s f n off v s' C t mt,
+Lemma smem_store_typing: forall s f x n off v s' C t mt,
   store_typing s ->
-  smem_store s (f_inst f) n off v t = Some s' ->
+  smem_store s (f_inst f) x n off v t = Some s' ->
   inst_typing s (f_inst f) = Some C -> 
-  lookup_N (tc_mems C) 0%N = Some mt ->
+  lookup_N (tc_mems C) x = Some mt ->
   store_typing s'.
 Proof.
-  move => s f n off v s' C t mt Hst Hupd Hit Hnth.
+  move => s f x n off v s' C t mt Hst Hupd Hit Hnth.
   assert (store_extension s s') as Hstext; first by eapply smem_store_extension; eauto.
   unfold_store_operations; remove_bools_options.
   resolve_store_inst_lookup; destruct m0; simpl in *; remove_bools_options; simpl in *.
@@ -1276,14 +1280,14 @@ Proof.
 Qed.
 
 (* Currently same as store *)
-Lemma smem_store_packed_extension: forall s f n off v tp s' C mt,
+Lemma smem_store_packed_extension: forall s f x n off v tp s' C mt,
   store_typing s ->
-  smem_store_packed s (f_inst f) n off v tp = Some s' ->
+  smem_store_packed s (f_inst f) x n off v tp = Some s' ->
   inst_typing s (f_inst f) = Some C -> 
-  lookup_N (tc_mems C) 0%N = Some mt ->
+  lookup_N (tc_mems C) x = Some mt ->
   store_extension s s'.
 Proof.
-  move => s f n off v tp s' C a Hst Hupd Hit Hnth.
+  move => s f x n off v tp s' C a Hst Hupd Hit Hnth.
   unfold store_extension; unfold_store_operations => /=; resolve_store_extension; resolve_store_inst_lookup; remove_bools_options => /=.
   rewrite Hnth in Hnthmt; injection Hnthmt as ->.
   destruct m0; simpl in *; remove_bools_options; simpl in *.
@@ -1292,14 +1296,14 @@ Proof.
 Qed.
 
 (* Currently store_packed is the same as store *)
-Lemma smem_store_packed_typing: forall s f n off v tp s' C mt,
+Lemma smem_store_packed_typing: forall s f x n off v tp s' C mt,
   store_typing s ->
-  smem_store_packed s (f_inst f) n off v tp = Some s' ->
+  smem_store_packed s (f_inst f) x n off v tp = Some s' ->
   inst_typing s (f_inst f) = Some C -> 
-  lookup_N (tc_mems C) 0%N = Some mt ->
+  lookup_N (tc_mems C) x = Some mt ->
   store_typing s'.
 Proof.
-  move => s f n off v tp s' C a Hst Hupd Hit Hnth.
+  move => s f x n off v tp s' C a Hst Hupd Hit Hnth.
   assert (store_extension s s') as Hstext; first by eapply smem_store_packed_extension; eauto.
   unfold_store_operations; remove_bools_options.
   resolve_store_inst_lookup; destruct m0; simpl in *; remove_bools_options; simpl in *.
@@ -1330,7 +1334,7 @@ Lemma smem_store_vec_extension: forall s f n v marg s' C mt,
   store_typing s ->
   smem_store_vec s (f_inst f) n v marg = Some s' ->
   inst_typing s (f_inst f) = Some C -> 
-  lookup_N (tc_mems C) 0%N = Some mt ->
+  lookup_N (tc_mems C) marg.(memarg_memory) = Some mt ->
   store_extension s s'.
 Proof.
   move => s f n v marg s' C a Hst Hupd Hit Hnth.
@@ -1345,7 +1349,7 @@ Lemma smem_store_vec_typing: forall s f n v marg s' C mt,
   store_typing s ->
   smem_store_vec s (f_inst f) n v marg = Some s' ->
   inst_typing s (f_inst f) = Some C -> 
-  lookup_N (tc_mems C) 0%N = Some mt ->
+  lookup_N (tc_mems C) marg.(memarg_memory) = Some mt ->
   store_typing s'.
 Proof.
   move => s f n v marg s' C a Hst Hupd Hit Hnth.
@@ -1380,7 +1384,7 @@ Lemma smem_store_vec_lane_extension: forall s f n v width marg x s' C mt,
   store_typing s ->
   smem_store_vec_lane s (f_inst f) n v width marg x = Some s' ->
   inst_typing s (f_inst f) = Some C -> 
-  lookup_N (tc_mems C) 0%N = Some mt ->
+  lookup_N (tc_mems C) marg.(memarg_memory) = Some mt ->
   store_extension s s'.
 Proof.
   move => s f n v width marg x s' C a Hst Hupd Hit Hnth.
@@ -1395,7 +1399,7 @@ Lemma smem_store_vec_lane_typing: forall s f n v width marg x s' C mt,
   store_typing s ->
   smem_store_vec_lane s (f_inst f) n v width marg x = Some s' ->
   inst_typing s (f_inst f) = Some C -> 
-  lookup_N (tc_mems C) 0%N = Some mt ->
+  lookup_N (tc_mems C) marg.(memarg_memory) = Some mt ->
   store_typing s'.
 Proof.
   move => s f n v width marg x s' C a Hst Hupd Hit Hnth.
@@ -1426,14 +1430,14 @@ Proof.
   - by apply nth_error_Some_length in Hoption2; lias.
 Qed.
 
-Lemma smem_grow_extension: forall s f n s' sz C mt,
+Lemma smem_grow_extension: forall s f x n s' sz C mt,
   store_typing s ->
-  smem_grow s (f_inst f) n = Some (s', sz) ->
+  smem_grow s (f_inst f) x n = Some (s', sz) ->
   inst_typing s (f_inst f) = Some C -> 
-  lookup_N (tc_mems C) 0%N = Some mt ->
+  lookup_N (tc_mems C) x = Some mt ->
   store_extension s s'.
 Proof.
-  move => s f n s' sz C a Hst Hupd Hit Hnth.
+  move => s f x n s' sz C a Hst Hupd Hit Hnth.
   unfold smem_grow in Hupd.
   unfold store_extension => /=; remove_bools_options; resolve_store_inst_lookup => /=.
   resolve_store_extension.
@@ -1446,14 +1450,14 @@ Proof.
   by rewrite Hif Hif0.
 Qed.
 
-Lemma smem_grow_typing: forall s f n s' sz C mt,
+Lemma smem_grow_typing: forall s f x n s' sz C mt,
   store_typing s ->
-  smem_grow s (f_inst f) n = Some (s', sz) ->
+  smem_grow s (f_inst f) x n = Some (s', sz) ->
   inst_typing s (f_inst f) = Some C -> 
-  lookup_N (tc_mems C) 0%N = Some mt ->
+  lookup_N (tc_mems C) x = Some mt ->
   store_typing s'.
 Proof.
-  move => s f n s' sz C a Hst Hupd Hit Hnth.
+  move => s f x n s' sz C a Hst Hupd Hit Hnth.
   assert (store_extension s s') as Hstext; first by eapply smem_grow_extension; eauto.
   unfold smem_grow in Hupd; remove_bools_options.
   resolve_store_inst_lookup; destruct m0; simpl in *; remove_bools_options; simpl in *.

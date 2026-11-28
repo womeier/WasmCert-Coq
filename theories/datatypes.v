@@ -530,7 +530,8 @@ Inductive load_vec_arg :=
 
 Record memarg : Set :=
   { memarg_offset : u32;
-    memarg_align: u32
+    memarg_align: u32;
+    memarg_memory: memidx
   }.
   
 Inductive basic_instruction : Type := (* be *)
@@ -607,11 +608,11 @@ Instructions in this group are concerned with linear memory.
   (* v128.store *)
   | BI_store_vec : memarg -> basic_instruction
   | BI_store_vec_lane : vwidth -> memarg -> laneidx -> basic_instruction
-  | BI_memory_size
-  | BI_memory_grow
-  | BI_memory_fill
-  | BI_memory_copy
-  | BI_memory_init: dataidx -> basic_instruction
+  | BI_memory_size : memidx -> basic_instruction
+  | BI_memory_grow : memidx -> basic_instruction
+  | BI_memory_fill : memidx -> basic_instruction
+  | BI_memory_copy : memidx -> memidx -> basic_instruction
+  | BI_memory_init: memidx -> dataidx -> basic_instruction
   | BI_data_drop: dataidx -> basic_instruction
 (** std-doc:
 Instructions in this group affect the flow of control.

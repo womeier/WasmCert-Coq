@@ -485,11 +485,7 @@ Definition module_filter_funcidx (m: module) : list funcidx :=
 Definition export_name_unique (exps: list module_export) : bool :=
   List.nodup name_eq_dec (map modexp_name exps) == (map modexp_name exps).
 
-(* Artificial restriction in and prior to Wasm 2.0 that only one memory is allowed. Drop this condition when a future update allows this. *)
-Definition wasm_2_memory_count_check (ms: list module_mem) (ims: list memory_type) : bool :=
-  (List.length ms) + (List.length ims) <= 1.
-                            
-(* We deliberately omit the artificial restriction on the length of memory here. *)
+(* Memory indices range over all imported and defined memories. *)
 Definition module_typing (m : module) (impts : list extern_type) (expts : list extern_type) : Prop :=
   exists fts tts mts gts rts dts,
   let '{|
@@ -539,7 +535,6 @@ Definition module_typing (m : module) (impts : list extern_type) (expts : list e
   List.Forall2 (module_func_typing c) fs fts /\
   List.Forall2 (module_table_typing c') ts tts /\
   List.Forall2 (module_mem_typing c') ms mts /\
-  wasm_2_memory_count_check ms ims /\
   List.Forall2 (module_global_typing c') gs gts /\
   List.Forall2 (module_elem_typing c') els rts /\
   List.Forall2 (module_data_typing c') ds dts /\
@@ -597,7 +592,7 @@ Definition get_init_expr_data (i: nat) (data: module_data) : list basic_instruct
   match data.(moddata_mode) with
   | MD_passive => nil
   | MD_active midx bes =>
-      bes ++ [::BI_const_num (VAL_int32 (Wasm_int.int_zero i32m)); BI_const_num (VAL_int32 (Wasm_int.int_of_Z i32m (Z.of_nat (length data.(moddata_init))))); BI_memory_init (N.of_nat i); BI_data_drop (N.of_nat i)]
+      bes ++ [::BI_const_num (VAL_int32 (Wasm_int.int_zero i32m)); BI_const_num (VAL_int32 (Wasm_int.int_of_Z i32m (Z.of_nat (length data.(moddata_init))))); BI_memory_init midx (N.of_nat i); BI_data_drop (N.of_nat i)]
   end.
 
 Definition get_init_expr_datas (datas: list module_data) : list basic_instruction :=
