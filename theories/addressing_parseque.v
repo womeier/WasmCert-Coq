@@ -15,18 +15,67 @@ Module AddressingParseque.
 Definition decode_reference_byte (b: byte) : option reference_type :=
   match b with x70 => Some T_funcref | x6f => Some T_externref | _ => None end.
 
-Definition decode_table_type (input: list byte)
-    : option (datatypes.table_type * list byte) :=
+Inductive reference_head : Type :=
+| RH_compact : reference_type -> reference_head
+| RH_explicit : bool -> reference_head.
+
+Definition decode_reference_head (b: byte) : option reference_head :=
+  match b with
+  | x70 => Some (RH_compact T_funcref)
+  | x6f => Some (RH_compact T_externref)
+  | x63 => Some (RH_explicit true)
+  | x64 => Some (RH_explicit false)
+  | _ => None
+  end.
+
+Definition decode_reference_type (input: list byte) : option (reference_type * list byte) :=
   match input with
   | nil => None
   | b :: input =>
-      match decode_reference_byte b with
+      match decode_reference_head b with
+      | Some (RH_compact rt) => Some (rt, input)
+      | Some (RH_explicit nullable) =>
+          match input with
+          | nil => None
+          | h :: rest => option_map (fun rt => (Ref_type nullable (ref_heap rt), rest))
+              (decode_reference_byte h)
+          end
       | None => None
-      | Some elem =>
-          option_map (fun '(a, lim, rest) =>
-            ({| tt_limits := lim; tt_elem_type := elem; tt_address_type := a |}, rest))
-            (decode_limits input)
       end
+  end.
+
+Inductive reference_encoding : list byte -> reference_type -> list byte -> Prop :=
+| reference_compact b rt rest :
+    decode_reference_head b = Some (RH_compact rt) ->
+    reference_encoding (b :: rest) rt rest
+| reference_explicit b h nullable rt rest :
+    decode_reference_head b = Some (RH_explicit nullable) ->
+    decode_reference_byte h = Some rt ->
+    reference_encoding (b :: h :: rest) (Ref_type nullable (ref_heap rt)) rest.
+
+Lemma decode_reference_type_spec input rt rest :
+  decode_reference_type input = Some (rt, rest) <-> reference_encoding input rt rest.
+Proof.
+  split.
+  - destruct input as [|b input]; [discriminate|].
+    cbn [decode_reference_type].
+    destruct (decode_reference_head b) as [[elem|nullable]|] eqn:Hhead; try discriminate.
+    + intros H; inversion H; subst. now constructor.
+    + destruct input as [|h input]; [discriminate|].
+      destruct (decode_reference_byte h) as [elem|] eqn:Hheap; [|discriminate].
+      intros H; inversion H; subst. econstructor; eassumption.
+  - intros H; destruct H; cbn [decode_reference_type]; rewrite H; try reflexivity.
+    now rewrite H0.
+Qed.
+
+Definition decode_table_type (input: list byte)
+    : option (datatypes.table_type * list byte) :=
+  match decode_reference_type input with
+  | None => None
+  | Some (elem, input) =>
+      option_map (fun '(a, lim, rest) =>
+        ({| tt_limits := lim; tt_elem_type := elem; tt_address_type := a |}, rest))
+        (decode_limits input)
   end.
 
 Definition decode_memarg (input: list byte) : option (memarg * list byte) :=
@@ -163,22 +212,39 @@ Definition decode_limits_tokens {n} (input: Toks n)
       end
   end.
 
-Definition decode_table_type_tokens {n} (input: Toks n)
-    : option (Success.Success Toks byte datatypes.table_type n) :=
+Definition decode_reference_type_tokens {n} (input: Toks n)
+    : option (Success.Success Toks byte reference_type n) :=
   match Success.getTok input with
   | None => None
-  | Some reference =>
-      match decode_reference_byte (Success.value reference) with
+  | Some first =>
+      match decode_reference_head (Success.value first) with
       | None => None
-      | Some elem =>
+      | Some (RH_compact rt) => Some (Success.map (fun _ => rt) first)
+      | Some (RH_explicit nullable) =>
+          match Success.getTok (Success.leftovers first) with
+          | None => None
+          | Some heap =>
+              match decode_reference_byte (Success.value heap) with
+              | None => None
+              | Some rt => Some (Success.lt_lift (Success.small first)
+                  (Success.map (fun _ => Ref_type nullable (ref_heap rt)) heap))
+              end
+          end
+      end
+  end.
+
+Definition decode_table_type_tokens {n} (input: Toks n)
+    : option (Success.Success Toks byte datatypes.table_type n) :=
+  match decode_reference_type_tokens input with
+  | None => None
+  | Some reference =>
           match decode_limits_tokens (Success.leftovers reference) with
           | None => None
           | Some lims =>
               Some (Success.lt_lift (Success.small reference)
                 (Success.map (fun '(a, lim) =>
-                  {| tt_limits := lim; tt_elem_type := elem; tt_address_type := a |}) lims))
+                  {| tt_limits := lim; tt_elem_type := Success.value reference; tt_address_type := a |}) lims))
           end
-      end
   end.
 
 Definition decode_memarg_offset_tokens align memory {n} (input: Toks n)
@@ -301,20 +367,51 @@ Definition flatten_table_type {n}
   option_map (fun s => (Success.value s,
     @Sized.value _ (@List.length byte) _ (Success.leftovers s))) result.
 
+Definition flatten_reference_type {n}
+    (result: option (Success.Success (SizedList byte) byte reference_type n))
+    : option (reference_type * list byte) :=
+  option_map (fun s => (Success.value s,
+    @Sized.value _ (@List.length byte) _ (Success.leftovers s))) result.
+
+Lemma decode_reference_type_tokens_correct input :
+  flatten_reference_type (decode_reference_type_tokens (mkSizedList input)) =
+    decode_reference_type input.
+Proof.
+  destruct input as [|b input]; [reflexivity|].
+  unfold decode_reference_type_tokens.
+  cbn [flatten_reference_type option_map decode_reference_type Success.getTok uncons
+    sizedList listUncons mkSizedList List.length Success.fromView
+    Success.value Success.size Success.leftovers Success.small uncurry].
+  destruct (decode_reference_head b) as [[rt|nullable]|]; try reflexivity.
+  destruct input as [|h rest]; [reflexivity|].
+  unfold flatten_reference_type.
+  rewrite sized_list_refl.
+  cbn [option_map Success.getTok uncons sizedList listUncons mkSizedList List.length
+    Success.fromView Success.value Success.size Success.leftovers Success.small uncurry].
+  destruct (decode_reference_byte h); reflexivity.
+Qed.
+
+Lemma decode_limits_tokens_correct_sized n (input: SizedList byte n) :
+  flatten_limits (decode_limits_tokens input) =
+    decode_limits (@Sized.value _ (@List.length byte) _ input).
+Proof.
+  destruct input as [input Hsize]. simpl in Hsize. subst n.
+  rewrite sized_list_refl. apply decode_limits_tokens_correct.
+Qed.
+
 Lemma decode_table_type_tokens_correct input :
   flatten_table_type (decode_table_type_tokens (mkSizedList input)) =
     decode_table_type input.
 Proof.
-  destruct input as [|reference input]; [reflexivity |].
-  unfold decode_table_type_tokens.
-  cbn [flatten_table_type option_map decode_table_type Success.getTok uncons
-    sizedList listUncons mkSizedList List.length Success.fromView
-    Success.value Success.size Success.leftovers Success.small uncurry].
-  destruct (decode_reference_byte reference) as [elem|]; [|reflexivity].
-  rewrite sized_list_refl.
-  pose proof (decode_limits_tokens_correct input) as Hlimits.
+  unfold decode_table_type_tokens, decode_table_type.
+  pose proof (decode_reference_type_tokens_correct input) as Href.
+  unfold flatten_reference_type in Href.
+  destruct (decode_reference_type_tokens (mkSizedList input)) as [reference|];
+    cbn [option_map] in Href; rewrite <- Href; [|reflexivity].
+  pose proof (decode_limits_tokens_correct_sized (Success.size reference)
+    (Success.leftovers reference)) as Hlimits.
   unfold flatten_limits in Hlimits.
-  destruct (decode_limits_tokens (mkSizedList input)) as [lims|];
+  destruct (decode_limits_tokens (Success.leftovers reference)) as [lims|];
     cbn [option_map] in Hlimits; rewrite <- Hlimits; [|reflexivity].
   destruct lims as [[a lim] size small rest]. reflexivity.
 Qed.

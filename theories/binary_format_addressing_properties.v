@@ -69,7 +69,7 @@ Qed.
 
 Theorem binary_table_type_encoding tt :
   binary_of_table_type tt =
-  binary_of_reference_type (datatypes.tt_elem_type tt) ::
+  binary_of_reference_type (datatypes.tt_elem_type tt) ++
     encode_limits (datatypes.tt_address_type tt) (datatypes.tt_limits tt).
 Proof.
   destruct tt as [[minimum maximum] elem width].
@@ -147,22 +147,21 @@ Qed.
 
 Theorem binary_table_type_parser_grammar input tt rest :
   run_table_type_prefix input = Some (tt, rest) <->
-  exists reference tail,
-    input = reference :: tail /\
-    decode_reference_byte reference = Some (datatypes.tt_elem_type tt) /\
+  exists tail,
+    reference_encoding input (datatypes.tt_elem_type tt) tail /\
     limits_encoding tail (datatypes.tt_address_type tt) (datatypes.tt_limits tt) rest.
 Proof.
   rewrite binary_table_type_parser_correct.
   split.
-  - destruct input as [|reference tail]; [discriminate |].
-    cbn [decode_table_type].
-    destruct (decode_reference_byte reference) as [elem|] eqn:Href; [|discriminate].
+  - unfold decode_table_type.
+    destruct (decode_reference_type input) as [[elem tail]|] eqn:Href; [|discriminate].
     destruct (decode_limits tail) as [[[a lim] remaining]|] eqn:Hlimits; [|discriminate].
     intros H; inversion H; subst; clear H.
-    exists reference, tail; repeat split; try assumption.
-    now apply decode_limits_sound.
-  - intros [reference [tail [-> [Href Hlimits]]]].
-    cbn [decode_table_type]. rewrite Href.
+    exists tail; split.
+    + now apply decode_reference_type_spec.
+    + now apply decode_limits_sound.
+  - intros [tail [Href Hlimits]].
+    unfold decode_table_type. apply decode_reference_type_spec in Href. rewrite Href.
     apply decode_limits_complete in Hlimits. rewrite Hlimits.
     destruct tt; reflexivity.
 Qed.

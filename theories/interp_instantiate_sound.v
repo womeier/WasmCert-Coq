@@ -4,7 +4,7 @@
 
 From mathcomp Require Import ssreflect ssrbool ssrnat eqtype seq.
 From Wasm Require Import interpreter_ctx instantiation_func instantiation_properties type_checker_reflects_typing.
-From Stdlib Require Import Program.
+From Stdlib Require Import Program Arith.PeanoNat.
 
 (* see common.v *)
 Set SsrOldRewriteGoalsOrder.
@@ -24,7 +24,7 @@ Proof.
                                                                                destruct (module_imports_typer mod_types mod_imports) as [impts | ] eqn:Hmitypes => //.
   destruct (gather_m_e_types (ext_t_tables impts ++ map modtab_type mod_tables) mod_elems) as [ets | ] eqn:Hmetypes => //.
   destruct (gather_m_d_types (ext_t_mems impts ++ map modmem_type mod_mems) mod_datas) as [dts | ] eqn:Hmdtypes => //.
-  destruct (all _ _ && _ && _ && _ && _ && _ && _ && _) eqn:Hallcond => //.
+  destruct (all _ _ && _ && _ && _ && _ && _ && _ && _ && _) eqn:Hallcond => //.
   destruct (module_exports_typer _ mod_exports) eqn:Hmexptypes => //.
   move/andP in Hallcond; destruct Hallcond as [Hallcond Hnameunique].
   move/andP in Hallcond; destruct Hallcond as [Hallcond Hstartcheck].
@@ -33,6 +33,7 @@ Proof.
   move/andP in Hallcond; destruct Hallcond as [Hallcond Hglobalcheck].
   move/andP in Hallcond; destruct Hallcond as [Hallcond Hmemcheck].
   move/andP in Hallcond; destruct Hallcond as [Hfunccheck Htablecheck].
+  move/andP in Hfunccheck; destruct Hfunccheck as [Htypescheck Hfunccheck].
   unfold module_typing.
   injection Hmodcheck as ->->.
   
@@ -40,7 +41,7 @@ Proof.
   repeat split => //.
 
   (* types *)
-  { by apply Forall_spec => //. }
+  { by apply Forall_all. }
   
   (* funcs *)
   { clear - Hfunccheck Hmftypes hfc.
@@ -65,10 +66,14 @@ Proof.
     move => n mtable [tx ty a] Htablenth Hftsnth.
     eapply all_projection in Htablecheck; eauto.
     simpl in *.
-    unfold module_table_typing, module_table_type_checker in *; rewrite Htablecheck => /=.
+    unfold module_table_typing, module_table_type_checker in *.
+    move/andP in Htablecheck; destruct Htablecheck as [Htablecheck Hbet].
+    move/andP in Htablecheck; destruct Htablecheck as [Hvalid Hconst].
     apply nth_error_map in Hftsnth as [mtab [??]].
     simplify_multieq.
-    by apply/eqP.
+    repeat split => //.
+    move/b_e_type_checker_reflects_typing in Hbet.
+    by rewrite H1 in Hbet.
   }
   (* memories *)
   { apply Forall2_spec => //; first by rewrite List.length_map.
@@ -177,21 +182,51 @@ Lemma external_type_checker_sound: forall s ext t,
   external_typing s ext t.
 Proof.
   move => s ext t Hextcheck.
-  unfold external_type_checker in Hextcheck; move/eqP in Hextcheck.
-  by destruct ext; destruct t => //; remove_bools_options; subst.
+  destruct ext as [a|a|a|a]; simpl in Hextcheck; try exact Hextcheck.
+  unfold ext_func_defined_type, funcinst_defined_type in Hextcheck.
+  destruct (lookup_N (s_funcs s) a) as [cl|] eqn:Hlookup; try discriminate.
+  destruct (close_defined_type (cl_type cl)) as [dt|] eqn:Hclose; try discriminate.
+  rewrite (close_defined_type_expands Hclose) in Hextcheck.
+  inversion Hextcheck; subst.
+  by unfold external_typing, ext_typing, ext_func_typing; rewrite Hlookup.
 Qed.
 
-Lemma interp_alloc_sound: forall s m v_imps g_inits r_inits s' inst,
+Lemma external_type_checker_complete s ext t :
+  store_typing s ->
+  external_typing s ext t ->
+  external_type_checker s ext = Some t.
+Proof.
+  move => Hstore Hext.
+  destruct ext as [a|a|a|a]; try exact Hext.
+  unfold external_typing, ext_typing in Hext.
+  destruct (ext_func_typing s a) as [ft|] eqn:Hft;
+    simpl in Hext; try discriminate.
+  inversion Hext; subst t.
+  destruct (ext_func_defined_type_complete Hstore Hft) as [dt [Hdt Hexpand]].
+  by unfold external_type_checker; rewrite Hdt Hexpand.
+Qed.
+
+Lemma external_type_checker_correct s ext t :
+  store_typing s ->
+  (external_type_checker s ext = Some t <-> external_typing s ext t).
+Proof.
+  move => Hstore; split.
+  - apply external_type_checker_sound.
+  - by apply external_type_checker_complete.
+Qed.
+
+Lemma interp_alloc_sound: forall s m v_imps g_inits r_inits t_inits s' inst,
   length g_inits = length m.(mod_globals) ->
   length r_inits = length m.(mod_elems) ->
-  interp_alloc_module s m v_imps g_inits r_inits = (s', inst) ->
-  alloc_module s m v_imps g_inits r_inits (s', inst).
+  length t_inits = length m.(mod_tables) ->
+  interp_alloc_module s m v_imps g_inits r_inits t_inits = (s', inst) ->
+  alloc_module s m v_imps g_inits r_inits t_inits (s', inst).
 Proof.
-  move => s m v_imps g_inits r_inits s' inst Hgvs_len Hrvs_len Halloc.
+  move => s m v_imps g_inits r_inits t_inits s' inst Hgvs_len Hrvs_len Htvs_len Halloc.
   unfold interp_alloc_module in Halloc.
   unfold alloc_module; simpl in *.
   destruct (alloc_funcs _ _ _) as [s1 ifs] eqn:Hallocfuncs.
-  destruct (alloc_tabs _ _) as [s2 its] eqn:Halloctabs.
+  destruct (alloc_tabs_with_init _ _) as [s2 its] eqn:Halloctabs.
   destruct (alloc_mems _ _) as [s3 ims] eqn:Hallocmems.
   destruct (alloc_globs _ _) as [s4 igs] eqn:Hallocglobs.
   destruct (alloc_elems _ _) as [s5 ies] eqn:Hallocelems.
@@ -200,7 +235,8 @@ Proof.
   injection Halloc as <-<-.
   rewrite Hallocfuncs Halloctabs Hallocmems Hallocglobs Hallocelems Hallocdatas => /=.
   apply alloc_func_iota_N in Hallocfuncs.
-  apply alloc_table_iota_N in Halloctabs.
+  apply alloc_table_inits_iota_N in Halloctabs.
+  rewrite List.length_combine List.length_map Htvs_len Nat.min_id in Halloctabs.
   apply alloc_mem_iota_N in Hallocmems.
   apply alloc_global_iota_N in Hallocglobs; last assumption.
   apply alloc_elem_iota_N in Hallocelems; last assumption.
@@ -242,6 +278,29 @@ Proof.
   by eexists; eauto.
 Qed.
 
+Lemma module_typecheck_table_aux: forall m t_imps t_exps str,
+    module_type_checker m = (Some (t_imps, t_exps), str) ->
+    exists c, all (module_table_type_checker c) m.(mod_tables).
+Proof.
+  move => m t_imps t_exps str.
+  unfold module_type_checker.
+  move => Hmodcheck.
+  destruct m.
+  remove_bools_options.
+  simpl in *.
+  by eexists; eauto.
+Qed.
+
+Lemma interp_get_vref_const s f es r :
+  interp_get_vref s f es = Some r ->
+  interp_get_const s f es = Some (VAL_ref r).
+Proof.
+  unfold interp_get_vref.
+  destruct (interp_get_const s f es) as [v|] eqn:E; try discriminate.
+  destruct v as [v|v|v]; try discriminate.
+  by move => [<-].
+Qed.
+
 Lemma interp_instantiate_imp_instantiate : forall hs hs' s m v_imps s_end f bes str,
   interp_instantiate hs s m v_imps = (Some (hs', s_end, f, bes), str) ->
   instantiate s m v_imps (s_end, f, bes).
@@ -252,20 +311,22 @@ Proof.
   destruct (module_type_checker m) as [[[t_imps_mod t_exps]|] str'] eqn:Hmodcheck => //.
   destruct (those _) as [t_imps | ] eqn:Hextcheck => //.
   destruct (all2 import_subtyping _ _) eqn:Hextsubtyping => //.
+  destruct (get_table_inits _ _ (mod_tables m)) as [t_inits|] eqn:Htableinit => //.
   destruct (get_global_inits _ _ (mod_globals m)) as [g_inits |] eqn:Hglobinit => //.
   destruct (get_elem_inits _ _ (mod_elems m)) as [r_inits |] eqn:Heleminit => //.
-  destruct (interp_alloc_module s m v_imps g_inits r_inits) as [s' inst'] eqn:Halloc => //.
+  destruct (interp_alloc_module s m v_imps g_inits r_inits t_inits) as [s' inst'] eqn:Halloc => //.
   injection Hinterp as <- <- Heq.
 
-  exists t_imps_mod, t_imps, t_exps, hs, inst', g_inits, r_inits.
+  exists t_imps_mod, t_imps, t_exps, hs, inst', g_inits, r_inits, t_inits.
 
   (* Proving these first so they can be used in the reasoning for initialisers later *)
   assert (module_typing m t_imps_mod t_exps) as Hmodtype; first by eapply module_type_checker_sound; eauto.
   
-  assert (alloc_module s m v_imps g_inits r_inits (s', inst')) as Hallocmodule.
+  assert (alloc_module s m v_imps g_inits r_inits t_inits (s', inst')) as Hallocmodule.
   { apply interp_alloc_sound => //.
     - by apply those_length in Hglobinit; rewrite length_is_size size_map -length_is_size in Hglobinit.
     - by apply those_length in Heleminit; rewrite length_is_size size_map -length_is_size in Heleminit.
+    - by apply those_length in Htableinit; rewrite length_is_size size_map -length_is_size in Htableinit.
   }
   
   assert (List.Forall2 (external_typing s) v_imps t_imps) as Hexttype.
@@ -292,10 +353,17 @@ Proof.
     by rewrite length_is_size.
   }
 
+  assert (Htvs_len : length t_inits = length m.(mod_tables)).
+  {
+    apply those_length in Htableinit.
+    rewrite length_is_size size_map in Htableinit.
+    by rewrite length_is_size.
+  }
+
   (* store *)
   unfold interp_alloc_module in Halloc.
   destruct (alloc_funcs _ _ _) as [s1 ifs] eqn:Hallocfuncs.
-  destruct (alloc_tabs _ _) as [s2 its] eqn:Halloctabs.
+  destruct (alloc_tabs_with_init _ _) as [s2 its] eqn:Halloctabs.
   destruct (alloc_mems _ _) as [s3 ims] eqn:Hallocmems.
   destruct (alloc_globs _ _) as [s4 igs] eqn:Hallocglobs.
   destruct (alloc_elems _ _) as [s5 ies] eqn:Hallocelems.
@@ -303,7 +371,8 @@ Proof.
 
   injection Halloc as <- Heqinst.
   specialize (alloc_func_iota_N Hallocfuncs) as Hfuncaddrs.
-  specialize (alloc_table_iota_N Halloctabs) as Htableaddrs.
+  specialize (alloc_table_inits_iota_N Halloctabs) as Htableaddrs.
+  rewrite List.length_combine List.length_map Htvs_len Nat.min_id in Htableaddrs.
   specialize (alloc_mem_iota_N Hallocmems) as Hmemaddrs.
   specialize (alloc_global_iota_N Hallocglobs Hgvs_len) as Hglobaladdrs.
   specialize (alloc_elem_iota_N Hallocelems Hrvs_len) as Helemaddrs.
@@ -315,6 +384,32 @@ Proof.
   repeat split => //.
   - (* subtyping *)
     by eapply Forall2_all2_impl; eauto.
+  - (* table initialisers *)
+    unfold instantiate_tables.
+    apply Forall2_spec => //.
+    move => n mtable tv Hnth1 Hnth2.
+    eapply those_map_lookup in Htableinit as [ti [Hmap Hnth]]; last by eauto.
+    apply interp_get_vref_const in Hmap.
+    apply module_typecheck_table_aux in Hmodcheck as [C Hmodcheck].
+    unfold module_table_type_checker in Hmodcheck.
+    eapply all_projection in Hmodcheck; eauto.
+    move/andP in Hmodcheck; destruct Hmodcheck as [Hchecks Hbetype].
+    move/andP in Hchecks; destruct Hchecks as [_ Hconstexpr].
+    move/b_e_type_checker_reflects_typing in Hbetype.
+    eapply const_exprs_impl in Hconstexpr; last by eauto.
+    destruct Hconstexpr as [e [Hinit Hconst]].
+    rewrite Hinit in Hmap |- *.
+    unfold const_expr in Hconst.
+    destruct e => //; simpl in Hmap; try discriminate.
+    + injection Hmap as <-; simpl in *; simplify_multieq; by constructor.
+    + remove_bools_options; simplify_multieq.
+      by constructor; apply r_ref_func => /=.
+    + remove_bools_options; simplify_multieq.
+      constructor; apply r_global_get => /=.
+      unfold sglob_val, sglob, sglob_ind in *; simpl in *.
+      remove_bools_options.
+      lookup_N_to_nth_error.
+      by erewrite nth_error_app_Some; eauto.
   - (* global initialisers -- hardest case, since it's the main difference in the 
        executable version *)
     unfold instantiate_globals.

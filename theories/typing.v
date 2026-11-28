@@ -24,6 +24,13 @@ Definition ext_func_typing (s: store_record) (addr: funcaddr) : option function_
   | None => None
   end.
 
+Definition ext_func_defined_type (s : store_record) (addr : funcaddr)
+    : option defined_type :=
+  match lookup_N s.(s_funcs) addr with
+  | Some cl => funcinst_defined_type cl
+  | None => None
+  end.
+
 Definition ext_table_typing (s: store_record) (addr: tableaddr) : option table_type :=
   match lookup_N s.(s_tables) addr with
   | Some x => Some (tableinst_type x)
@@ -56,13 +63,13 @@ For the purpose of checking argument values against the parameter types of expor
 
 Definition typeof_ref (s: store_record) (v: value_ref) : option reference_type :=
   match v with
-  | VAL_ref_null t => Some t
+  | VAL_ref_null t => Some (Ref_type true t)
   | VAL_ref_func addr =>
       match ext_func_typing s addr with
-      | Some ft => Some T_funcref
+      | Some ft => Some (Ref_type false HT_func)
       | _ => None
       end
-  | VAL_ref_extern eaddr => Some T_externref
+  | VAL_ref_extern eaddr => Some (Ref_type false HT_extern)
   end.
 
 Definition typeof_value (s: store_record) (v: value) : option value_type :=
@@ -192,12 +199,12 @@ https://www.w3.org/TR/wasm-core-2/valid/instructions.html
 Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :=
 | bet_const_num : forall C v, be_typing C [::BI_const_num v] (Tf [::] [::T_num (typeof_num v)])
 | bet_const_vec : forall C v, be_typing C [::BI_const_vec v] (Tf [::] [::T_vec (typeof_vec v)])
-| bet_ref_null: forall C t, be_typing C [::BI_ref_null t] (Tf [::] [::T_ref t])
+| bet_ref_null: forall C t, be_typing C [::BI_ref_null t] (Tf [::] [::T_ref (Ref_type true t)])
 | bet_ref_is_null: forall C t, be_typing C [::BI_ref_is_null] (Tf [::T_ref t] [::T_num T_i32])
 | bet_ref_func: forall C t x,
     lookup_N (tc_funcs C) x = Some t ->
     List.In x (tc_refs C) ->
-    be_typing C [::BI_ref_func x] (Tf [::] [::T_ref T_funcref])
+    be_typing C [::BI_ref_func x] (Tf [::] [::T_ref (Ref_type false HT_func)])
 | bet_unop : forall C t op,
     unop_type_agree t op -> be_typing C [::BI_unop t op] (Tf [::T_num t] [::T_num t])
 | bet_binop : forall C t op,
@@ -263,7 +270,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   be_typing C [::BI_call i] tf
 | bet_call_indirect : forall C x y tabtype t1s t2s,
   lookup_N (tc_tables C) x = Some tabtype ->
-  tabtype.(tt_elem_type) = T_funcref ->
+  ref_heap tabtype.(tt_elem_type) = HT_func ->
   lookup_N (tc_types C) y = Some (Tf t1s t2s) ->
   be_typing C [::BI_call_indirect x y]
     (Tf (t1s ++ [::Addressing.address_value_type tabtype.(tt_address_type)]) t2s)
@@ -273,7 +280,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   be_typing C [::BI_return_call x] (Tf (t3s ++ t1s) t4s)
 | bet_return_call_indirect : forall C x y tabt t1s t2s t3s t4s,
   lookup_N (tc_tables C) x = Some tabt ->
-  tabt.(tt_elem_type) = T_funcref ->
+  ref_heap tabt.(tt_elem_type) = HT_func ->
   lookup_N (tc_types C) y = Some (Tf t1s t2s) -> 
   tc_return C = Some t2s ->
   be_typing C [::BI_return_call_indirect x y]
@@ -416,6 +423,19 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   be_typing C es (Tf t1s t2s) ->
   (Tf t1s t2s) <ti: (Tf t1s' t2s') ->
   be_typing C es (Tf t1s' t2s')
+(* Reference refinement changes only nullability, retaining heap identity. *)
+| bet_ref_as_non_null : forall C t,
+  is_ref_t t ->
+  be_typing C [::BI_ref_as_non_null] (Tf [::t] [::non_nullable_type t])
+| bet_br_on_non_null : forall C x ts t,
+  lookup_N C.(tc_labels) x = Some (ts ++ [::t]) ->
+  is_ref_t t ->
+  be_typing C [::BI_br_on_non_null x] (Tf (ts ++ [::nullable_type t]) ts)
+| bet_br_on_null : forall C x ts t,
+  lookup_N C.(tc_labels) x = Some ts ->
+  is_ref_t t ->
+  be_typing C [::BI_br_on_null x]
+    (Tf (ts ++ [::t]) (ts ++ [::non_nullable_type t]))
 .
 
 Definition expr_typing (C: t_context) (bes: list basic_instruction) (ts: result_type) : Prop :=
@@ -562,10 +582,10 @@ Inductive e_typing : store_record -> t_context -> seq administrative_instruction
 | ety_trap : forall s C tf,
   e_typing s C [::AI_trap] tf
 | ety_ref_extern : forall s C a,
-  e_typing s C [::AI_ref_extern a] (Tf [::] [::T_ref T_externref])
+  e_typing s C [::AI_ref_extern a] (Tf [::] [::T_ref (Ref_type false HT_extern)])
 | ety_ref : forall s C a tf,
   ext_func_typing s a = Some tf ->
-  e_typing s C [::AI_ref a] (Tf [::] [::T_ref T_funcref])
+  e_typing s C [::AI_ref a] (Tf [::] [::T_ref (Ref_type false HT_func)])
 | ety_invoke : forall s (a: funcaddr) C tf,
   ext_func_typing s a = Some tf ->
   e_typing s C [::AI_invoke a] tf

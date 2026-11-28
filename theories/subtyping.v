@@ -4,21 +4,26 @@ From mathcomp Require Import ssreflect eqtype ssrbool seq ssrnat.
 (* see common.v *)
 Set SsrOldRewriteGoalsOrder.
 
-(** The mechanisation implements a restricted version of the subtyping system
-from the upcoming GC proposal to the current set of Wasm 2.0 types.
-Namely, t_1 <: t_2 iff t_1 is the bottom type, or the two types are equal.
-
-This allows smoother transition into the upcoming proposals and avoids
-the need to deal with the artificial stack type in Wasm 2.0, which is a
-temporary solution.
-
-For more details on the GC proposal, check
-[https://github.com/WebAssembly/gc/blob/main/proposals/gc/Overview.md]
-**)
+(** Core subtyping includes bottom and same-heap reference nullability.
+    Declared/recursive heap matching is supplied by the shared type layer;
+    module-local indices are not global runtime identities. **)
 Section Subtyping.
 
+(* Shared validation entry point. This profile implements same-heap
+   nullability matching. The explicit declaration context is the boundary
+   at which recursive/declared matching must be added;
+   a source HT_type index is not a closed runtime identity. *)
+Definition reference_type_match (_C : type_context)
+    (t1 t2 : reference_type) : bool :=
+  (ref_heap t1 == ref_heap t2) &&
+    (negb (ref_nullable t1) || ref_nullable t2).
+
 Definition value_subtyping (t1: value_type) (t2: value_type) : bool :=
-  (t1 == t2) || (t1 == T_bot).
+  (t1 == t2) || (t1 == T_bot) ||
+  match t1, t2 with
+  | T_ref r1, T_ref r2 => reference_type_match nil r1 r2
+  | _, _ => false
+  end.
 
 Definition values_subtyping (ts1: list value_type) (ts2: list value_type) : bool :=
   all2 value_subtyping ts1 ts2.
@@ -49,17 +54,17 @@ Notation "ts1 <ts: ts2" := (values_subtyping ts1 ts2) (at level 60).
 Notation "tf1 <ti: tf2" := (instr_subtyping tf1 tf2) (at level 60).
 Notation "tf1 <tf: tf2" := (func_subtyping tf1 tf2) (at level 60).
 
-(* Type lattice of Wasm 2.0 is quite trivial *)
+(* Within the same-heap profile, comparable types have their meet/join
+   selected by subtyping. Unrelated types have bottom/no join respectively. *)
 Section Lattice.
   
   Definition t_inf (t1 t2: value_type) : value_type :=
-    if (t1 == t2) then t1 else T_bot.
+    if (t1 <t: t2) then t1
+    else if (t2 <t: t1) then t2 else T_bot.
 
   Definition t_sup (t1 t2: value_type) : option value_type :=
-    if (t1 == T_bot) then Some t2
-    else if (t2 == T_bot) then Some t1
-         else if (t1 == t2) then Some t1
-              else None.
+    if (t1 <t: t2) then Some t2
+    else if (t2 <t: t1) then Some t1 else None.
 
   Definition ts_inf (ts1 ts2: list value_type) : option (list value_type) :=
     if (List.length ts1 == List.length ts2) then

@@ -113,6 +113,21 @@ Definition type_update_drop (ct : checker_type) : option checker_type :=
       Some <<ts', ct.(CT_unr)>>
   end.
 
+Definition type_update_ref_as_non_null (ct : checker_type) : option checker_type :=
+  match ct.(CT_type) with
+  | nil =>
+      if ct.(CT_unr) then Some <<[::T_bot], true>> else None
+  | t :: ts => if is_ref_t t
+               then Some <<non_nullable_type t :: ts, ct.(CT_unr)>> else None
+  end.
+
+Definition type_update_br_on_null (ct : checker_type)
+    (labels : list value_type) : option checker_type :=
+  let t := head T_bot ct.(CT_type) in
+  if is_ref_t t then
+    type_update ct (t :: labels) (non_nullable_type t :: labels)
+  else None.
+
 (** With subtyping in Wasm 2.0, br_table now needs to find the common subtype to be consumed. **)
 
 Fixpoint common_lab_h (iss : seq tableidx) (lab_c : seq (seq value_type)) (ts : seq value_type) : option (seq value_type) :=
@@ -160,13 +175,33 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       match be with
       | BI_const_num v => type_update ts [::] [::T_num (typeof_num v)]
       | BI_const_vec v => type_update ts [::] [::T_vec (typeof_vec v)]
-      | BI_ref_null t => type_update ts [::]  [::T_ref t]
+      | BI_ref_null t => type_update ts [::]  [::T_ref (Ref_type true t)]
       | BI_ref_is_null => type_update_ref_is_null ts
+      | BI_ref_as_non_null => type_update_ref_as_non_null ts
+      (* Parsing and dispatch are available, but accepting these instructions
+         requires closed indexed function reference typing. Never substitute
+         abstract funcref validation or a dynamic signature-checking trap. *)
+      | BI_call_ref _ | BI_return_call_ref _ => None
+      | BI_br_on_non_null x =>
+          match lookup_N C.(tc_labels) x with
+          | Some label_types =>
+              if (label_types != nil) && is_ref_t (head T_bot label_types)
+               then type_update ts
+                 (nullable_type (head T_bot label_types) :: behead label_types)
+                 (behead label_types)
+              else None
+           | None => None
+           end
+       | BI_br_on_null x =>
+           match lookup_N C.(tc_labels) x with
+           | Some labels => type_update_br_on_null ts labels
+           | None => None
+           end
       | BI_ref_func x =>
           match lookup_N C.(tc_funcs) x with
           | Some _ =>
               if x \in C.(tc_refs)
-              then type_update ts [::] [::T_ref T_funcref]
+               then type_update ts [::] [::T_ref (Ref_type false HT_func)]
               else None
           | _ => None
           end
@@ -273,7 +308,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       | BI_call_indirect x y =>
           match lookup_N C.(tc_tables) x with
           | Some tabt =>
-              if tabt.(tt_elem_type) == T_funcref then
+                if ref_heap tabt.(tt_elem_type) == HT_func then
                 match lookup_N (tc_types C) y with
                 | Some (Tf tn tm) =>
                     type_update ts (Addressing.address_value_type tabt.(tt_address_type) :: tn) tm
@@ -299,7 +334,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           | Some t2s =>
               match lookup_N C.(tc_tables) x with
               | Some tabt =>
-                  if tabt.(tt_elem_type) == T_funcref then
+                    if ref_heap tabt.(tt_elem_type) == HT_func then
                     match lookup_N (tc_types C) y with
                     | Some (Tf tn tm) =>
                         if (t2s == tm) then

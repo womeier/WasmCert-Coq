@@ -1296,9 +1296,82 @@ Ltac extract_listn :=
 
 (** * More Advanced Lemmas **)
 
+Lemma resolve_defined_type_sound C i dt :
+  resolve_defined_type C i = Some dt ->
+  exists ft, lookup_N C i = Some ft /\
+    expand_function_type dt = Some ft /\ function_type_closed ft = true.
+Proof.
+  unfold resolve_defined_type.
+  destruct (lookup_N C i) as [ft|] eqn:Hlookup; try discriminate.
+  move => Hclose. exists ft; split; first reflexivity.
+  pose proof (close_defined_type_expands Hclose) as Hexpand.
+  split; first exact Hexpand.
+  by apply (expanded_function_type_closed Hexpand).
+Qed.
+
+Lemma resolve_defined_type_complete C i ft :
+  List.Forall functype_valid C ->
+  lookup_N C i = Some ft ->
+  exists dt, resolve_defined_type C i = Some dt /\
+    expand_function_type dt = Some ft.
+Proof.
+  move => Hclosed Hlookup.
+  have Hft: function_type_closed ft = true.
+  { exact (Forall_lookup Hclosed (lookup_N_nth_error Hlookup)). }
+  destruct (close_defined_type_complete Hft) as [dt Hdt].
+  exists dt; split.
+  - by unfold resolve_defined_type; rewrite Hlookup.
+  - by apply close_defined_type_expands.
+Qed.
+
 Section Host.
 
 Context `{hfc: host_function_class} `{memory: BlockUpdateMemory}.
+
+Lemma funcinst_defined_type_typing s cl ft :
+  funcinst_typing s cl ft ->
+  exists dt, funcinst_defined_type cl = Some dt /\
+    expand_function_type dt = Some ft.
+Proof.
+  destruct cl as [body inst code|body hf]; simpl.
+  - move => [E [Hclosed _]]; subst ft.
+    destruct (close_defined_type_complete Hclosed) as [dt Hdt].
+    exists dt; split; [exact Hdt | by apply close_defined_type_expands].
+  - move => [E Hclosed]; subst ft.
+    destruct (close_defined_type_complete Hclosed) as [dt Hdt].
+    exists dt; split; [exact Hdt | by apply close_defined_type_expands].
+Qed.
+
+Lemma ext_func_defined_type_sound s a dt :
+  ext_func_defined_type s a = Some dt ->
+  exists ft, ext_func_typing s a = Some ft /\
+    expand_function_type dt = Some ft.
+Proof.
+  unfold ext_func_defined_type, ext_func_typing, funcinst_defined_type.
+  destruct (lookup_N (s_funcs s) a) as [cl|]; try discriminate.
+  move => Hdt. exists (cl_type cl); split; [reflexivity |].
+  by apply close_defined_type_expands.
+Qed.
+
+Lemma ext_func_defined_type_complete s a ft :
+  store_typing s ->
+  ext_func_typing s a = Some ft ->
+  exists dt, ext_func_defined_type s a = Some dt /\
+    expand_function_type dt = Some ft.
+Proof.
+  move => Hstore Hft.
+  unfold ext_func_typing in Hft.
+  destruct (lookup_N (s_funcs s) a) as [cl|] eqn:Hlookup; try discriminate.
+  injection Hft as <-.
+  destruct s; simpl in Hstore, Hlookup.
+  destruct Hstore as [Hfuncs _].
+  destruct (Forall_lookup Hfuncs (lookup_N_nth_error Hlookup)) as [body Hcl].
+  destruct (funcinst_defined_type_typing Hcl) as [dt [Hdt Hexpand]].
+  exists dt; split.
+  - unfold ext_func_defined_type; simpl.
+    by rewrite Hlookup.
+  - by apply close_defined_type_expands.
+Qed.
 
 Lemma values_typing_size: forall s vs ts,
     values_typing s vs ts ->
@@ -1351,10 +1424,13 @@ Lemma default_value_typing: forall s t v,
     value_typing s v t.
 Proof.
   move => s t v Hval.
-  destruct t, v => //; simpl in *; try inversion Hval; subst => //=.
-  - by destruct n.
-  - by destruct v0.
-  - by destruct r.
+  destruct t as [n|w|[b h]|]; simpl in Hval.
+  - destruct n; inversion Hval; subst; by [].
+  - destruct w; inversion Hval; subst; by [].
+  - destruct b; simpl in Hval; try discriminate.
+    inversion Hval; subst.
+    by unfold value_typing; simpl; rewrite /value_subtyping eq_refl.
+  - discriminate.
 Qed.
 
 Lemma default_values_typing: forall s ts vs,

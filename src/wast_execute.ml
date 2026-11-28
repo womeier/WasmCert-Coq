@@ -502,11 +502,12 @@ let register_spectest_host verbosity hs s =
   let table64 = Extract.{
     tt_limits = {lim_min = Big_int_Z.big_int_of_int 10;
                  lim_max = Some (Big_int_Z.big_int_of_int 20)};
-    tt_elem_type = T_funcref; tt_address_type = Addressing.AT_i64 } in
+    tt_elem_type = {ref_nullable = true; ref_heap = HT_func};
+    tt_address_type = Addressing.AT_i64 } in
   let table64_name = List.init 7 (String.get "table64") in
   let table64_index = Big_int_Z.big_int_of_int (List.length m.Extract.mod_tables) in
   let m = Extract.{ m with
-    mod_tables = m.mod_tables @ [table64];
+    mod_tables = m.mod_tables @ [{modtab_type = table64; modtab_init = None}];
     mod_exports = m.mod_exports @
       [{modexp_name = table64_name; modexp_desc = MED_table table64_index}] } in
   let modname = "spectest" in

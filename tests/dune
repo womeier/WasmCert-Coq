@@ -113,3 +113,15 @@
  (action
   (run bash %{dep:wast_assertion_phases_test.sh} %{dep:../run_wast.sh}
    %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps run_wast_tests.sh ../run_wast.sh)
+ (action (run bash %{dep:run_wast_tests.sh} %{dep:../run_wast.sh})))
+
+(rule
+ (alias runtest)
+ (deps function_references_binary.py)
+ (action
+  (run python3 %{dep:function_references_binary.py}
+   %{exe:../src/wasm_coq_interpreter.exe})))

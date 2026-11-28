@@ -11,6 +11,7 @@ module P = AddressingParseque
 let n = Big_int_Z.big_int_of_string
 let z = n "0"
 let one = n "1"
+let funcref = { ref_nullable = true; ref_heap = HT_func }
 let equal = Big_int_Z.eq_big_int
 let value a s = A.value_of_address a (n s)
 let limits minimum maximum =
@@ -39,7 +40,7 @@ let storage_program result_type memories tables instructions : module0 =
   { mod_types = [Tf ([], [T_num result_type])];
     mod_funcs = [{ modfunc_type = z; modfunc_locals = [];
                    modfunc_body = instructions }];
-    mod_tables = tables;
+    mod_tables = List.map (fun t -> {modtab_type = t; modtab_init = None}) tables;
     mod_mems = memories;
     mod_globals = []; mod_elems = []; mod_datas = []; mod_start = None;
     mod_imports = []; mod_exports = [] }
@@ -190,20 +191,20 @@ let () =
   check "core growth respects memory64 maximum"
     (mem_grow0 memory_instance core_grown one = None);
   let core_tt64 : table_type =
-    { tt_limits = limits "1" (Some "2"); tt_elem_type = T_funcref;
+    { tt_limits = limits "1" (Some "2"); tt_elem_type = funcref;
       tt_address_type = A.AT_i64 } in
   let core_tt32 : table_type =
     { core_tt64 with tt_address_type = A.AT_i32 } in
   check "core table imports distinguish address widths"
     (not (import_table_subtyping core_tt64 core_tt32) &&
      not (import_table_subtyping core_tt32 core_tt64));
-  let core_table = gen_table_instance core_tt64 (VAL_ref_null T_funcref) in
+  let core_table = gen_table_instance core_tt64 (VAL_ref_null HT_func) in
   let core_table_grown = some "core table64 growth"
       (growtable core_table one (VAL_ref_func (n "8"))) in
   check "core table growth retains address type"
     (core_table_grown.tableinst_type.tt_address_type = A.AT_i64);
   check "core table64 growth rejects address overflow before allocation"
-    (growtable core_table max64 (VAL_ref_null T_funcref) = None);
+    (growtable core_table max64 (VAL_ref_null HT_func) = None);
   let full_core64 : memory_type =
     { mt_limits = limits "281474976710656" None; mt_address_type = A.AT_i64 } in
   check "actual core interpreter memory64.size returns i64 without narrowing"
@@ -256,7 +257,7 @@ let () =
          [BI_const_num (value A.AT_i32 "1"); BI_memory_grow z]) []
   in
   check "core validator rejects i32 delta for memory64.grow" (bad_delta = None);
-  let table_delta s = [BI_ref_null T_funcref; delta64 s; BI_table_grow z] in
+  let table_delta s = [BI_ref_null HT_func; delta64 s; BI_table_grow z] in
   check "actual core table64.grow returns previous size as i64"
     (execute_storage_module
        (storage_program T_i64 [] [core_tt64] (table_delta "1")) =
@@ -281,13 +282,13 @@ let () =
   let bad_table_delta, _ =
     Runner.interp_instantiate_wrapper (Obj.repr ()) Runner.empty_store_record
       (storage_program T_i64 [] [core_tt64]
-         [BI_ref_null T_funcref; BI_const_num (value A.AT_i32 "1"); BI_table_grow z]) []
+         [BI_ref_null HT_func; BI_const_num (value A.AT_i32 "1"); BI_table_grow z]) []
   in
   check "core validator rejects i32 delta for table64.grow" (bad_table_delta = None);
   let bad_table_init, _ =
     Runner.interp_instantiate_wrapper (Obj.repr ()) Runner.empty_store_record
       (storage_program T_i64 [] [core_tt64]
-         [BI_ref_null T_externref; delta64 "1"; BI_table_grow z]) []
+         [BI_ref_null HT_extern; delta64 "1"; BI_table_grow z]) []
   in
   check "core table64.grow retains reference-type checks" (bad_table_init = None);
   let core_tt64 = { core_tt64 with tt_limits = limits "2" (Some "3") } in
@@ -300,10 +301,10 @@ let () =
   check_table "core table64.get accepts i64 index" [core_tt64]
     [index64 "1"; BI_table_get z; BI_ref_is_null] "1";
   check_table "core table64.set accepts i64 index" [core_tt64]
-    [index64 "1"; BI_ref_null T_funcref; BI_table_set z;
+    [index64 "1"; BI_ref_null HT_func; BI_table_set z;
      index64 "1"; BI_table_get z; BI_ref_is_null] "1";
   check_table "core table64.fill uses i64 count" [core_tt64]
-    [index64 "0"; BI_ref_null T_funcref; index64 "2"; BI_table_fill z;
+    [index64 "0"; BI_ref_null HT_func; index64 "2"; BI_table_fill z;
      index64 "1"; BI_table_get z; BI_ref_is_null] "1";
   let core_tt32 = { core_tt64 with tt_address_type = A.AT_i32 } in
   check_table "core mixed table copy 32 to 64 uses i32 length" [core_tt64; core_tt32]
@@ -324,7 +325,7 @@ let () =
     ["core table64.get rejects i32", [core_tt64],
        [index32 "0"; BI_table_get z; BI_ref_is_null];
      "core table64.fill rejects i32 count", [core_tt64],
-       [index64 "0"; BI_ref_null T_funcref; index32 "0"; BI_table_fill z; index32 "0"];
+       [index64 "0"; BI_ref_null HT_func; index32 "0"; BI_table_fill z; index32 "0"];
      "core mixed table copy rejects i64 length", [core_tt64; core_tt32],
        [index64 "0"; index32 "0"; index64 "0"; BI_table_copy (z, one); index32 "0"]];
   let with_active_element offset body =
@@ -333,7 +334,7 @@ let () =
       mod_funcs = m.mod_funcs @
         [{ modfunc_type = z; modfunc_locals = [];
            modfunc_body = [index32 "42"] }];
-      mod_elems = [{ modelem_type = T_funcref;
+      mod_elems = [{ modelem_type = funcref;
                      modelem_init = [[BI_ref_func one]];
                      modelem_mode = ME_active (z, [offset]) }] } in
   List.iter (fun (name, call) ->
@@ -349,8 +350,8 @@ let () =
   let passive = { (table_program [core_tt64]
     [index64 "1"; index32 "0"; index32 "1"; BI_table_init (z, z);
      index64 "1"; BI_table_get z; BI_ref_is_null]) with
-      mod_elems = [{ modelem_type = T_funcref;
-                     modelem_init = [[BI_ref_null T_funcref]];
+      mod_elems = [{ modelem_type = funcref;
+                     modelem_init = [[BI_ref_null HT_func]];
                      modelem_mode = ME_passive }] } in
   check "core table64.init uses i64 destination and i32 segment operands"
     (execute_storage_module passive = [Utility.vali32_of_Z one]);
@@ -360,7 +361,7 @@ let () =
       (storage_module T_i64 [] [full_tt64] (BI_table_size z)) =
         [Utility.vali64_of_Z (n "-1")]);
   let with_declared_self m = { m with
-    mod_elems = [{ modelem_type = T_funcref;
+    mod_elems = [{ modelem_type = funcref;
                    modelem_init = [[BI_ref_func z]];
                    modelem_mode = ME_declarative }] } in
   check "core table64.set/get reaches last full-capacity element"
@@ -420,10 +421,10 @@ let () =
        (value A.AT_i32 "0") (value A.AT_i64 "1") = None);
   let tt = A.{ table_address_type = AT_i64;
                table_limits = limits "2" (Some "3");
-               table_element_type = T_funcref } in
+               table_element_type = funcref } in
   let t = some "table64 allocation" (T.allocate tt) in
   check "table64 null initialization"
-    (T.get t (value A.AT_i64 "1") = Some (VAL_ref_null T_funcref));
+    (T.get t (value A.AT_i64 "1") = Some (VAL_ref_null HT_func));
   check "table64 high index bounds failure"
     (T.get t (value A.AT_i64 "18446744073709551615") = None);
   check "table64 rejects i32 index"
@@ -441,7 +442,7 @@ let () =
   check "table64 growth initializes new elements"
     (T.get t'' (value A.AT_i64 "2") = Some (VAL_ref_func (n "8")));
   check "table64 growth respects declared maximum"
-    (T.grow t'' (value A.AT_i64 "1") (VAL_ref_null T_funcref) = None);
+    (T.grow t'' (value A.AT_i64 "1") (VAL_ref_null HT_func) = None);
   let original = Parray.set_gen (Parray.make 4 0) 0 4 (fun i -> i + 1) in
   let snapshot_copy = Parray.set_gen original 1 3 (Parray.get original) in
   check "native block generator sees source snapshot"

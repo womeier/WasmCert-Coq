@@ -140,6 +140,123 @@ Lemma memory_zero_simd_compact_bytes :
     xfd :: x00 :: x04 :: x00 :: nil.
 Proof. vm_compute. reflexivity. Qed.
 
+Lemma test_ref_as_non_null :
+  run_parse_bes (xd4 :: nil) = Some (BI_ref_as_non_null :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma print_ref_as_non_null :
+  binary_of_expr (BI_ref_as_non_null :: nil) = xd4 :: x0b :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma test_call_ref :
+  run_parse_bes (x14 :: x00 :: nil) = Some (BI_call_ref 0%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma test_return_call_ref :
+  run_parse_bes (x15 :: x01 :: nil) = Some (BI_return_call_ref 1%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma test_call_ref_noncanonical_index :
+  run_parse_bes (x14 :: x80 :: x00 :: nil) = Some (BI_call_ref 0%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma test_call_ref_truncated_index :
+  run_parse_bes (x14 :: x80 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma test_call_ref_overflow_index :
+  run_parse_bes (x14 :: x80 :: x80 :: x80 :: x80 :: x10 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma test_return_call_ref_max_index :
+  run_parse_bes (x15 :: xff :: xff :: xff :: xff :: x0f :: nil) =
+    Some (BI_return_call_ref 4294967295%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma print_call_refs :
+  binary_of_expr (BI_call_ref 0%N :: BI_return_call_ref 1%N :: nil) =
+    x14 :: x00 :: x15 :: x01 :: x0b :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma print_nullable_indexed_reference :
+  binary_of_reference_type (Ref_type true (HT_type 64%N)) =
+    x63 :: xc0 :: x00 :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma print_non_null_indexed_reference :
+  binary_of_reference_type (Ref_type false (HT_type 0%N)) =
+    x64 :: x00 :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+(* Exhaustive bounded-domain correctness for the actual parser entry point,
+   not a replacement decoder: a single-byte immediate has exactly 128 valid
+   encodings; all continuation bytes are rejected when the input ends here.
+   General multi-byte LEB128/parser correctness remains a separate obligation. *)
+Lemma parse_reference_call_single_byte (tail : bool) (b : Byte.byte) :
+  run_parse_bes ((if tail then x15 else x14) :: b :: nil) =
+    if N.ltb (Byte.to_N b) 128%N then
+      Some ((if tail then BI_return_call_ref (Byte.to_N b)
+             else BI_call_ref (Byte.to_N b)) :: nil)
+    else None.
+Proof. destruct tail, b; vm_compute; reflexivity. Qed.
+
+Lemma parse_br_on_non_null_single_byte (b : Byte.byte) :
+  run_parse_bes (xd6 :: b :: nil) =
+    if N.ltb (Byte.to_N b) 128%N then
+      Some (BI_br_on_non_null (Byte.to_N b) :: nil)
+    else None.
+Proof. destruct b; vm_compute; reflexivity. Qed.
+
+Lemma parse_br_on_null_single_byte (b : Byte.byte) :
+  run_parse_bes (xd5 :: b :: nil) =
+    if (Byte.to_N b <? 128)%N then
+      Some (BI_br_on_null (Byte.to_N b) :: nil)
+    else None.
+Proof. destruct b; vm_compute; reflexivity. Qed.
+
+Lemma print_br_on_null :
+  binary_of_expr (BI_br_on_null 0%N :: nil) = xd5 :: x00 :: x0b :: nil.
+Proof. reflexivity. Qed.
+
+Definition initialized_funcref_table :=
+  Build_module_table
+    (Build_table_type (Build_limits 2%N None) T_funcref AT_i32)
+    (Some (BI_ref_func 0%N :: nil)).
+
+Lemma parse_nonnullable_funcref :
+  check_toks (x64 :: x70 :: nil)
+    (fun n => parse_reference_type (n := n)) =
+    Running.Singleton (Ref_type false HT_func).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma parse_explicit_nullable_externref :
+  check_toks (x63 :: x6f :: nil)
+    (fun n => parse_reference_type (n := n)) =
+    Running.Singleton T_externref.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma parse_table_initializer :
+  check_toks (x40 :: x00 :: x70 :: x00 :: x02 :: xd2 :: x00 :: x0b :: nil)
+    (fun n => parse_module_table (n := n)) = Running.Singleton initialized_funcref_table.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma print_table_initializer :
+  binary_of_module_table initialized_funcref_table =
+    x40 :: x00 :: x70 :: x00 :: x02 :: xd2 :: x00 :: x0b :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma print_legacy_table :
+  binary_of_module_table
+    (Build_module_table
+       (Build_table_type (Build_limits 2%N None) T_funcref AT_i32) None) =
+    x70 :: x00 :: x02 :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma reject_table_reserved_byte :
+  check_toks (x40 :: x01 :: x70 :: x00 :: x02 :: xd2 :: x00 :: x0b :: nil)
+    (fun n => parse_module_table (n := n)) = False.
+Proof. vm_compute. reflexivity. Qed.
+
 (** An example program. **)
 Definition test :=
   BI_if (BT_valtype None) (BI_testop T_i64 TO_eqz :: nil) (BI_testop T_i64 TO_eqz :: nil).
@@ -363,7 +480,7 @@ Definition module_tableops := {|
   mod_funcs :=
     let e := BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 1))) in
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := cons e nil |} nil;
-  mod_tables := (cons (Build_module_table (Build_table_type (Build_limits 0%N (Some 4%N)) T_funcref AT_i32)) nil);
+  mod_tables := (cons (Build_module_table (Build_table_type (Build_limits 0%N (Some 4%N)) T_funcref AT_i32) None) nil);
   mod_mems := nil;
                                mod_globals := nil;
   mod_elems := (cons (Build_module_element T_funcref (cons (cons (BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 1)))) nil) nil) (ME_active 0%N (cons (BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 1)))) nil))) nil);

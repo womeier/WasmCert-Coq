@@ -75,6 +75,13 @@ Proof.
     + reflexivity.
 Qed.
 
+Definition resolve_defined_type (C : type_context) (i : typeidx)
+    : option defined_type :=
+  match lookup_N C i with
+  | Some ft => close_defined_type ft
+  | None => None
+  end.
+
 Definition empty_t_context := Build_t_context nil nil nil nil nil nil nil nil nil None nil.
 
 (** read `len` bytes from `m` starting at `start_idx` *)
@@ -274,7 +281,8 @@ Definition default_val (t: value_type) : option value :=
   match t with
   | T_num t => Some (VAL_num (bitzero t))
   | T_vec t => Some (VAL_vec (VAL_vec128 SIMD.v128_default))
-  | T_ref t => Some (VAL_ref (VAL_ref_null t))
+  | T_ref t =>
+      if ref_nullable t then Some (VAL_ref (VAL_ref_null (ref_heap t))) else None
   | T_bot => None
   end.
 
@@ -846,6 +854,9 @@ Definition cl_type (cl : funcinst) : function_type :=
   | FC_func_host tf _ => tf
   end.
 
+Definition funcinst_defined_type (cl : funcinst) : option defined_type :=
+  close_defined_type (cl_type cl).
+
 Definition upd_s_func (s : store_record) (fs: list funcinst) : store_record :=
   {|
     s_funcs := fs;
@@ -1352,7 +1363,7 @@ Definition e_to_vref (e: administrative_instruction) : value_ref :=
   | AI_basic (BI_ref_null t) => VAL_ref_null t
   | AI_ref addr => VAL_ref_func addr
   | AI_ref_extern eaddr => VAL_ref_extern eaddr
-  | _ => VAL_ref_null T_funcref
+  | _ => VAL_ref_null HT_func
   end.
 
 Definition e_to_vref_opt (e: administrative_instruction) : option value_ref :=

@@ -28,7 +28,7 @@ Definition valid (t: instance) : Prop :=
 Definition allocate (tt: Addressing.table_type) : option instance :=
   if table_type_valid tt then
     Some {| declared_type := tt;
-            elements := List.repeat (VAL_ref_null tt.(table_element_type))
+            elements := List.repeat (VAL_ref_null (ref_heap tt.(table_element_type)))
               (N.to_nat tt.(table_limits).(lim_min)) |}
   else None.
 

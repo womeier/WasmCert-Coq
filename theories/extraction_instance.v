@@ -202,13 +202,29 @@ Definition invoke_extern (s: store_record) (ext: extern_value) (args: list value
   | EV_func fi =>
       match lookup_N s.(s_funcs) fi with
       | Some (FC_func_native (Tf ts1 ts2) _ _) =>
-          if (those (map (typeof_value s) args) == Some ts1) then
+          if values_typing s args ts1 then
             Some (v_to_e_list args ++ [::AI_invoke fi])%list
           else None
       | _ => None
       end
   | _ => None
   end.
+
+Lemma invoke_extern_typing s ext args es C :
+  invoke_extern s ext args = Some es ->
+  exists results, e_typing s C es (Tf nil results).
+Proof.
+  unfold invoke_extern.
+  destruct ext as [fi|a|a|a] => //.
+  destruct (lookup_N (s_funcs s) fi) as [cl|] eqn:Hlookup => //.
+  destruct cl as [[params results] inst code|ft hf] => //.
+  destruct (@values_typing PH.hfc memory_instance s args params) eqn:Hargs => //.
+  move => [<-]. exists results.
+  eapply et_composition' with (t2s := params).
+  - by apply et_values_typing.
+  - apply ety_invoke.
+    by unfold ext_func_typing; rewrite Hlookup.
+Qed.
 
 Definition wasm_global_get (s: store_record) (ext: extern_value) : option value :=
   match ext with

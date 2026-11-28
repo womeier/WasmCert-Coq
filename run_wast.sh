@@ -28,7 +28,7 @@ lockfile="$results_dir/.lock"
 : > "$lockfile"
 trap 'rm -rf "$results_dir"' EXIT
 
-# Worker function: run one .wast file, print output, write "passed total" to a result file.
+# Worker function: write "passed total infrastructure_failures" to a result file.
 # Output is grouped per-file under flock so parallel jobs don't interleave their reports.
 run_one() {
   local wastfile="$1"
@@ -56,25 +56,30 @@ run_one() {
   if (( rc != 0 )); then
     summary="CRASH: $base"
     failed=1
-    echo "0 0" > "$results_dir/$base"
+    echo "0 0 1" > "$results_dir/$base"
   else
     local result_line
     if result_line=$(printf '%s' "$cleaned" | grep -m1 "Result: "); then
       if [[ "$result_line" =~ Result:\ ([0-9]+)/([0-9]+) ]]; then
-        echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}" > "$results_dir/$base"
-        summary="DONE: $base — $result_line"
-        if (( BASH_REMATCH[1] != BASH_REMATCH[2] )); then
-          failed=1
-        fi
+         local passed="${BASH_REMATCH[1]}" total="${BASH_REMATCH[2]}"
+         if (( total > 0 && passed <= total )); then
+           echo "$passed $total 0" > "$results_dir/$base"
+            summary="DONE: $base — $result_line"
+            if (( passed != total )); then failed=1; fi
+         else
+            summary="INVALID RESULT: $base — $result_line"
+            failed=1
+           echo "0 0 1" > "$results_dir/$base"
+         fi
       else
         summary="PARSE ERROR: $base — could not parse result line"
-        failed=1
-        echo "0 0" > "$results_dir/$base"
+         failed=1
+         echo "0 0 1" > "$results_dir/$base"
       fi
     else
       summary="NO RESULT: $base"
-      failed=1
-      echo "0 0" > "$results_dir/$base"
+       failed=1
+       echo "0 0 1" > "$results_dir/$base"
     fi
   fi
 
@@ -98,10 +103,12 @@ printf '%s\n' "${files[@]}" | xargs -P "$jobs" -I {} bash -c 'run_one "$@"' _ {}
 # Aggregate results
 total_passed=0
 total_tests=0
+infrastructure_failures=0
 for f in "$results_dir"/*; do
-  read -r p t < "$f"
+  read -r p t failures < "$f"
   total_passed=$((total_passed + p))
   total_tests=$((total_tests + t))
+  infrastructure_failures=$((infrastructure_failures + failures))
 done
 
 echo "================"
@@ -112,6 +119,10 @@ fi
 
 percentage=$(awk "BEGIN { printf \"%.2f\", ($total_passed / $total_tests) * 100 }")
 echo "Total Passed: $total_passed/$total_tests ($percentage%)"
+if (( infrastructure_failures > 0 )); then
+  echo "FAILED: $infrastructure_failures file(s) crashed or produced an invalid/missing result."
+  exit 1
+fi
 
 if (( total_passed < total_tests )); then
   echo "FAILED: $((total_tests - total_passed)) test(s) did not pass."
