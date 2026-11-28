@@ -69,3 +69,30 @@ frontend. Use wasm-tools 1.263.0 to reproduce the pinned projection.
   equality. A conformance command count is not a proof of that harness property.
 - The projected official fixtures are distributed under the Apache 2.0 license
   included in `LICENSE`.
+
+### Final tail-call coverage is three files, not two
+
+The final-spec comparison is pinned to
+`WebAssembly/spec@04931610158e1ae1c69a3abf49e73984c0d4ddaf`.
+Use all of `test/core/{return_call,return_call_indirect,return_call_ref}.wast`
+for a final tail-call audit. Their Git blob IDs and binary-scope command counts
+are:
+
+| Source | Git blob | Binary commands |
+|---|---|---:|
+| `return_call.wast` | `0285662f4d01fe72d79ef2748e06f8342c74d6d7` | 51 |
+| `return_call_indirect.wast` | `9ef29f074aa1ee41c17bc3adba65fbe58036888f` | 72 |
+| `return_call_ref.wast` | `acf8013a5b600c8daf608e7093459beccf476fad` | 53 |
+
+Download each source at that exact commit and project each with
+`tests/binary_wast.py --wasm-tools /path/to/wasm-tools-1.263.0 SOURCE DESTINATION`.
+Put the three projected files in a new audit directory and run the entire
+directory with `JOBS=2 bash run_wast.sh DIRECTORY`. This is separate from the
+checked-in 115-command concrete-type baseline above; it must not be presented
+as passing merely because that older baseline passes.
+
+All 176 binary commands are in scope. Only 11 text-only malformed assertions
+are outside scope, in final `return_call_indirect.wast` at source lines
+310, 322, 334, 346, 358, 370, 382, 389, 399, 409, 421. The direct and reference
+files have no text-only exclusions. Final reference tests are required even
+while their shared implementation dependency is unfinished.

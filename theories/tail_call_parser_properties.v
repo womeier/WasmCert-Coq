@@ -377,3 +377,81 @@ Proof.
         end.
     + exists opcode, b, rest. auto.
 Qed.
+
+(** Adapter for the shared recursive grammar's consumed-byte soundness
+    interface. The grammar mentions only bytes, not parser executions. *)
+Definition tail_instruction_encoding bytes instruction :=
+  return_call_prefix bytes instruction nil \/
+    return_call_indirect_prefix bytes instruction nil.
+
+Lemma uleb_prefix_consumed_grammar : forall fuel input value rest,
+    uleb_prefix fuel input value rest ->
+    exists bytes, input = List.app bytes rest /\
+      forall suffix, uleb_prefix fuel (List.app bytes suffix) value suffix.
+Proof.
+  intros fuel input value rest Hgrammar.
+  induction Hgrammar as
+    [fuel b rest Hbyte | fuel b input value rest Hbyte Htail IH].
+  - exists (b :: nil). split; [reflexivity |].
+    intro suffix. constructor. exact Hbyte.
+  - destruct IH as [bytes [Hinput Hbytes]].
+    exists (b :: bytes). split.
+    + cbn [List.app]. now rewrite Hinput.
+    + intro suffix. cbn [List.app]. constructor; [exact Hbyte | apply Hbytes].
+Qed.
+
+Lemma u32_prefix_consumed_grammar : forall input value rest,
+    u32_prefix input value rest ->
+    exists bytes, input = List.app bytes rest /\
+      forall suffix, u32_prefix (List.app bytes suffix) value suffix.
+Proof.
+  intros input value rest [Hgrammar Hbound].
+  destruct (uleb_prefix_consumed_grammar _ _ _ _ Hgrammar)
+    as [bytes [Hinput Hbytes]].
+  exists bytes. split; [exact Hinput |].
+  intro suffix. split; [apply Hbytes | exact Hbound].
+Qed.
+
+Lemma tail_prefix_consumed_grammar : forall input instruction rest,
+    return_call_prefix input instruction rest \/
+      return_call_indirect_prefix input instruction rest ->
+    exists bytes, input = List.app bytes rest /\
+      tail_instruction_encoding bytes instruction.
+Proof.
+  intros input instruction rest [Hdirect | Hindirect].
+  - inversion Hdirect as [payload index suffix Hindex]; subst.
+    destruct (u32_prefix_consumed_grammar _ _ _ Hindex)
+      as [bytes [Hinput Hbytes]].
+    exists (x12 :: bytes). split.
+    + cbn [List.app]. now rewrite Hinput.
+    + left. constructor.
+      specialize (Hbytes nil). now rewrite List.app_nil_r in Hbytes.
+  - inversion Hindirect as [payload type middle table suffix Htype Htable]; subst.
+    destruct (u32_prefix_consumed_grammar _ _ _ Htype)
+      as [types [Hinput Htypes]].
+    destruct (u32_prefix_consumed_grammar _ _ _ Htable)
+      as [tables [Hmiddle Htables]].
+    exists (x13 :: List.app types tables). split.
+    + cbn [List.app]. rewrite Hinput, Hmiddle, List.app_assoc. reflexivity.
+    + right. eapply return_call_indirect_bytes with (middle := tables).
+      * apply Htypes.
+      * specialize (Htables nil). now rewrite List.app_nil_r in Htables.
+Qed.
+
+Theorem parse_tail_call_consumed_sound :
+    forall n m (Hle : (m <= n)%nat) (input : SizedList Byte.byte m)
+      (result : Success (SizedList Byte.byte) Byte.byte basic_instruction m),
+    runParser (parse_tail_call :
+      Parser (SizedList Byte.byte) Byte.byte option basic_instruction n)
+      Hle input = Some result ->
+    exists bytes,
+      @Sized.value _ _ _ input =
+        List.app bytes (@Sized.value _ _ _ (Success.leftovers result)) /\
+      tail_instruction_encoding bytes (Success.value result).
+Proof.
+  intros n m Hle input result Hrun.
+  apply tail_prefix_consumed_grammar.
+  apply (proj1 (tail_call_parser_sound_complete n m Hle input
+    (Success.value result) (@Sized.value _ _ _ (Success.leftovers result)))).
+  rewrite Hrun. reflexivity.
+Qed.
