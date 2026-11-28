@@ -18,6 +18,13 @@
 
 (rule
  (alias runtest)
+ (deps local_initialization_projection.py)
+ (action
+  (run python3 %{dep:local_initialization_projection.py}
+    %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
  (deps gc_i31_binary.py)
  (action
   (run python3 %{dep:gc_i31_binary.py}

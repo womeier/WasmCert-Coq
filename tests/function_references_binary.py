@@ -237,6 +237,30 @@ initialization_cases = [
      0, "i32.const 0"),
     ("nonnull_null_refinement_traps_before_write", "d070d421002000d1",
      0, "Execution returned a trap"),
+    ("nonnull_branch_after_write", "0240d20021000c00000b4107",
+     0, "i32.const 7"),
+    ("nonnull_branch_does_not_export_write", "0240d20021000c000b2000d1",
+     123, "Module type checking failure:"),
+    ("nonnull_branch_skips_write_no_leak", "02400c00d20021000b2000d1",
+     123, "Module type checking failure:"),
+    ("nonnull_br_if_taken_after_write", "0240d200210041010d00000b4107",
+     0, "i32.const 7"),
+    ("nonnull_br_if_fallthrough_reads_write", "0240d200210041000d0020001a0b4107",
+     0, "i32.const 7"),
+    ("nonnull_br_table_after_write", "0240d200210041000e0000000b4107",
+     0, "i32.const 7"),
+    ("nonnull_nested_branch_after_write", "02400240d20021000c01000b000b4107",
+     0, "i32.const 7"),
+    ("nonnull_nested_branch_no_leak", "02400240d20021000c010b0b2000d1",
+     123, "Module type checking failure:"),
+    ("nonnull_return_after_write", "d200210041070f",
+     0, "i32.const 7"),
+    ("nonnull_return_does_not_excuse_dead_read", "41070f2000d1",
+     123, "Module type checking failure:"),
+    ("nonnull_branch_does_not_excuse_dead_read", "02400c0020001a0b4107",
+     123, "Module type checking failure:"),
+    ("nonnull_call_does_not_initialize_caller", "10001a2000d1",
+     123, "Module type checking failure:"),
 ]
 
 def check_tail_covariance(directory, indirect, name, callee_results, caller_results,
@@ -303,10 +327,18 @@ with tempfile.TemporaryDirectory() as directory:
         check_case(directory, name + "_nonnull_callee_slots", opcode + "00",
                    0, "i32.const 42", callee_locals="01016470",
                    callee_body="d20021002000d11a412a")
+    check_case(directory, "nonnull_loop_backedge_reinitializes",
+               "0340d200210020001a200141016a22014102490d000b2001",
+               0, "i32.const 2", locals="02016470017f")
+    check_case(directory, "nonnull_native_call_frame_isolation",
+               "d20121004107210110001a20001a2001",
+               0, "i32.const 7", locals="02016470017f",
+               callee_locals="02016470017f",
+               callee_body="d20021004109210120001a412a")
     for indirect in [False, True]:
         for case in tail_covariance_cases:
             check_tail_covariance(directory, indirect, *case)
 
 total = (len(cases) + len(table_cases) + len(initialization_cases)
-         + 2 * len(tail_covariance_cases) + 8)
+         + 2 * len(tail_covariance_cases) + 10)
 print(f"function-reference binary runtime regressions: {total}/{total}")

@@ -2207,4 +2207,57 @@ Proof.
     end.
 Qed.
 
+Theorem t_preservation_trans initial final ts :
+  reduce_trans initial final ->
+  let '(_, s, f, es) := initial in
+  config_typing s (f, es) ts ->
+  let '(_, s', f', es') := final in
+  config_typing s' (f', es') ts.
+Proof.
+  unfold reduce_trans.
+  move => Steps.
+  induction Steps as [initial final Step | current |
+    initial middle final First IHfirst Second IHsecond].
+  - destruct initial as [[[hs s] f] es], final as [[[hs' s'] f'] es'].
+    simpl in *. by eapply t_preservation; eauto.
+  - destruct current as [[[hs s] f] es]. done.
+  - destruct initial as [[[hs s] f] es], middle as [[[hsm sm] fm] esm],
+      final as [[[hs' s'] f'] es'].
+    simpl in *. move => Typed. by apply IHsecond, IHfirst.
+Qed.
+
+(** Readiness after arbitrary executions, including loop back-edges and
+    nonlocal branches. A focused get can take a real reduction step; there is
+    no defaultability assumption and no null sentinel for an empty slot. *)
+Theorem initialized_local_get_reachable initial hs s f es ts k
+    (lh : lholed k) index :
+  reduce_trans initial (hs, s, f, es) ->
+  (let '(_, s0, f0, es0) := initial in config_typing s0 (f0, es0) ts) ->
+  es = lfill lh [::AI_basic (BI_local_get index)] ->
+  exists v,
+    lookup_N f.(f_locs) index = Some (Some v) /\
+    reduce hs s f es hs s f (lfill lh [::v_to_e v]).
+Proof.
+  move => Steps Typed Fill. subst es.
+  destruct initial as [[[hs0 s0] f0] es0].
+  simpl in Typed.
+  have Final := t_preservation_trans ts Steps Typed.
+  destruct Final as [_ Thread].
+  inversion Thread; subst.
+  match goal with Hinit : frame_initialization _ _ |- _ =>
+    destruct Hinit as [O Init]
+  end.
+  apply administrative_local_init_lfill in Init as [J Get].
+  apply administrative_local_init_get in Get.
+  unfold initialized_slots, lookup_N in Get.
+  rewrite nth_error_map' in Get.
+  destruct (List.nth_error (f_locs f) (N.to_nat index))
+    as [[v|]|] eqn:Slot; try discriminate.
+  exists v; split; first exact Slot.
+  eapply r_label with (lh := lh).
+  - apply r_local_get. exact Slot.
+  - reflexivity.
+  - reflexivity.
+Qed.
+
 End Host.
