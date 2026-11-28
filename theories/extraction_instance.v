@@ -70,6 +70,8 @@ Module Utility.
     Module Types.
       Definition validate := canonical_registry_validb.
       Definition close_validated := close_and_validate_type_groups.
+      Definition close_functions registry types :=
+        close_and_validate_type_groups registry (function_type_groups types).
       Definition composite_matches := closed_composite_matchesb.
       Definition close := close_type_groups.
       Definition expand := expand_defined_type.

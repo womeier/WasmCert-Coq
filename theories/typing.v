@@ -593,7 +593,8 @@ Definition funcinst_typing (s: store_record) (fi: funcinst) (tf0: function_type)
         | None => False
         end
   | FC_func_host tf hf =>
-      functype_valid tf (* No host function assumptions *)
+      functype_valid tf /\
+      gc_type_context.canonical_function_identityb s.(s_types) tf = true
   end.
 
 Definition store_typing (s : store_record) : Prop :=

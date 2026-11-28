@@ -2086,6 +2086,17 @@ Proof.
   now apply canonical_registry_prefixb_correct.
 Qed.
 
+Lemma store_extension_host_identity s s' source :
+  store_extension s s' ->
+  canonical_function_identityb s.(s_types) source = true ->
+  canonical_function_identityb s'.(s_types) source = true.
+Proof.
+  intros Extends Identity.
+  destruct (store_extension_type_groups Extends) as [suffix Registry].
+  rewrite Registry.
+  exact (canonical_function_identityb_extension _ _ _ Identity).
+Qed.
+
 Lemma inst_typing_identities s inst C :
   inst_typing s inst = Some C ->
   gc_declaration_typing.function_type_identitiesb s.(s_types)

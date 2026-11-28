@@ -728,3 +728,95 @@ Proof.
   intro E; inversion E; subst.
   apply close_type_groups_present in Closed; [exact Closed | constructor].
 Qed.
+
+Lemma find_canonical_group_extension groups suffix group index :
+  find_canonical_group groups group = Some index ->
+  find_canonical_group (groups ++ suffix) group = Some index.
+Proof.
+  revert index. induction groups as [|head groups IH]; intros index Found;
+    simpl in *; [discriminate |].
+  destruct (canonical_group_eqb head group); [exact Found |].
+  destruct (find_canonical_group groups group) as [i|] eqn:Tail;
+    simpl in Found; [|discriminate].
+  rewrite (IH _ eq_refl). exact Found.
+Qed.
+
+Lemma canonical_function_identity_extension groups suffix source id :
+  canonical_function_identity groups source = Some id ->
+  canonical_function_identity (groups ++ suffix) source = Some id.
+Proof.
+  unfold canonical_function_identity.
+  destruct (close_function_type [] 0 source) as [signature|]; [|discriminate].
+  destruct (find_canonical_group groups [Sub_type true [] (Comp_func signature)])
+    as [i|] eqn:Found; [|discriminate].
+  rewrite (find_canonical_group_extension _ _ _ _ Found). auto.
+Qed.
+
+Lemma canonical_function_identityb_extension groups suffix source :
+  canonical_function_identityb groups source = true ->
+  canonical_function_identityb (groups ++ suffix) source = true.
+Proof.
+  unfold canonical_function_identityb.
+  destruct (canonical_function_identity groups source) as [id|] eqn:Found;
+    [|discriminate].
+  rewrite (canonical_function_identity_extension _ _ _ _ Found). reflexivity.
+Qed.
+
+Lemma expand_closed_host_value self source closed :
+  close_value_type [] 0 source = Some closed ->
+  expand_value_type self closed = closed.
+Proof.
+  destruct source as [n|v|[nullable heap]|]; simpl; try discriminate;
+    try (intro E; inversion E; reflexivity).
+  destruct heap; simpl; try (intro E; inversion E; reflexivity).
+  destruct t; discriminate.
+Qed.
+
+Lemma expand_closed_host_values self sources closed :
+  list_extra.those0 (map (close_value_type [] 0) sources) = Some closed ->
+  map (expand_value_type self) closed = closed.
+Proof.
+  revert closed. induction sources as [|source sources IH]; intros closed E; simpl in E.
+  - inversion E; reflexivity.
+  - destruct (close_value_type [] 0 source) as [head|] eqn:Head; [|discriminate].
+    destruct (list_extra.those0 (map (close_value_type [] 0) sources))
+      as [tail|] eqn:Tail; [|discriminate].
+    inversion E; subst closed. simpl.
+    rewrite (expand_closed_host_value _ _ _ Head), (IH _ eq_refl). reflexivity.
+Qed.
+
+Lemma expand_closed_host_function self source signature :
+  close_function_type [] 0 source = Some signature ->
+  expand_composite_type self (Comp_func signature) = Comp_func signature.
+Proof.
+  destruct source as [args results]. unfold close_function_type.
+  destruct (list_extra.those0 (map (close_value_type [] 0) args)) as [a|] eqn:Args;
+    [|discriminate].
+  destruct (list_extra.those0 (map (close_value_type [] 0) results)) as [r|] eqn:Results;
+    [|discriminate].
+  intro E; inversion E; subst. simpl.
+  rewrite (expand_closed_host_values _ _ _ Args),
+    (expand_closed_host_values _ _ _ Results). reflexivity.
+Qed.
+
+Theorem canonical_function_identity_expansion groups source id :
+  canonical_function_identity groups source = Some id ->
+  exists signature,
+    close_function_type [] 0 source = Some signature /\
+    expand_function_type groups id = Some signature.
+Proof.
+  unfold canonical_function_identity.
+  destruct (close_function_type [] 0 source) as [signature|] eqn:Closed;
+    [|discriminate].
+  destruct (find_canonical_group groups [Sub_type true [] (Comp_func signature)])
+    as [i|] eqn:Found; [|discriminate].
+  intro E; inversion E; subst.
+  apply find_canonical_group_sound in Found.
+  exists signature. split; [reflexivity |].
+  unfold expand_function_type, expand_defined_type, lookup_defined_type.
+  cbn [defined_group defined_member]. rewrite Nat2N.id, Found.
+  change (match expand_composite_type (Def_type (N.of_nat i) 0)
+      (Comp_func signature) with
+    | Comp_func f => Some f | _ => None end = Some signature).
+  rewrite (expand_closed_host_function _ _ _ Closed). reflexivity.
+Qed.

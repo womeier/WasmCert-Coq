@@ -93,7 +93,10 @@ Proof.
   intros Extends Resolved.
   unfold lookup_func_defined_type in *.
   destruct (lookup_N s.(s_funcs) address) as [fi|] eqn:Lookup; [|discriminate].
-  rewrite (store_extension_lookup_func Extends Lookup). exact Resolved.
+  rewrite (store_extension_lookup_func Extends Lookup).
+  destruct fi; simpl in *; [exact Resolved |].
+  destruct (store_extension_type_groups Extends) as [suffix Registry].
+  rewrite Registry. exact (canonical_function_identity_extension _ _ _ _ Resolved).
 Qed.
 
 Theorem store_extension_native_function_expansion s s' address source inst code :
@@ -157,6 +160,65 @@ Proof.
   exists signature. split; [exact Closed |].
   unfold expand_inst_function_type. rewrite Resolved.
   now apply (store_extension_function_expansion _ _ _ _ Extension).
+Qed.
+
+Theorem funcinst_typing_expansion_agreement s fi source :
+  funcinst_typing s fi source ->
+  exists id signature,
+    funcinst_defined_type s fi = Some id /\
+    close_function_type (funcinst_type_names fi) 0 source = Some signature /\
+    expand_function_type s.(s_types) id = Some signature.
+Proof.
+  intro Typed. destruct fi as [ft inst code|ft host].
+  - destruct Typed as [Same Rest]. simpl in Same. subst source.
+    assert (Native : funcinst_typing s (FC_func_native ft inst code) ft)
+      by (split; [reflexivity | exact Rest]).
+    apply funcinst_typing_defined_type_expansion in Native.
+    destruct Native as [C [id [signature [_ [Identity [Closed Expanded]]]]]].
+    exists id, signature. repeat split; assumption.
+  - destruct Typed as [Same [_ Valid]]. simpl in Same. subst source.
+    unfold canonical_function_identityb in Valid.
+    destruct (canonical_function_identity s.(s_types) ft) as [id|] eqn:Identity;
+      [|discriminate].
+    destruct (canonical_function_identity_expansion _ _ _ Identity)
+      as [signature [Closed Expanded]].
+    exists id, signature. repeat split; assumption.
+Qed.
+
+Theorem store_typing_function_expansion_agreement s address fi :
+  store_typing s ->
+  lookup_N s.(s_funcs) address = Some fi ->
+  exists id signature,
+    lookup_func_defined_type s address = Some id /\
+    close_function_type (funcinst_type_names fi) 0 (cl_type fi) = Some signature /\
+    expand_function_type s.(s_types) id = Some signature.
+Proof.
+  intros Typed Lookup.
+  destruct (store_typing_func_lookup Typed Lookup) as [ft Function].
+  pose proof (proj1 Function) as Same.
+  apply funcinst_typing_expansion_agreement in Function.
+  destruct Function as [id [signature [Identity [Closed Expanded]]]].
+  exists id, signature. rewrite Same.
+  repeat split; try assumption.
+  unfold lookup_func_defined_type. now rewrite Lookup.
+Qed.
+
+Theorem store_extension_function_expansion_agreement s s' address fi :
+  store_typing s ->
+  store_extension s s' ->
+  lookup_N s.(s_funcs) address = Some fi ->
+  exists id signature,
+    lookup_func_defined_type s' address = Some id /\
+    close_function_type (funcinst_type_names fi) 0 (cl_type fi) = Some signature /\
+    expand_function_type s'.(s_types) id = Some signature.
+Proof.
+  intros Typed Extension Lookup.
+  destruct (store_typing_function_expansion_agreement _ _ _ Typed Lookup)
+    as [id [signature [Identity [Closed Expanded]]]].
+  exists id, signature. split.
+  - now apply (store_extension_native_function_identity _ _ _ _ Extension).
+  - split; [exact Closed |].
+    now apply (store_extension_function_expansion _ _ _ _ Extension).
 Qed.
 
 End Host.

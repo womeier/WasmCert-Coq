@@ -153,6 +153,22 @@ Fixpoint find_canonical_group (groups : canonical_registry) (g : canonical_group
       else option_map S (find_canonical_group rest g)
   end.
 
+(** Host signatures have no module-local type-index environment. Their
+    defining identity is the already-interned singleton final function group. *)
+Definition canonical_function_identity groups source : option defined_type :=
+  match close_function_type [] 0 source with
+  | None => None
+  | Some signature =>
+      option_map (fun i => Def_type (N.of_nat i) 0)
+        (find_canonical_group groups [Sub_type true [] (Comp_func signature)])
+  end.
+
+Definition canonical_function_identityb groups source : bool :=
+  match canonical_function_identity groups source with
+  | Some _ => true
+  | None => false
+  end.
+
 Definition intern_group (groups : canonical_registry) (g : canonical_group) :
     canonical_registry * N :=
   match find_canonical_group groups g with

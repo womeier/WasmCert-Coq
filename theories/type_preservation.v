@@ -756,6 +756,7 @@ Proof.
   rewrite Hit'.
   unfold func_typing in *.
   by eapply context_extension_func_typing; eauto.
+  by eapply store_extension_host_identity; eauto.
 Qed.
 
 Lemma store_extension_tableinst_typing: forall s s' x t,

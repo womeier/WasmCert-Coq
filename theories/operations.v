@@ -48,10 +48,22 @@ Definition native_func_defined_type (fi : funcinst) : option defined_type :=
   | FC_func_host _ _ => None
   end.
 
+Definition funcinst_defined_type (s : store_record) (fi : funcinst) : option defined_type :=
+  match fi with
+  | FC_func_native _ inst code => resolve_inst_type inst code.(modfunc_type)
+  | FC_func_host signature _ => canonical_function_identity s.(s_types) signature
+  end.
+
+Definition funcinst_type_names (fi : funcinst) : list defined_type :=
+  match fi with
+  | FC_func_native _ inst _ => inst.(inst_defined_types)
+  | FC_func_host _ _ => nil
+  end.
+
 Definition lookup_func_defined_type (s : store_record) (address : funcaddr) :
     option defined_type :=
   match lookup_N s.(s_funcs) address with
-  | Some fi => native_func_defined_type fi
+  | Some fi => funcinst_defined_type s fi
   | None => None
   end.
 

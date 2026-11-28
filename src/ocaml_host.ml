@@ -24,7 +24,13 @@ module Ocaml_host: Extract.Parametric_host = struct
 end
 
 let starting_wasm_host_store = 
-  let hf0 = Extract.FC_func_host (Extract.Tf ([], [Extract.T_num Extract.T_i64]), Obj.magic 0) in
+  let signature = Extract.Tf ([], [Extract.T_num Extract.T_i64]) in
+  let hf0 = Extract.FC_func_host (signature, Obj.magic 0) in
+  let types =
+    match Extract.Utility.GC.Types.close_functions [] [signature] with
+    | Some (registry, _) -> registry
+    | None -> failwith "Invalid initial host function type"
+  in
   let starting_wasm_store = 
     {Extract.s_funcs = [hf0]; 
      Extract.s_tables = []; 
@@ -32,7 +38,7 @@ let starting_wasm_host_store =
      Extract.s_globals = []; 
      Extract.s_elems = []; 
      Extract.s_datas = [];
-     Extract.s_types = []
+     Extract.s_types = types
     } 
   in
   let env_module_exps = StringMap.add "clock_ms"  (Extract.EV_func (z_of_int 0)) Utils.StringMap.empty in 

@@ -424,4 +424,40 @@ let () =
     (Runtime.instance_context ss iself <> None &&
      Runtime.expand_function ss iself BigZ.zero =
        Some (Closed_ft ([CV_ref (true, CH_defined (CT_def (id 0 0)))], [])));
+  let host_signature = Tf ([T_num T_i32], [T_num T_i32]) in
+  let host_registry =
+    match Types.close_functions [] [host_signature] with
+    | Some (registry, _) -> registry
+    | None -> failwith "host canonical registration failed"
+  in
+  let host_store =
+    { Runtime.empty_store_record with
+      s_funcs = [FC_func_host (host_signature, Obj.magic ())];
+      s_types = host_registry }
+  in
+  check "production host function resolves canonical defining identity"
+    (Runtime.lookup_function_type host_store BigZ.zero = Some (id 0 0));
+  let importer =
+    { blank with mod_types = [host_signature];
+      mod_imports = [{ imp_module = []; imp_name = []; imp_desc = MID_func BigZ.zero }] }
+  in
+  let imported_store, imported_instance =
+    match Runtime.interp_instantiate_wrapper (Obj.magic ()) host_store importer
+      [EV_func BigZ.zero] with
+    | Some (s, (frame, _)), _ -> s, frame.f_inst
+    | None, _ -> failwith "production host canonical import failed"
+  in
+  check "production host import agrees with module closed identity"
+    (Runtime.lookup_function_type imported_store BigZ.zero =
+     Runtime.resolve_type imported_instance BigZ.zero);
+  let host_extended, _ = instantiate imported_store m2 in
+  check "host canonical identity is stable across later module instantiation"
+    (Runtime.lookup_function_type host_extended BigZ.zero = Some (id 0 0));
+  check "host canonical identity has closed function expansion"
+    (Types.function_type host_extended.s_types (id 0 0) =
+      Some (Closed_ft ([CV_num T_i32], [CV_num T_i32])));
+  check "host source indices cannot masquerade as module-local identities"
+    (Runtime.lookup_function_type
+      { host_store with s_funcs = [FC_func_host (typed_param 0, Obj.magic ())] }
+      BigZ.zero = None);
   Printf.printf "GC extraction: %d/%d checks passed\n" !checks !checks
