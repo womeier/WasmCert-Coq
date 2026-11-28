@@ -263,7 +263,7 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
         reduce hs s f [::v_to_e v; AI_basic (BI_return_call_indirect x y)] hs s f [::AI_trap]
 
   | r_invoke_native :
-      forall addr cl ts1 ts2 code x ts es ves vs n m k defaults s f inst hs,
+      forall addr cl ts1 ts2 code x ts es ves vs n m k s f inst hs,
         lookup_N s.(s_funcs) addr = Some cl ->
         cl = FC_func_native (Tf ts1 ts2) inst code ->
         code = Build_module_func x ts es ->
@@ -272,8 +272,9 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
         length ts = k ->
         length ts1 = n ->
         length ts2 = m ->
-        default_vals ts = Some defaults ->
-        reduce hs s f (ves ++ [::AI_invoke addr]) hs s f [::AI_frame m (Build_frame (vs ++ defaults) inst) [::AI_label m [::] (to_e_list es)]]
+        reduce hs s f (ves ++ [::AI_invoke addr]) hs s f
+          [::AI_frame m (Build_frame (map Some vs ++ map default_val ts) inst)
+            [::AI_label m [::] (to_e_list es)]]
   | r_invoke_host_success :
       forall a cl h t1s t2s ves vcs m n s s' r f hs hs',
         lookup_N s.(s_funcs) a = Some cl ->
@@ -309,13 +310,13 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
   (** get, set, load, and store operations **)
   | r_local_get :
       forall f v j s hs,
-        lookup_N f.(f_locs) j = Some v ->
+        lookup_N f.(f_locs) j = Some (Some v) ->
         reduce hs s f [::AI_basic (BI_local_get j)] hs s f [::v_to_e v]
   | r_local_set :
       forall f f' i v s vd hs,
         f'.(f_inst) = f.(f_inst) ->
         N.to_nat i < length f.(f_locs) ->
-        f'.(f_locs) = set_nth vd f.(f_locs) (N.to_nat i) v ->
+        f'.(f_locs) = set_nth (Some vd) f.(f_locs) (N.to_nat i) (Some v) ->
         reduce hs s f [::v_to_e v; AI_basic (BI_local_set i)] hs s f' [::]
   | r_global_get :
       forall s f i v hs,

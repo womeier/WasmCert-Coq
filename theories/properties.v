@@ -1341,6 +1341,13 @@ Proof.
   - by apply close_defined_type_expands.
 Qed.
 
+Lemma local_values_typing_some s vs ts :
+  local_values_typing s (map Some vs) ts = values_typing s vs ts.
+Proof.
+  move: ts; induction vs; destruct ts => //=.
+  by rewrite IHvs.
+Qed.
+
 Lemma values_typing_size: forall s vs ts,
     values_typing s vs ts ->
     size vs = size ts.
@@ -1410,6 +1417,31 @@ Proof.
   move => s; elim => /=; first by case.
   move => t ts IH vs Hdefaults; destruct vs => //; remove_bools_options => /=.
   by erewrite default_value_typing; eauto.
+Qed.
+
+Lemma local_values_typing_cat s xs ys ts us :
+  local_values_typing s xs ts ->
+  local_values_typing s ys us ->
+  local_values_typing s (xs ++ ys) (ts ++ us).
+Proof.
+  unfold local_values_typing.
+  move => Hxs Hys.
+  rewrite all2_cat; first by rewrite Hxs Hys.
+  by apply all2_size in Hxs.
+Qed.
+
+Lemma default_local_values_typing s ts :
+  default_vals ts <> None ->
+  local_values_typing s (map default_val ts) ts.
+Proof.
+  unfold default_vals.
+  setoid_rewrite <- those_those0.
+  induction ts as [|t ts IH] => //=.
+  destruct (default_val t) as [v|] eqn:E => //=.
+  - destruct (those0 (map default_val ts)) eqn:Es => //=.
+    move => _; apply/andP; split.
+    + by eapply default_value_typing; eauto.
+    + apply IH. discriminate.
 Qed.
 
 (* Avoid changing everything to type or making other large-scale changes *)

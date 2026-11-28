@@ -1,7 +1,7 @@
 (** Wasm typing rules **)
 (* (C) J. Pichon, M. Bodin - see LICENSE.txt *)
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
-From Wasm Require Export operations subtyping.
+From Wasm Require Export operations subtyping local_initialization.
 From Stdlib Require Import NArith.
 
 (* see common.v *)
@@ -88,6 +88,28 @@ Definition value_typing (s: store_record) (v: value) (t: value_type) : bool :=
 
 Definition values_typing (s: store_record) (vs: list value) (tf: list value_type) : bool :=
   all2 (value_typing s) vs tf.
+
+Definition local_value_typing (s : store_record) (slot : option value)
+    (t : value_type) : bool :=
+  match slot with Some v => value_typing s v t | None => false end.
+
+Definition local_values_typing (s : store_record) (slots : list (option value))
+    (ts : list value_type) : bool :=
+  all2 (local_value_typing s) slots ts.
+
+(* A false static bit permits an initialized value as well: runtime writes
+   remain initialized when a block forgets its body-local static effects. *)
+Inductive initialized_locals_typing (s : store_record) :
+    list (option value) -> list value_type -> local_init_state -> Prop :=
+| ilt_nil : initialized_locals_typing s nil nil nil
+| ilt_value : forall v t b slots ts I,
+    value_typing s v t ->
+    initialized_locals_typing s slots ts I ->
+    initialized_locals_typing s (Some v :: slots) (t :: ts) (b :: I)
+| ilt_uninitialized : forall t slots ts I,
+    default_val t = None ->
+    initialized_locals_typing s slots ts I ->
+    initialized_locals_typing s (None :: slots) (t :: ts) (false :: I).
 
 Definition result_types_agree (s: store_record) (ts : result_type) r : bool :=
   match r with
@@ -408,6 +430,10 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 Definition expr_typing (C: t_context) (bes: list basic_instruction) (ts: result_type) : Prop :=
   be_typing C bes (Tf nil ts).
 
+Definition be_typing_init (C : t_context) (I : local_init_state)
+    (bes : list basic_instruction) (tf : function_type) (O : local_init_state) : Prop :=
+  be_typing C bes tf /\ local_init_sequence I bes O.
+
 Definition func_typing (C: t_context) (code: module_func) (tf: function_type) : Prop :=
   let: {| modfunc_type := x; modfunc_locals := ts; modfunc_body := bes |} := code in
   match lookup_N C.(tc_types) x with
@@ -416,7 +442,8 @@ Definition func_typing (C: t_context) (code: module_func) (tf: function_type) : 
       let C' := upd_local_label_return C (ts1 ++ ts) [:: ts2] (Some ts2) in
       expr_typing C' bes ts2 /\
       (* This is an artificial restriction added due to the implementation of subtyping from the future GC proposal, but without the implementing non-defaultable locals *)
-      default_vals ts <> None
+      default_vals ts <> None /\
+      exists O, local_init_sequence (initial_local_state ts1 ts) bes O
   | None => False
   end.
     
@@ -523,7 +550,16 @@ Definition frame_typing (s: store_record) (f: frame) (C: t_context): Prop :=
   match inst_typing s f.(f_inst) with
   | Some C0 =>
       exists ts, C = upd_local C0 (ts ++ tc_locals C0) /\
-              values_typing s f.(f_locs) ts
+              local_values_typing s f.(f_locs) ts
+  | None => False
+  end.
+
+Definition frame_typing_init (s : store_record) (f : frame) (C : t_context)
+    (I : local_init_state) : Prop :=
+  match inst_typing s f.(f_inst) with
+  | Some C0 =>
+      exists ts, C = upd_local C0 (ts ++ tc_locals C0) /\
+        initialized_locals_typing s f.(f_locs) ts I
   | None => False
   end.
 

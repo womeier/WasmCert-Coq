@@ -1088,7 +1088,8 @@ Record store_record : Type := (* s *) {
 [https://www.w3.org/TR/wasm-core-2/exec/runtime.html#activations-and-frames]
 *)
 Record frame : Type := (* f *) {
-  f_locs: list value;
+  (* None is an uninitialized local slot, not a null reference value. *)
+  f_locs: list (option value);
   f_inst: moduleinst
 }.
 

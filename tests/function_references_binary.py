@@ -11,7 +11,7 @@ import sys
 import tempfile
 
 
-def module(body, table=None, declare=True, imports=None, globals=None):
+def module(body, table=None, declare=True, imports=None, globals=None, locals=None):
     prefix = bytes.fromhex(
         "0061736d01000000 0105016000017f"
     )
@@ -32,7 +32,8 @@ def module(body, table=None, declare=True, imports=None, globals=None):
     if declare:
         prefix += bytes.fromhex("09050103000100")
     first = bytes.fromhex("0400412a0b")
-    second = bytes([len(body) + 2, 0]) + body + b"\x0b"
+    declarations = b"\x00" if locals is None else bytes.fromhex(locals)
+    second = bytes([len(body) + len(declarations) + 1]) + declarations + body + b"\x0b"
     code = b"\x02" + first + second
     assert len(code) < 128
     return prefix + b"\x0a" + bytes([len(code)]) + code
@@ -146,9 +147,9 @@ table_cases = [
 exe = str(pathlib.Path(sys.argv[1]).resolve())
 
 
-def check_case(directory, name, body, status, expected, *, table=None, declare=True):
+def check_case(directory, name, body, status, expected, *, table=None, declare=True, locals=None):
     path = pathlib.Path(directory) / (name + ".wasm")
-    path.write_bytes(module(bytes.fromhex(body), table, declare))
+    path.write_bytes(module(bytes.fromhex(body), table, declare, locals=locals))
     result = subprocess.run(
         [exe, str(path), "-r", "main"], capture_output=True, text=True
     )
@@ -212,6 +213,14 @@ with tempfile.TemporaryDirectory() as directory:
         check_case(directory, name, body, status, expected, table=table, declare=False)
     check_imported_initializer(directory)
     check_exported_reference_argument(directory)
+    check_case(directory, "default_local_slot", "2000", 0, "i32.const 0",
+               locals="01017f")
+    check_case(directory, "set_local_slot", "410721002000", 0, "i32.const 7",
+               locals="01017f")
+    check_case(directory, "tee_local_slot", "4107220020006a", 0, "i32.const 14",
+               locals="01017f")
+    check_case(directory, "nullable_local_slot", "2000d1", 0, "i32.const 1",
+               locals="010170")
 
-total = len(cases) + len(table_cases) + 2
+total = len(cases) + len(table_cases) + 6
 print(f"function-reference binary runtime regressions: {total}/{total}")

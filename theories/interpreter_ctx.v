@@ -136,6 +136,8 @@ Ltac discriminate_size :=
   repeat match goal with
   | H: is_true (values_typing _ _ _) |- _ =>
     apply values_typing_size in H
+  | H: is_true (local_values_typing _ _ _) |- _ =>
+    unfold local_values_typing in H; apply all2_size in H
   | H: Tf _ _ <ti: Tf _ _ |- _ =>
     let Hsize_add := fresh "Hsize_add" in
     let Hsize_bound1 := fresh "Hsize_bound1" in
@@ -257,13 +259,9 @@ Proof.
       destruct (length vs0 >= n) eqn:Hlen.
       (* true *)
       * destruct (split_n vs0 n) as [vs' vs''] eqn:Hsplit.
-        destruct (default_vals ts) as [zs |] eqn:Hdefault.
-        (* All types are defaultable as of Wasm 2.0. This potentially needs a 
-           small change in 3.0 where non-defaultable types are introduced. In particular,
-           the `default_vals` function needs to be made partial, and there should be
-           a case split on the failure case due to an attempt on using the default values
-           of non-defaultable types *)
-        { apply <<hs, (s, (Build_frame_ctx vs'' m (Build_frame (rev vs' ++ zs) i) es0, nil) :: (fc, lcs) :: ccs', (nil, nil), Some (AI_label m nil (to_e_list es))), N.add d 1>> => //=.
+         { apply <<hs, (s, (Build_frame_ctx vs'' m
+             (Build_frame (map Some (rev vs') ++ map default_val ts) i) es0, nil) ::
+             (fc, lcs) :: ccs', (nil, nil), Some (AI_label m nil (to_e_list es))), N.add d 1>> => //=.
           apply (@reduce_focus_pivot _ _ _ nil ([::(Build_frame_ctx vs'' m _ es0, nil)])) => //=.
           apply (list_label_ctx_eval.(ctx_reduce)) => //=.
           rewrite split_n_is_take_drop in Hsplit; injection Hsplit as <- <-.
@@ -276,15 +274,6 @@ Proof.
           repeat rewrite length_is_size.
           repeat rewrite length_is_size in Hlen.
           by rewrite size_rev size_takel => //.
-        }
-        (* Not defaultable *)
-        { resolve_invalid_typing.
-          specialize (store_typing_func_lookup Hstype Heqo) as [ft [<- [_ Hfunctype]]].
-          simpl in *.
-          remove_bools_options.
-          destruct f.
-          destruct Hfunctype as [Heqtf [Hetype Hdefault']].
-          by apply Hdefault'.
         }
       * (* not enough arguments *)
         resolve_invalid_typing.
@@ -859,12 +848,22 @@ the condition that all values should live in the operand stack. *)
         by apply r_simple; apply rs_select_true.
         
     (* AI_basic (BI_local_get j) *)
-    - destruct (lookup_N fc.(FC_frame).(f_locs) j) as [vs_at_j|] eqn:?.
+    - destruct (lookup_N fc.(FC_frame).(f_locs) j) as [[vs_at_j|]|] eqn:?.
       (* Some vs_at_j *)
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs_at_j :: vs0, es0), None), d>> => //.
         resolve_reduce_ctx vs0 es0.
         by eapply r_local_get; subst.
       (* None *)
+      + resolve_invalid_typing.
+        unfold_frame_type Hftype.
+        erewrite inst_t_context_local_empty in Hconjr; eauto.
+        rewrite cats0 in Hconjr.
+        unfold local_values_typing, lookup_N in *.
+        match goal with Hlocals : is_true (all2 (local_value_typing _) _ _) |- _ =>
+          eapply all2_projection in Hlocals; eauto
+        end.
+        done.
+      (* Out of range *)
       + resolve_invalid_typing.
         unfold_frame_type Hftype.
         erewrite inst_t_context_local_empty in Hconjr; eauto.
@@ -875,7 +874,7 @@ the condition that all values should live in the operand stack. *)
       (* v :: ves' *)
       destruct (N.ltb j (N.of_nat (length fc.(FC_frame).(f_locs)))) eqn:Hlen.
       (* true *)
-      + apply <<hs, (s, ((Build_frame_ctx (fc.(FC_val)) fc.(FC_arity) (Build_frame (set_nth v fc.(FC_frame).(f_locs) (N.to_nat j) v) fc.(FC_frame).(f_inst)) fc.(FC_post)), lcs) :: ccs', (vs0, es0), None), d>> => //.
+      + apply <<hs, (s, ((Build_frame_ctx (fc.(FC_val)) fc.(FC_arity) (Build_frame (set_nth (Some v) fc.(FC_frame).(f_locs) (N.to_nat j) (Some v)) fc.(FC_frame).(f_inst)) fc.(FC_post)), lcs) :: ccs', (vs0, es0), None), d>> => //.
         resolve_reduce_ctx vs0 es0.
         eapply r_local_set with (vd := v) => //=; by lias.
       (* false *)

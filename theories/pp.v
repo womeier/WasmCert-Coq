@@ -417,6 +417,16 @@ Definition pp_values_hint_empty (vs : list value) : string :=
   | _ => pp_values vs
   end.
 
+Definition pp_local_values (vs : list (option value)) : string :=
+  match vs with
+  | nil => pp_values_hint_empty nil
+  | _ => String.concat "" (List.map
+      (fun slot => match slot with
+                   | Some v => pp_value v
+                   | None => "<uninitialized>"
+                   end) vs)
+  end.
+
 Definition pp_unary_op_i (uoi : unop_i) : string :=
   match uoi with
   | UOI_clz => "clz"
@@ -789,7 +799,7 @@ Fixpoint pp_administrative_instruction (n : indentation) (e : administrative_ins
   | AI_frame n f es =>
     indent n (with_fg ae_style "frame " ++ string_of_nat n ++ newline) ++
     (* TODO: inst? *)
-    indent n (with_fg ae_style "with values " ++ pp_values_hint_empty f.(f_locs) ++ newline) ++
+    indent n (with_fg ae_style "with values " ++ pp_local_values f.(f_locs) ++ newline) ++
     pp_administrative_instructions (n.+1) es ++
     indent n (with_fg ae_style "end frame" ++ newline)
   end.
@@ -836,7 +846,7 @@ Definition pp_store (n : indentation) (s : store_record) : string :=
 Definition pp_config_tuple_except_store (cfg : store_record * frame * list administrative_instruction) : string :=
   let '(s, f, es) := cfg in
   pp_administrative_instructions_hint_empty 0 es ++
-  "with values " ++ pp_values_hint_empty f.(f_locs) ++ newline.
+  "with values " ++ pp_local_values f.(f_locs) ++ newline.
 
 Definition pp_cfg_tuple_ctx_except_store (cfg: cfg_tuple_ctx) : string :=
   let '(s, ccs, sc, oe) := cfg in

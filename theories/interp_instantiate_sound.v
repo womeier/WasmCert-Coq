@@ -4,6 +4,7 @@
 
 From mathcomp Require Import ssreflect ssrbool ssrnat eqtype seq.
 From Wasm Require Import interpreter_ctx instantiation_func instantiation_properties type_checker_reflects_typing.
+From Wasm Require Import local_initialization_properties.
 From Stdlib Require Import Program Arith.PeanoNat.
 
 (* see common.v *)
@@ -59,8 +60,13 @@ Proof.
     split => //.
     rewrite Hmap in Hfunccheck.
     remove_bools_options.
-    split => //; last by apply/eqP.
-    by apply/b_e_type_checker_reflects_typing.
+    split.
+    { by apply/b_e_type_checker_reflects_typing. }
+    split; first by apply/eqP.
+    destruct (check_local_init_sequence modfunc_body
+      (initial_local_state r modfunc_locals)) eqn:Hinit.
+    - eexists. by apply check_local_init_sequence_sound; eauto.
+    - by rewrite eq_refl in H0.
   }
   (* tables *)
   { apply Forall2_spec => //; first by rewrite List.length_map.

@@ -395,6 +395,18 @@ Proof.
   by rewrite Htr Hmr.
 Qed.  
 
+Lemma local_values_typing_extension s s' slots ts :
+  store_extension s s' ->
+  local_values_typing s slots ts ->
+  local_values_typing s' slots ts.
+Proof.
+  move => Hext.
+  move: ts; induction slots as [|[v|] slots IH]; destruct ts => //=.
+  move/andP => [Hv Hvs].
+  apply/andP; split; last by apply IH.
+  by eapply value_typing_extension; eauto.
+Qed.
+
 Lemma frame_typing_extension: forall s s' f C,
     store_extension s s' ->
     frame_typing s f C ->
@@ -412,7 +424,7 @@ Proof.
   exists (upd_local C' ts); split => //.
   - rewrite Hit.
     exists ts.
-    eapply values_typing_extension in Hvts; eauto.
+    eapply local_values_typing_extension in Hvts; eauto.
     rewrite Hvts.
     by erewrite inst_t_context_local_empty; eauto; by rewrite cats0.
   - unfold context_extension in *.
@@ -1696,8 +1708,8 @@ Lemma t_preservation_locs_type_aux: forall s f es s' f' es' C C0 ts t1s t2s hs h
     inst_match C C0 ->
     C0.(tc_locals) = ts ->
     e_typing s C0 es (Tf t1s t2s) ->
-    values_typing s f.(f_locs) ts ->
-    values_typing s f'.(f_locs) ts.
+    local_values_typing s f.(f_locs) ts ->
+    local_values_typing s f'.(f_locs) ts.
 Proof.
   move => s f es s' f' es' C C0 ts t1s t2s hs hs' HReduce HST HIT.
   move: C0 t1s t2s.
@@ -1706,7 +1718,8 @@ Proof.
     simpl in Hsub; remove_bools_options.
     rewrite H1.
     unfold values_typing in *.
-    eapply all2_set_nth1; eauto; by resolve_value_principal_typing.
+    unfold local_values_typing in *.
+    eapply all2_set_nth1; eauto; simpl; by resolve_value_principal_typing.
   - eapply lfilled_es_type_exists in HType; eauto.
     destruct HType as [lab' [ts1 [ts2 Hetype]]].
     by eapply IHHReduce; (try apply Hetype); eauto.
@@ -1725,12 +1738,12 @@ Lemma t_preservation_locs_type: forall s f es s' f' es' C C0 ts t1s t2s hs hs',
     inst_match C C0 ->
     C0.(tc_locals) = ts ->
     e_typing s C0 es (Tf t1s t2s) ->
-    values_typing s f.(f_locs) ts ->
-    values_typing s' f'.(f_locs) ts.
+    local_values_typing s f.(f_locs) ts ->
+    local_values_typing s' f'.(f_locs) ts.
 Proof.
   move => s f es s' f' es' C C0 ts t1s t2s hs hs' HReduce HST HIT Hmatch Hlocs HType Hvaltype.
   eapply t_preservation_locs_type_aux in Hvaltype; eauto.
-  eapply values_typing_extension in Hvaltype; eauto.
+  eapply local_values_typing_extension in Hvaltype; eauto.
   by eapply store_extension_reduce; eauto.
 Qed.
 
@@ -1772,7 +1785,7 @@ Lemma t_preservation_e: forall s f es s' f' es' tlocs C C' t1s t2s lab ret hs hs
     store_typing s' ->
     inst_typing s f.(f_inst) = Some C ->
     inst_typing s' f'.(f_inst) = Some C' ->
-    values_typing s f.(f_locs) tlocs ->
+    local_values_typing s f.(f_locs) tlocs ->
     e_typing s (upd_local_label_return C tlocs lab ret) es (Tf t1s t2s) ->
     e_typing s' (upd_local_label_return C' tlocs lab ret) es' (Tf t1s t2s).
 Proof.
@@ -1866,7 +1879,7 @@ Proof.
     destruct extr as [ts1' ts2'].
     destruct Hft as [<- [Hvalid Hftype]].
     simpl in Hftype; remove_bools_options; destruct f0.
-    destruct Hftype as [Heq [Hetype _]].
+    destruct Hftype as [Heq [Hetype [Hdefault Hinit]]].
     injection Heq as <- <-.
     unfold ext_func_typing in Hconjr.
     rewrite H in Hconjr; simpl in Hconjr; injection Hconjr as <- <-.
@@ -1881,7 +1894,9 @@ Proof.
       rewrite Hoption.
       eexists; split; first done.
       specialize (values_typing_trans H2_values Hsubt) as Hvts.
-      erewrite values_typing_cat; by [done | apply Hvts | eapply default_values_typing; eauto].
+      apply local_values_typing_cat with (ts := ts1) (us := ts).
+      * by rewrite local_values_typing_some.
+      * by apply default_local_values_typing.
     + by erewrite -> inst_t_context_local_empty; eauto.
     + rewrite cats0.
       eapply ety_label; eauto.
@@ -2023,7 +2038,7 @@ derived from the two transitive pairs on the suffixes. Stated as an individual l
     erewrite <- reduce_inst_unchanged in HIT2; eauto.
     specialize (inst_typing_extension Hext HIT1) as [C'' [Hit Hcext]].
     simplify_multieq.
-    assert (values_typing s' f'.(f_locs) tlocs) as Hvaltype.
+    assert (local_values_typing s' f'.(f_locs) tlocs) as Hvaltype.
     {
       specialize (lfilled_es_type_exists erefl HType) as Hestype.
       destruct Hestype as [lab' [ts1 [ts2 Hestype]]].
@@ -2084,7 +2099,7 @@ derived from the two transitive pairs on the suffixes. Stated as an individual l
       unfold inst_match => /=.
       by repeat rewrite eq_refl.
     }
-    assert (values_typing s' f'.(f_locs) ts) as Hvaltype'.
+    assert (local_values_typing s' f'.(f_locs) ts) as Hvaltype'.
     {
       eapply t_preservation_locs_type; eauto => /=.
       - unfold inst_match; by repeat rewrite eq_refl.
