@@ -94,12 +94,26 @@ directions, including an exact trailing suffix.
 
 ## Exact open module composition obligations
 
-The pinned flat-function-type grammar cannot typecheck as a description of this
-tree's recursive declaration groups. A concrete source recursive-group/
-field/composite grammar and corresponding actual leaf contracts still have to
-be installed. The actual code/local expansion, all import/export tag branches,
-table/global/element/data records, section framing and optional/custom sequence
-must be composed with those leaves and the complete expression grammar.
+The pinned flat-function-type grammar cannot describe this tree's recursive
+declaration groups. That mismatch is now discharged by the concrete
+`source_function_encoding`, `source_storage_encoding`, `source_field_encoding`,
+`source_composite_encoding`, `source_subtype_encoding` and
+`source_recursive_encoding` grammars. Their actual parser soundness/completeness
+is proved, including source-indexed references, explicit/implicit subtypes and
+singleton/explicit recursive groups. `run_parse_recursive_type_correct` and
+`parse_recursive_type_prefix_correct` are unconditional iffs.
+
+AST-only wire-bounds predicates support general actual group and type-section
+printer membership/roundtrip theorems (`source_recursive_printer_roundtrip`,
+`source_type_section_printer_roundtrip`), not just examples. They constrain
+source-type/index/vector/section-size encodability, not parser-success domains.
+The actual type-section framing codec is proved as well. Regressions combine
+packed and indexed-reference fields, subtype supers and final EH references
+inside a multi-member recursive declaration group.
+
+**Still open:** actual code/local expansion, all import/export tag branches,
+table/global/element/data records, and composition of all section framing and
+optional/custom sequences with these leaves and the complete expression grammar.
 
 Only after those concrete contracts are discharged can the independent
 `module_binary_encoding` / actual AST wire-bounds predicate be adapted and the
@@ -112,6 +126,23 @@ conceal these gaps. GC's closed administrative-stack migration remains a
 separate runtime dependency and is not an explanation for these open proofs.
 
 ## Validation of this increment
+
+Recursive declarations/type-section follow-up: full exact-tree build, forced
+tests and relevant kernel checks pass. Recursive-group exact/prefix iffs and
+both general group/type-section printer roundtrips are **globally closed**.
+Whole-module and string contracts remain open; group/type-section roundtrips
+do not close the actual module assembly contracts. Official binaries remain
+**489/489 + 18 mapped text deferrals**; indexed probes remain **7 PASS / 3 FAIL**.
+Strict core remains **53,999/54,004**, 148 files, zero infrastructure errors and
+the same five stale alignment expectations.
+
+Logs: `/tmp/opencode/eh-declaration-final-build.log`,
+`/tmp/opencode/eh-declaration-final-tests.log`,
+`/tmp/opencode/eh-declaration-final-coqchk.log`,
+`/tmp/opencode/eh-declaration-assumptions.log`,
+`/tmp/opencode/eh-declaration-official.log`,
+`/tmp/opencode/eh-declaration-indexed.log`,
+`/tmp/opencode/eh-declaration-core.log`.
 
 Follow-up combined dispatch and recursive expression iff: full exact-tree
 build, forced tests and relevant kernel checks pass. The audit prints the
