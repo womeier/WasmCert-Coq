@@ -527,8 +527,9 @@ Proof.
     | addr
     | addr
     | n ces es
-    | n f es
-    ]; simpl in *; try by (injection Hdecomp as <- <- <-; unfold valid_ccs).
+     | n f es
+     | i31
+     ]; simpl in *; try by (injection Hdecomp as <- <- <-; unfold valid_ccs).
   - destruct acc as [ | [fc lcs] ccs'] => //.
     eapply IH in Hdecomp; eauto; apply split_vals_inv in Hsplit as ->.
     by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
@@ -558,8 +559,9 @@ Proof.
     | addr
     | addr
     | n ces es
-    | n f es
-    ]; simpl in *; try by injection Hdecomp as <- <- <-.
+     | n f es
+     | i31
+     ]; simpl in *; try by injection Hdecomp as <- <- <-.
   - injection Hdecomp as <- <- <- => /=.
     apply split_vals_nconst in Hsplit.
     by destruct b.
@@ -570,8 +572,10 @@ Proof.
   - destruct acc as [ | [fc lcs] ccs'] => //.
     eapply IH in Hdecomp; eauto; apply split_vals_inv in Hsplit as ->.
     by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
-  - eapply IH in Hdecomp; eauto; apply split_vals_inv in Hsplit as ->.
-    by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
+   - eapply IH in Hdecomp; eauto; apply split_vals_inv in Hsplit as ->.
+     by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
+   - injection Hdecomp as <- <- <- => /=.
+     by apply split_vals_nconst in Hsplit.
 Qed.
 
 Lemma ctx_decompose_valid_split: forall ves ccs sctx oe,
@@ -706,8 +710,9 @@ Proof.
       | addr
       | addr
       | n ces es
-      | n f es
-      ]; simpl in *; try by injection Hdecomp as <- <- <- => /=; apply split_vals_inv in Hsplit as ->.
+       | n f es
+       | i31
+       ]; simpl in *; try by injection Hdecomp as <- <- <- => /=; apply split_vals_inv in Hsplit as ->.
     (* Label *)
     + destruct acc as [ | [fc lcs] ccs']; first by inversion Hdecomp => /=.
       eapply IH in Hdecomp; eauto; apply split_vals_inv in Hsplit as ->; first by rewrite Hdecomp.

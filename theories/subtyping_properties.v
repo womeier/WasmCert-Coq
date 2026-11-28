@@ -969,9 +969,10 @@ Lemma value_typing_ref_nonnull s v t :
 Proof.
   move => Hnonnull Htype.
   unfold value_typing, typeof_value in *.
-  destruct v as [h|a|a]; first by exfalso; apply (Hnonnull h).
+  destruct v as [h|a|a|n]; first by exfalso; apply (Hnonnull h).
   - simpl in *. destruct (ext_func_typing s a) => //.
     exact (non_nullable_type_mono Htype).
+  - exact (non_nullable_type_mono Htype).
   - exact (non_nullable_type_mono Htype).
 Qed.
 

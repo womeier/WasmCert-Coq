@@ -1,4 +1,4 @@
-(* Custom implementation of LEB128 integer format -- unverified *)
+(* LEB128 integer format. Parser proofs are in leb128_properties.v. *)
 (* https://en.wikipedia.org/wiki/LEB128 *)
 From Stdlib Require Import ZArith Init.Byte.
 From parseque Require Import Parseque.
@@ -95,9 +95,6 @@ Definition encode_unsigned_aux (n : N) : list byte :=
   | Npos n' => make_msb_of_non_first_byte_one (binary_of_aux2 nil nil n')
   end.
 
-Definition encode_unsigned (n : N) : list byte :=
-  List.rev (encode_unsigned_aux n).
-
 Definition encode_signed_aux (z : Z) : list byte :=
   match z with
   | Z0 => cons x00 nil
@@ -108,8 +105,60 @@ Definition encode_signed_aux (z : Z) : list byte :=
                       (bits_of_pos_pad nil 0 7 n')))
   end.
 
+(** The signed printer uses arithmetic division with an explicit structural
+    bound.  Unlike a bound based on the integer's magnitude, the bit-length
+    bound remains small under both Rocq evaluation and extraction.
+    [encode_signed_aux] above is retained as the original bit-list helper.
+    Correctness of the public encoder is proved in leb128_printer_properties. *)
+Definition leb_byte (n : N) : byte :=
+  match Byte.of_N n with
+  | Some b => b
+  | None => x00
+  end.
+
+Definition signed_terminalb (z : Z) : bool :=
+  andb (Z.leb (-64) z) (Z.ltb z 64).
+
+Fixpoint encode_signed_fuel (fuel : nat) (z : Z) : list byte :=
+  match fuel with
+  | O => nil
+  | S fuel' =>
+      let low := (z mod 128)%Z in
+      if signed_terminalb z
+      then leb_byte (Z.to_N low) :: nil
+      else leb_byte (Z.to_N (low + 128)) ::
+        encode_signed_fuel fuel' (z / 128)%Z
+  end.
+
+Definition signed_encoder_fuel (z : Z) : nat :=
+  match z with
+  | Z0 => 1
+  | Zpos p | Zneg p => S (Pos.size_nat p)
+  end.
+
 Definition encode_signed (z : Z) : list byte :=
-  List.rev (encode_signed_aux z).
+  encode_signed_fuel (signed_encoder_fuel z) z.
+
+(** The ordinary u32/index/vector-length printer uses the same checked
+    byte conversion and a bit-length structural bound. *)
+Fixpoint encode_unsigned_fuel (fuel : nat) (n : N) : list byte :=
+  match fuel with
+  | O => nil
+  | S fuel' =>
+      if N.ltb n 128
+      then leb_byte n :: nil
+      else leb_byte (N.modulo n 128 + 128) ::
+        encode_unsigned_fuel fuel' (N.div n 128)
+  end.
+
+Definition unsigned_encoder_fuel (n : N) : nat :=
+  match n with
+  | N0 => 1
+  | Npos p => S (Pos.size_nat p)
+  end.
+
+Definition encode_unsigned (n : N) : list byte :=
+  encode_unsigned_fuel (unsigned_encoder_fuel n) n.
 
 Section Language.
 

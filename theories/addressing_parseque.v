@@ -7,7 +7,7 @@
     It covers both the decoded value and every unconsumed byte. *)
 From Wasm Require Import datatypes operations addressing addressing_binary.
 From parseque Require Import Parseque.
-From Stdlib Require Import Strings.Byte NArith List PeanoNat Eqdep_dec.
+From Stdlib Require Import Strings.Byte NArith List PeanoNat Eqdep_dec Lia.
 Import Addressing AddressingBinary.
 
 Module AddressingParseque.
@@ -183,6 +183,52 @@ Definition decode_address_tokens (a: address_type) {n} (input: Toks n)
       if N.ltb (Success.value result) (address_bound a)
       then Some result else None
   end.
+
+Lemma getTok_consumed_one n (input: Toks n) first :
+  Success.getTok input = Some first ->
+  n = S (Success.size first).
+Proof.
+  destruct n as [|n]; unfold Success.getTok.
+  - destruct (uncons input) as [impossible|]; [destruct impossible|discriminate].
+  - destruct (uncons input) as [[head tail]|]; [|discriminate].
+    cbn [option_map Success.fromView uncurry].
+    intros E; inversion E; reflexivity.
+Qed.
+
+Lemma decode_uleb_tokens_consumed fuel n (input: Toks n) result :
+  decode_uleb_tokens fuel input = Some result ->
+  (n - Success.size result <= fuel)%nat.
+Proof.
+  revert n input result.
+  induction fuel as [|fuel IH]; intros n input result; [discriminate|].
+  cbn [decode_uleb_tokens].
+  destruct (Success.getTok input) as [first|] eqn:First; [|discriminate].
+  pose proof (getTok_consumed_one n input first First) as Size.
+  destruct (N.ltb (Byte.to_N (Success.value first)) 128).
+  - intros E; inversion E; subst result; cbn [Success.map Success.size].
+    lia.
+  - destruct (decode_uleb_tokens fuel (Success.leftovers first)) as [tail|] eqn:Tail;
+      [|discriminate].
+    specialize (IH _ _ _ Tail).
+    pose proof (Success.small tail) as Small.
+    intros E; inversion E; subst result.
+    change (n - Success.size tail <= S fuel)%nat.
+    lia.
+Qed.
+
+Lemma decode_address_tokens_guards a n (input: Toks n) result :
+  decode_address_tokens a input = Some result ->
+  (Success.value result < address_bound a)%N /\
+  (n - Success.size result <= address_bytes a)%nat.
+Proof.
+  unfold decode_address_tokens.
+  destruct (decode_uleb_tokens (address_bytes a) input) as [decoded|] eqn:Decoded;
+    [|discriminate].
+  destruct (N.ltb (Success.value decoded) (address_bound a)) eqn:Bound;
+    [|discriminate].
+  intros E; inversion E; subst result.
+  split; [now apply N.ltb_lt|now apply decode_uleb_tokens_consumed in Decoded].
+Qed.
 
 Definition decode_limits_tokens {n} (input: Toks n)
     : option (Success.Success Toks byte (address_type * limits) n) :=

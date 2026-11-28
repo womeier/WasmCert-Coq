@@ -37,7 +37,8 @@ end
 module Runner = Extraction_instance (No_host)
 
 let storage_program result_type memories tables instructions : module0 =
-  { mod_types = [Tf ([], [T_num result_type])];
+  { mod_types = [[{subtype_final = true; subtype_supers = [];
+                  subtype_composite = Comp_func (Tf ([], [T_num result_type]))}]];
     mod_funcs = [{ modfunc_type = z; modfunc_locals = [];
                    modfunc_body = instructions }];
     mod_tables = List.map (fun t -> {modtab_type = t; modtab_init = None}) tables;

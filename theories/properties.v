@@ -1,6 +1,7 @@
 (** Miscellaneous properties about Wasm operations **)
 
 From Wasm Require Export datatypes_properties operations typing opsem common.
+From Wasm Require Import gc_type_context gc_type_context_properties.
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From Stdlib Require Import Bool Program NArith ZArith Wf_nat.
 
@@ -353,7 +354,7 @@ Proof.
   split.
   - case v => //=; move => v' <- => //=.
     by case v' => //=.
-  - case e => //=; move => e'. 2,3: by move => [<-].
+  - case e => //=; move => e'. 2,3,4: by move => [<-].
     case e' => //=; by move => ? [<-] => //.
 Qed.
 
@@ -370,7 +371,7 @@ Lemma ve_inj: forall v1 v2,
     v1 = v2.
 Proof.
   move => v1 v2.
-  destruct v1 as [ | | [| |]]; destruct v2 as [ | | [| |]] => //=; by move => [<-].
+  destruct v1 as [ | | [| | |]]; destruct v2 as [ | | [| | |]] => //=; by move => [<-].
 Qed.
 
 Lemma v_to_e_inj: forall l1 l2,
@@ -1296,82 +1297,19 @@ Ltac extract_listn :=
 
 (** * More Advanced Lemmas **)
 
-Lemma resolve_defined_type_sound C i dt :
-  resolve_defined_type C i = Some dt ->
-  exists ft, lookup_N C i = Some ft /\
-    expand_function_type dt = Some ft /\ function_type_closed ft = true.
-Proof.
-  unfold resolve_defined_type.
-  destruct (lookup_N C i) as [ft|] eqn:Hlookup; try discriminate.
-  move => Hclose. exists ft; split; first reflexivity.
-  pose proof (close_defined_type_expands Hclose) as Hexpand.
-  split; first exact Hexpand.
-  by apply (expanded_function_type_closed Hexpand).
-Qed.
-
-Lemma resolve_defined_type_complete C i ft :
-  List.Forall functype_valid C ->
-  lookup_N C i = Some ft ->
-  exists dt, resolve_defined_type C i = Some dt /\
-    expand_function_type dt = Some ft.
-Proof.
-  move => Hclosed Hlookup.
-  have Hft: function_type_closed ft = true.
-  { exact (Forall_lookup Hclosed (lookup_N_nth_error Hlookup)). }
-  destruct (close_defined_type_complete Hft) as [dt Hdt].
-  exists dt; split.
-  - by unfold resolve_defined_type; rewrite Hlookup.
-  - by apply close_defined_type_expands.
-Qed.
+(* The former flat-signature resolve_defined_type lemmas are replaced by
+   inst_typing_function_expansion_agreement in gc_runtime_type_properties:
+   closing is relative to inst_defined_types, never context-free. *)
 
 Section Host.
 
 Context `{hfc: host_function_class} `{memory: BlockUpdateMemory}.
 
-Lemma funcinst_defined_type_typing s cl ft :
-  funcinst_typing s cl ft ->
-  exists dt, funcinst_defined_type cl = Some dt /\
-    expand_function_type dt = Some ft.
-Proof.
-  destruct cl as [body inst code|body hf]; simpl.
-  - move => [E [Hclosed _]]; subst ft.
-    destruct (close_defined_type_complete Hclosed) as [dt Hdt].
-    exists dt; split; [exact Hdt | by apply close_defined_type_expands].
-  - move => [E Hclosed]; subst ft.
-    destruct (close_defined_type_complete Hclosed) as [dt Hdt].
-    exists dt; split; [exact Hdt | by apply close_defined_type_expands].
-Qed.
-
-Lemma ext_func_defined_type_sound s a dt :
-  ext_func_defined_type s a = Some dt ->
-  exists ft, ext_func_typing s a = Some ft /\
-    expand_function_type dt = Some ft.
-Proof.
-  unfold ext_func_defined_type, ext_func_typing, funcinst_defined_type.
-  destruct (lookup_N (s_funcs s) a) as [cl|]; try discriminate.
-  move => Hdt. exists (cl_type cl); split; [reflexivity |].
-  by apply close_defined_type_expands.
-Qed.
-
-Lemma ext_func_defined_type_complete s a ft :
-  store_typing s ->
-  ext_func_typing s a = Some ft ->
-  exists dt, ext_func_defined_type s a = Some dt /\
-    expand_function_type dt = Some ft.
-Proof.
-  move => Hstore Hft.
-  unfold ext_func_typing in Hft.
-  destruct (lookup_N (s_funcs s) a) as [cl|] eqn:Hlookup; try discriminate.
-  injection Hft as <-.
-  destruct s; simpl in Hstore, Hlookup.
-  destruct Hstore as [Hfuncs _].
-  destruct (Forall_lookup Hfuncs (lookup_N_nth_error Hlookup)) as [body Hcl].
-  destruct (funcinst_defined_type_typing Hcl) as [dt [Hdt Hexpand]].
-  exists dt; split.
-  - unfold ext_func_defined_type; simpl.
-    by rewrite Hlookup.
-  - by apply close_defined_type_expands.
-Qed.
+(* Canonical function/store expansion and completeness, for both native and
+   host functions, are proved by funcinst_typing_expansion_agreement and
+   store_typing_function_expansion_agreement in gc_runtime_type_properties.
+   They include the producer's name vector and registry expansion, rather
+   than equating a source signature with its closed signature. *)
 
 Lemma values_typing_size: forall s vs ts,
     values_typing s vs ts ->
@@ -2145,6 +2083,7 @@ Proof.
   move => Hext1 Hext2.
   unfold store_extension, operations.store_extension in *.
   remove_bools_options.
+  apply/andP; split; last by eapply gc_type_context_properties.canonical_registry_prefixb_trans; eauto.
   apply/andP; split; last by eapply component_extension_trans; eauto; apply data_extension_trans.
   apply/andP; split; last by eapply component_extension_trans; eauto; apply elem_extension_trans.
   apply/andP; split; last by eapply component_extension_trans; eauto; apply global_extension_trans.
@@ -2157,6 +2096,7 @@ Lemma store_extension_same: forall s,
     store_extension s s.
 Proof.
   move => s. unfold store_extension.
+  rewrite gc_type_context_properties.canonical_registry_prefixb_refl andbT.
   repeat (apply/andP; split => //); rewrite length_is_size take_size.
   + by apply all2_func_extension_same.
   + by apply all2_table_extension_same.
@@ -2180,6 +2120,43 @@ Proof.
   apply (nth_error_take (k := length l1)) in Hnth'; last by lias.
   specialize (all2_projection H0 Hnth Hnth') as Hproj.
   by exists y.
+Qed.
+
+Lemma store_extension_type_groups s s' :
+  store_extension s s' -> exists suffix, s'.(s_types) = s.(s_types) ++ suffix.
+Proof.
+  unfold store_extension. move/andP => [_ Prefix].
+  now apply canonical_registry_prefixb_correct.
+Qed.
+
+Lemma store_extension_host_identity s s' source :
+  store_extension s s' ->
+  canonical_function_identityb s.(s_types) source = true ->
+  canonical_function_identityb s'.(s_types) source = true.
+Proof.
+  intros Extends Identity.
+  destruct (store_extension_type_groups Extends) as [suffix Registry].
+  rewrite Registry.
+  exact (canonical_function_identityb_extension _ _ _ Identity).
+Qed.
+
+Lemma inst_typing_identities s inst C :
+  inst_typing s inst = Some C ->
+  gc_declaration_typing.source_type_identitiesb s.(s_types)
+    inst.(inst_defined_types) inst.(inst_types) inst.(inst_defined_types) = true.
+Proof.
+  unfold inst_typing. destruct inst. simpl.
+  destruct (all _ _ && _) eqn:Checked; [|discriminate].
+  move/andP in Checked. tauto.
+Qed.
+
+Lemma inst_typing_functypes_valid s inst C :
+  inst_typing s inst = Some C ->
+  all source_subtype_valid inst.(inst_types) = true.
+Proof.
+  unfold inst_typing. destruct inst. simpl.
+  destruct (all _ _ && _) eqn:Checked; [|discriminate].
+  move/andP in Checked. tauto.
 Qed.
 
 Definition component_extension_extend {T: Type} (l1 l2 l3: list T) f:
@@ -2265,7 +2242,7 @@ Qed.
 (** Lookups connecting module instance, store, and typing context *)
 Lemma inst_typing_type_lookup: forall s inst C n,
     inst_typing s inst = Some C ->
-    lookup_N inst.(inst_types) n = lookup_N C.(tc_types) n.
+    lookup_function_type inst.(inst_types) n = lookup_function_type C.(tc_types) n.
 Proof.
   move => s inst C n Hit.
   unfold inst_typing in Hit.
@@ -2501,8 +2478,9 @@ Lemma store_typing_func_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [Hf _]; simpl in *.
-  rewrite lookup_N_spec in Hnth. by eapply Forall_lookup in Hf; eauto.
+  destruct Hst as [_ [Hf _]]; simpl in *.
+  rewrite lookup_N_spec in Hnth.
+  by eapply Forall_lookup in Hf; eauto.
 Qed.
 
 Lemma store_typing_table_lookup: forall s n x,
@@ -2512,8 +2490,9 @@ Lemma store_typing_table_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [Hf [Ht _]]; simpl in *.
-  rewrite lookup_N_spec in Hnth. by eapply Forall_lookup in Ht; eauto.
+  destruct Hst as [_ [Hf [Ht _]]]; simpl in *.
+  rewrite lookup_N_spec in Hnth.
+  by eapply Forall_lookup in Ht; eauto.
 Qed.
 
 Lemma store_typing_mem_lookup: forall s n x,
@@ -2523,8 +2502,9 @@ Lemma store_typing_mem_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [Hf [Ht [Hm _]]]; simpl in *.
-  rewrite lookup_N_spec in Hnth. by eapply Forall_lookup in Hm; eauto.
+  destruct Hst as [_ [Hf [Ht [Hm _]]]]; simpl in *.
+  rewrite lookup_N_spec in Hnth.
+  by eapply Forall_lookup in Hm; eauto.
 Qed.
 
 Lemma store_typing_global_lookup: forall s n x,
@@ -2534,8 +2514,9 @@ Lemma store_typing_global_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [_ [_ [_ [Hg _]]]]; simpl in *.
-  rewrite lookup_N_spec in Hnth. by eapply Forall_lookup in Hg; eauto.
+  destruct Hst as [_ [_ [_ [_ [Hg _]]]]]; simpl in *.
+  rewrite lookup_N_spec in Hnth.
+  by eapply Forall_lookup in Hg; eauto.
 Qed.
 
 Lemma store_typing_elem_lookup: forall s n x,
@@ -2545,8 +2526,9 @@ Lemma store_typing_elem_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [_ [_ [_ [_ [He _]]]]]; simpl in *.
-  rewrite lookup_N_spec in Hnth. by eapply Forall_lookup in He; eauto.
+  destruct Hst as [_ [_ [_ [_ [_ [He _]]]]]]; simpl in *.
+  rewrite lookup_N_spec in Hnth.
+  by eapply Forall_lookup in He; eauto.
 Qed.
 
 Lemma store_typing_data_lookup: forall s n x,
@@ -2556,8 +2538,9 @@ Lemma store_typing_data_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [_ [_ [_ [_ [_ Hd]]]]]; simpl in *.
-  rewrite lookup_N_spec in Hnth. by eapply Forall_lookup in Hd; eauto.
+  destruct Hst as [_ [_ [_ [_ [_ [_ Hd]]]]]]; simpl in *.
+  rewrite lookup_N_spec in Hnth.
+  by eapply Forall_lookup in Hd; eauto.
 Qed.
 
 End Host.
@@ -2693,7 +2676,6 @@ Proof.
     apply const_list_split in Hconst as [_ Hconst].
     simpl in Hconst.
     move/andP in Hconst; destruct Hconst as [? Hconst].
-    destruct e as [b | | | | | | | ] => //; try destruct b => //;
     exists lvs, les, (Logic.eq_refl 0); by split => //.
   - move => e lf Hconst Hlf. subst.
     exfalso.
@@ -2743,8 +2725,7 @@ Proof.
   - subst.
     left; by exists nil, ves'.
   - destruct (e_to_v_opt e) as [v | ] eqn:Hconst.
-    { destruct e as [ b | | | | | | |] => //; first destruct b => //.
-      all: apply ve_inv in Hconst; destruct (IHves' fe) as [[vs [es ->]] | Hcontra]; first by (left; exists (v :: vs), es); rewrite - Hconst.
+    { apply ve_inv in Hconst; destruct (IHves' fe) as [[vs [es ->]] | Hcontra]; first by (left; exists (v :: vs), es); rewrite - Hconst.
       all: right; move => vs es Heq;
       destruct vs as [| v' vs'] => //; simpl in *; first by inversion Heq.
       all: apply (Hcontra vs' es) => /=; by inversion Heq.
@@ -2785,7 +2766,7 @@ Proof.
     by apply Hcontra in Heq.
   - specialize (split_vals_nconst Hsplit) as Hnconst.
     apply split_vals_inv in Hsplit as ->.
-    destruct e as [ | | | | | | j lvs les |].
+    destruct e as [ | | | | | | j lvs les | |].
     7: {
       destruct (Hrec (fun n => fe (S n)) les) as [IH | IH] => /=.
       (* measure *)

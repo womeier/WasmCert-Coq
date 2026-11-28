@@ -4,6 +4,71 @@ From parseque Require Import Parseque.
 From Wasm Require Import binary_format_parser binary_format_printer
                          datatypes_properties check_toks.
 
+(** A vector's u32 length may have a non-minimal LEB128 representation.
+    In particular, a padded zero length must not require an element parser
+    to consume a token.  These tests use the actual whole-module parser. *)
+Definition empty_module_header : list Byte.byte :=
+  x00 :: x61 :: x73 :: x6d :: x01 :: x00 :: x00 :: x00 :: nil.
+
+Lemma padded_empty_type_vector :
+  run_parse_module
+    (empty_module_header ++ (x01 :: x02 :: x80 :: x00 :: nil)) =
+  run_parse_module empty_module_header.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma maximally_padded_empty_type_vector :
+  run_parse_module
+    (empty_module_header ++
+      (x01 :: x05 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil)) =
+  run_parse_module empty_module_header.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma overlong_empty_type_vector_rejected :
+  run_parse_module
+    (empty_module_header ++
+      (x01 :: x06 :: x80 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma overflowing_type_vector_length_rejected :
+  run_parse_module
+    (empty_module_header ++
+      (x01 :: x05 :: x80 :: x80 :: x80 :: x80 :: x10 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+(** Heap indices are unsigned indices encoded with signed LEB128. *)
+Lemma heap_index_64 :
+  run_parse_heap_typeidx (xc0 :: x00 :: nil) = Some 64%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_64_requires_positive_sign :
+  run_parse_heap_typeidx (x40 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_u32_max :
+  run_parse_heap_typeidx (xff :: xff :: xff :: xff :: x0f :: nil) =
+  Some 4294967295%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_padded_zero :
+  run_parse_heap_typeidx (x80 :: x80 :: x80 :: x80 :: x00 :: nil) = Some 0%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_overlong_zero_rejected :
+  run_parse_heap_typeidx (x80 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_overflow_rejected :
+  run_parse_heap_typeidx (x80 :: x80 :: x80 :: x80 :: x10 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_abstract_type_rejected :
+  run_parse_heap_typeidx (x70 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_leftovers_rejected :
+  run_parse_heap_typeidx (x00 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
 Open Scope string_scope.
 Import Stdlib.Strings.String.StringSyntax.
 Open Scope list_scope.
@@ -64,8 +129,8 @@ Lemma indexed_scalar_simd_round_trips :
 Proof. vm_compute. reflexivity. Qed.
 
 Lemma indexed_memarg_encoding :
-  (* The shared LEB encoder emits a legal padded encoding of flags 64. *)
-  binary_of_memarg indexed_memarg = xc0 :: x00 :: x80 :: x01 :: xd2 :: x09 :: nil.
+  (* The integrated unsigned encoder now emits canonical flags 64. *)
+  binary_of_memarg indexed_memarg = x40 :: x80 :: x01 :: xd2 :: x09 :: nil.
 Proof. vm_compute. reflexivity. Qed.
 
 Lemma explicit_zero_memory_index_accepted :
@@ -338,7 +403,7 @@ Lemma empty_module_round_trip : run_parse_module (binary_of_module empty_module)
 Proof. vm_compute. reflexivity. Qed.
 
 Definition two_memory_legacy_access := {|
-  mod_types := Tf nil (T_num T_i32 :: nil) :: nil;
+  mod_types := (Sub_type true nil (Comp_func (Tf nil (T_num T_i32 :: nil))) :: nil) :: nil;
   mod_funcs := {|
     modfunc_type := 0%N;
     modfunc_locals := nil;
@@ -373,7 +438,7 @@ Lemma two_memory_module_round_trip :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition two_memory_data_init := {|
-  mod_types := Tf nil nil :: nil;
+  mod_types := (Sub_type true nil (Comp_func (Tf nil nil)) :: nil) :: nil;
   mod_funcs := {|
     modfunc_type := 0%N;
     modfunc_locals := nil;
@@ -403,7 +468,7 @@ Lemma indexed_init_module_round_trip_includes_data_count :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_type := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs := nil;
   mod_tables := nil;
   mod_mems := nil;
@@ -420,7 +485,7 @@ Lemma module_type_round_trip :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_type_fun := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs :=
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := nil |} nil;
   mod_tables := nil;
@@ -438,7 +503,7 @@ Lemma module_type_fun_round_trip :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_42 := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs :=
     let e := BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 42))) in
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := cons e nil |} nil;
@@ -457,7 +522,7 @@ Lemma module_42_round_trip :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_42_exported := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs :=
     let e := BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 42))) in
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := cons e nil |} nil;
@@ -476,7 +541,7 @@ Lemma module_42_exported_round_trip :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_tableops := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs :=
     let e := BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 1))) in
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := cons e nil |} nil;

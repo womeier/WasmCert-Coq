@@ -1,6 +1,7 @@
 (** Proof of preservation **)
 
 From Wasm Require Export typing_inversion tactic.
+From Wasm Require Import gc_declaration_typing_properties.
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From Stdlib Require Import Program.Equality ZArith.
 
@@ -322,8 +323,17 @@ Lemma inst_typing_extension: forall s s' i C,
       context_extension C C'.
 Proof.
   move => s s' i C HST HIT.
+  pose proof (inst_typing_identities HIT) as Hidentities.
+  pose proof (inst_typing_functypes_valid HIT) as Hvalid.
+  destruct (store_extension_type_groups HST) as [suffix Hregistry].
+  pose proof (gc_declaration_typing_properties.source_type_identitiesb_extension
+    (s_types s) suffix _ _ _ Hidentities) as Hidentities'.
+  assert (Hnew : gc_declaration_typing.source_type_identitiesb (s_types s')
+    i.(inst_defined_types) i.(inst_types) i.(inst_defined_types) = true).
+  { rewrite Hregistry. exact Hidentities'. }
   unfold inst_typing in *.
   destruct i.
+  simpl in Hnew, Hvalid. rewrite Hnew Hvalid.
   remove_bools_options.
   (* Functions *)
   eapply those_map_impl in Hoption; last first.
@@ -768,6 +778,8 @@ Proof.
   - move=> s C n f es ts HType IHHType E s' HST1 HST2 Hext.
     apply ety_frame => //.
     by eapply IHHType; try apply HST1 => //.
+  - move=> s C n s' HST1 HST2 Hext.
+    apply ety_ref_i31.
   (* Thread *)
   - move=> s f es rs ts C C' HFType HContext HType IHHType s' HST1 HST2 Hext.
     remove_bools_options.
@@ -856,6 +868,7 @@ Proof.
   rewrite Hit'.
   unfold func_typing in *.
   by eapply context_extension_func_typing; eauto.
+  by eapply store_extension_host_identity; eauto.
 Qed.
 
 Lemma store_extension_tableinst_typing: forall s s' x t,
@@ -989,6 +1002,8 @@ Qed.
 
 Ltac resolve_store_extension :=
   repeat lazymatch goal with
+  | |- context [ gc_type_context.canonical_registry_prefixb ?x ?x ] =>
+      rewrite gc_type_context_properties.canonical_registry_prefixb_refl
   | |- context [ component_extension (@operations.func_extension _) ?x ?x ] =>
       rewrite -> component_extension_same_refl with (f := func_extension); last by apply func_extension_refl
   | |- context [ component_extension table_extension ?x ?x ] =>
@@ -1007,6 +1022,7 @@ Ltac resolve_store_extension :=
 Ltac resolve_store_typing :=
   repeat split;
   repeat lazymatch goal with
+  | |- gc_declaration_typing.canonical_registry_validb _ = true => assumption
   | |- List.Forall (fun x => exists t, funcinst_typing ?s x t) _ =>
       by eapply store_extension_funcs_typing; eauto
   | |- List.Forall (fun x => exists t, tableinst_typing ?s x = Some t) _ =>
@@ -1064,7 +1080,7 @@ Proof.
   eapply value_typing_extension in Hvaltype; eauto.
   unfold store_typing in *; destruct s; simpl in *.
   unfold_store_operations; remove_bools_options.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Htt Hmt Het Hdt.
   lookup_N_to_nth_error.
   eapply Forall_set; eauto; last by apply nth_error_Some_length in Hoption1; lias.
@@ -1109,7 +1125,7 @@ Proof.
   rewrite Hnthtabt in Hnth; injection Hnth as ->.
   unfold store_typing in *; destruct s; simpl in *.
   unfold_store_operations; remove_bools_options.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Hmt Hgt Het Hdt.
   lookup_N_to_nth_error.
   eapply Forall_set; eauto; last by apply nth_error_Some_length in Hoption1; lias.
@@ -1171,7 +1187,7 @@ Proof.
   rewrite Hnthtabt in Hnth; injection Hnth as <-.
   unfold store_typing in *; destruct s; simpl in *.
   unfold_store_operations; remove_bools_options.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Hmt Hgt Het Hdt.
   unfold tab_size in *; simpl in *.
   apply List.Forall_forall.
@@ -1228,7 +1244,7 @@ Proof.
   rewrite Hnth in Hnthet; injection Hnthet as <-.
   unfold store_typing in *; destruct s; simpl in *.
   unfold_store_operations; remove_bools_options.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Htt Hmt Hgt Hdt.
   apply List.Forall_forall.
   move => x0 Hin.
@@ -1370,7 +1386,7 @@ Proof.
   resolve_store_inst_lookup; destruct m0; simpl in *; remove_bools_options; simpl in *.
   rewrite Hnthmt in Hnth; injection Hnth as <-.
   unfold store_typing in *; destruct s; simpl in *.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Htt Hgt Het Hdt.
   apply List.Forall_forall.
   move => x0 Hin.
@@ -1421,7 +1437,7 @@ Proof.
   resolve_store_inst_lookup; destruct m0; simpl in *; remove_bools_options; simpl in *.
   rewrite Hnthmt in Hnth; injection Hnth as <-.
   unfold store_typing in *; destruct s; simpl in *.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Htt Hgt Het Hdt.
   apply List.Forall_forall.
   move => x0 Hin.
@@ -1471,7 +1487,7 @@ Proof.
   resolve_store_inst_lookup; destruct m0; simpl in *; remove_bools_options; simpl in *.
   rewrite Hnthmt in Hnth; injection Hnth as <-.
   unfold store_typing in *; destruct s; simpl in *.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Htt Hgt Het Hdt.
   apply List.Forall_forall.
   move => x0 Hin.
@@ -1521,7 +1537,7 @@ Proof.
   resolve_store_inst_lookup; destruct m0; simpl in *; remove_bools_options; simpl in *.
   rewrite Hnthmt in Hnth; injection Hnth as <-.
   unfold store_typing in *; destruct s; simpl in *.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Htt Hgt Het Hdt.
   apply List.Forall_forall.
   move => x0 Hin.
@@ -1575,7 +1591,7 @@ Proof.
   resolve_store_inst_lookup; destruct m0; simpl in *; remove_bools_options; simpl in *.
   rewrite Hnthmt in Hnth; injection Hnth as <-.
   unfold store_typing in *; destruct s; simpl in *.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Htt Hgt Het Hdt.
   apply List.Forall_forall.
   move => x0 Hin.
@@ -1619,7 +1635,7 @@ Proof.
   rewrite Hnth in Hnthdt; injection Hnthdt as <-.
   unfold store_typing in *; destruct s; simpl in *.
   unfold_store_operations; remove_bools_options.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Htt Hmt Hgt Het.
   apply List.Forall_forall.
   move => x0 Hin.
@@ -1851,7 +1867,7 @@ Lemma r_return_call_indirect_invert: forall hs s f v x y hs' s' f' a,
         stab s (f_inst f) x = Some tab /\
         Addressing.address_of_value tab.(tableinst_type).(tt_address_type) i = Some index /\
         lookup_N (s_funcs s) a = Some cl /\
-        lookup_N (inst_types (f_inst f)) y = Some (cl_type cl) /\
+        lookup_function_type (inst_types (f_inst f)) y = Some (cl_type cl) /\
         stab_elem s (f_inst f) x index = Some (VAL_ref_func a).
 Proof.
   move => hs s f v x y hs' s' f' a Hreduce.
@@ -1860,7 +1876,7 @@ Proof.
   - by exists cl, i, index, tab.
   - by repeat (destruct ves => //).
   - destruct (lfill_singleton_invert H x) as [[? Hlheq] [-> ->]] => //.
-    + by do 2 (destruct v as [v|v|v] => //=).
+    + destruct v as [v|v|v] => //=; by destruct v as [v|v|v|v] => //=.
     + by apply IHHreduce.
 Qed.
   

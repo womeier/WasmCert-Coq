@@ -399,6 +399,7 @@ Definition pp_value_ref (v : value_ref) : string :=
   | VAL_ref_null t => pp_reference_type (Ref_type true t) ++ ".null" ++ newline
   | VAL_ref_func a => "funcref " ++ pp_addr a ++ newline
   | VAL_ref_extern a => "externref " ++ pp_addr a ++ newline
+  | VAL_ref_i31 n => "i31ref " ++ pp_Z (Wasm_int.Int31.unsigned n) ++ newline
   end.
 
 Definition pp_value (v: value) : string :=
@@ -606,6 +607,9 @@ Fixpoint pp_basic_instruction (i : indentation) (be : basic_instruction) : strin
   | BI_ref_is_null => indent i (with_fg be_style "ref.is_null " ++ newline)
   | BI_ref_func addr => indent i (with_fg be_style "ref.func " ++ pp_addr addr ++ newline)
   | BI_ref_as_non_null => indent i (with_fg be_style "ref.as_non_null" ++ newline)
+  | BI_ref_i31 => indent i (with_fg be_style "ref.i31" ++ newline)
+  | BI_i31_get SX_S => indent i (with_fg be_style "i31.get_s" ++ newline)
+  | BI_i31_get SX_U => indent i (with_fg be_style "i31.get_u" ++ newline)
   | BI_call_ref x => indent i (with_fg be_style "call_ref " ++ pp_id x ++ newline)
   | BI_return_call_ref x => indent i (with_fg be_style "return_call_ref " ++ pp_id x ++ newline)
   | BI_br_on_non_null x => indent i (with_fg be_style "br_on_non_null " ++ pp_id x ++ newline)
@@ -775,6 +779,8 @@ Fixpoint pp_administrative_instruction (n : indentation) (e : administrative_ins
     indent n (with_fg ae_style "ref " ++ pp_addr a ++ newline)
   | AI_ref_extern a =>
     indent n (with_fg ae_style "ref_extern " ++ pp_addr a ++ newline)
+  | AI_ref_i31 v =>
+    indent n (with_fg ae_style "ref_i31 " ++ pp_Z (Wasm_int.Int31.unsigned v) ++ newline)
   | AI_invoke a =>
     indent n (with_fg ae_style "invoke " ++ pp_addr a ++ newline)
   | AI_return_invoke a =>

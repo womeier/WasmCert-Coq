@@ -4,6 +4,7 @@
 (* (C) J. Pichon, M. Bodin - see LICENSE.txt *)
 
 From Wasm Require Export common numerics bytes memory simd address_types table_storage.
+From Wasm Require Export gc_storage_types.
 From compcert Require common.Memdata.
 From Stdlib Require Import ZArith.
 
@@ -37,6 +38,13 @@ Definition u32_bound : N := 4294967296%N.
 Definition u8_bound : N := 256%N.
 
 Definition typeidx : Set := u32.
+
+(** Runtime defined-type identities are canonical registry entries, never
+    module-local HT_type indices. Group members retain their binder position. *)
+Record defined_type : Set := Def_type {
+  defined_group : N;
+  defined_member : N;
+}.
 Definition funcidx : Set := u32.
 Definition tableidx : Set := u32.
 Definition memidx : Set := u32.
@@ -195,44 +203,58 @@ Inductive function_type := (* tf *)
 | Tf : result_type -> result_type -> function_type
 .
 
-(* The supported closed-definition profile is flat function declarations.
-   In particular, no module-local HT_type may escape as a runtime identity.
-   Recursive groups must extend this layer, rather than certify a free index
-   by comparing it with the same numeric index in another module. *)
-Definition heap_type_closed (h : heap_type) : bool :=
-  match h with HT_type _ => false | _ => true end.
+Inductive function_type_gen (V : Type) : Type :=
+| Closed_ft : list V -> list V -> function_type_gen V.
 
-Definition value_type_closed (t : value_type) : bool :=
-  match t with T_ref r => heap_type_closed (ref_heap r) | _ => true end.
+Arguments Closed_ft {V} _ _.
 
-Definition function_type_closed (ft : function_type) : bool :=
-  let '(Tf args results) := ft in
-  List.forallb value_type_closed args && List.forallb value_type_closed results.
+(** Source and canonical declaration phases share the same composite,
+    field/storage and function shapes. Only their reference leaves differ. *)
+Inductive composite_type (V F : Type) : Type :=
+| Comp_func : F -> composite_type V F
+| Comp_struct : list (field_type V) -> composite_type V F
+| Comp_array : field_type V -> composite_type V F.
 
-Record closed_function_type := Closed_function_type {
-  closed_function_body : function_type;
-  closed_function_certificate : function_type_closed closed_function_body = true
+Arguments Comp_func {V F} _.
+Arguments Comp_struct {V F} _.
+Arguments Comp_array {V F} _.
+
+Record subtype (V I F : Type) : Type := Sub_type {
+  subtype_final : bool;
+  subtype_supers : list I;
+  subtype_composite : composite_type V F;
 }.
 
-Inductive defined_type :=
-| Def_func : closed_function_type -> defined_type.
+Arguments Sub_type {V I F} _ _ _.
+Arguments subtype_final {V I F} _.
+Arguments subtype_supers {V I F} _.
+Arguments subtype_composite {V I F} _.
 
-Definition expand_function_type (dt : defined_type) : option function_type :=
-  match dt with Def_func ft => Some (closed_function_body ft) end.
+Definition source_subtype := subtype value_type typeidx function_type.
+Definition recursive_type := list source_subtype.
 
-Definition close_function_type (ft : function_type) : option closed_function_type :=
-  match Bool.bool_dec (function_type_closed ft) true with
-  | left H => Some (@Closed_function_type ft H)
-  | right _ => None
-  end.
+Inductive closed_type_use : Set :=
+| CT_rec : N -> closed_type_use
+| CT_def : defined_type -> closed_type_use.
 
-Definition close_defined_type (ft : function_type) : option defined_type :=
-  option_map Def_func (close_function_type ft).
+Inductive closed_heap_type : Set :=
+| CH_abstract : heap_type -> closed_heap_type
+| CH_defined : closed_type_use -> closed_heap_type.
 
-(* Source type declarations currently contain function signatures only.
-   GC must extend this declaration layer with recursive subtype groups.
-   An inst_types entry is not a globally allocated runtime identity. *)
-Definition type_context := list function_type.
+Inductive closed_value_type : Set :=
+| CV_num : number_type -> closed_value_type
+| CV_vec : vector_type -> closed_value_type
+| CV_ref : bool -> closed_heap_type -> closed_value_type.
+
+Definition closed_function_type := function_type_gen closed_value_type.
+Definition closed_subtype :=
+  subtype closed_value_type closed_type_use closed_function_type.
+Definition canonical_group := list closed_subtype.
+Definition canonical_registry := list canonical_group.
+
+(* Context entries retain composite kind and the source index space.
+   An inst_types entry is never a globally allocated runtime identity. *)
+Definition type_context := list source_subtype.
 
 (* This is a definition for future extensions, where instruction types are no longer
 the same as function types. *)
@@ -297,10 +319,6 @@ Record table_type : Set := {
 
 [https://www.w3.org/TR/wasm-core-2/syntax/types.html#global-types]
 *)
-Inductive mutability : Set := (* mut *)
-  | MUT_const
-  | MUT_var
-  .
 
 
 (** std-doc:
@@ -339,8 +357,38 @@ Inductive block_type : Set :=
 Most types are universally valid. However, restrictions apply to limits, which must be checked during validation. Moreover, block types are converted to plain function types for ease of processing.
 **)
 
+(* Whether a signature is independent of any module's type-name map.
+   Retained for the legacy context-free import profile only; this predicate
+   is not a runtime identity and is not declaration well-formedness. *)
+Definition heap_type_closed (h : heap_type) : bool :=
+  match h with HT_type _ => false | _ => true end.
+
+Definition value_type_closed (t : value_type) : bool :=
+  match t with T_ref r => heap_type_closed (ref_heap r) | _ => true end.
+
+Definition function_type_closed (ft : function_type) : bool :=
+  let '(Tf args results) := ft in
+  List.forallb value_type_closed args && List.forallb value_type_closed results.
+
 Definition functype_valid (ft: function_type) : bool :=
-  function_type_closed ft.
+  (* Compatibility shape predicate only.  Source scope and declared-type
+     validity are checked by module_declarations_validb, while runtime
+     signatures are checked against the instance's canonical type names.
+     The old context-free flat-signature certificate cannot certify HT_type. *)
+  true.
+
+Definition source_subtype_valid (t : source_subtype) : bool :=
+  match subtype_composite t with
+  | Comp_func f => functype_valid f
+  | Comp_struct _ | Comp_array _ => true
+  end.
+
+(** Like the pre-existing functype_valid predicate, this is only the
+    compatibility context-shape check. Actual source declaration validity is
+    checked by canonical closing, registry validation and identity agreement;
+    it must never be inferred from this universally true legacy predicate. *)
+Lemma source_subtype_valid_true t : source_subtype_valid t = true.
+Proof. destruct t as [final supers composite]; destruct composite; reflexivity. Qed.
 
 Definition table_limit_bound : N := (N.sub u32_bound 1%N).
 
@@ -368,6 +416,11 @@ Definition globaltype_valid (gt: global_type) : bool :=
   true.
 
 End Types.
+
+Arguments Closed_ft {V} _ _.
+Arguments Comp_func {V F} _.
+Arguments Comp_struct {V F} _.
+Arguments Comp_array {V F} _.
 
 Notation T_funcref := (Ref_type true HT_func).
 Notation T_externref := (Ref_type true HT_extern).
@@ -669,6 +722,8 @@ Instructions in this group affect the flow of control.
   | BI_return_call_ref : typeidx -> basic_instruction
   | BI_br_on_non_null : labelidx -> basic_instruction
   | BI_br_on_null : labelidx -> basic_instruction
+  | BI_ref_i31
+  | BI_i31_get : sx -> basic_instruction
   .
 
 
@@ -694,6 +749,7 @@ Inductive value_ref : Set :=
 | VAL_ref_null: heap_type -> value_ref
 | VAL_ref_func: funcaddr -> value_ref
 | VAL_ref_extern: externaddr -> value_ref
+| VAL_ref_i31: i31bits -> value_ref
 .
 
 Inductive value : Type :=
@@ -838,7 +894,7 @@ WebAssembly programs are organized into modules, which are the unit of deploymen
 [https://webassembly.github.io/spec/core/syntax/modules.html]
 *)
 Record module : Type := {
-  mod_types : list function_type;
+  mod_types : list recursive_type;
   mod_funcs : list module_func;
   mod_tables : list module_table;
   mod_mems : list module_mem;
@@ -1051,9 +1107,11 @@ Record moduleinst : Type := (* inst *) {
   inst_elems : list elemaddr;
   inst_datas : list dataaddr;
   inst_exports: list exportinst;  
+  (* Source type index -> canonical closed identity in the shared store. *)
+  inst_defined_types : list defined_type;
   }.
 
-Definition empty_moduleinst := Build_moduleinst nil nil nil nil nil nil nil nil.
+Definition empty_moduleinst := Build_moduleinst nil nil nil nil nil nil nil nil nil.
 
 
 (** We assume a family of host functions. **)
@@ -1103,6 +1161,8 @@ Record store_record : Type := (* s *) {
   s_globals : list globalinst;
   s_elems: list eleminst;
   s_datas: list datainst;
+  (* Append-only canonical groups shared by instantiated modules. *)
+  s_types : canonical_registry;
 }.
 
                             
@@ -1145,6 +1205,7 @@ Inductive administrative_instruction : Type := (* e *)
 | AI_return_invoke : funcaddr -> administrative_instruction
 | AI_label : nat -> list administrative_instruction -> list administrative_instruction -> administrative_instruction
 | AI_frame : nat -> frame -> list administrative_instruction -> administrative_instruction
+| AI_ref_i31 : i31bits -> administrative_instruction
 .
 
 (** std-doc:

@@ -4,6 +4,7 @@
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From compcert Require Floats.
 From Wasm Require Export common memory datatypes_properties list_extra simd_execute addressing.
+From Wasm Require Import gc_type_context.
 From Stdlib Require Import ZArith.
 
 (* see common.v *)
@@ -75,10 +76,58 @@ Proof.
     + reflexivity.
 Qed.
 
-Definition resolve_defined_type (C : type_context) (i : typeidx)
-    : option defined_type :=
-  match lookup_N C i with
-  | Some ft => close_defined_type ft
+Definition lookup_function_type (types : type_context) (index : typeidx) :
+    option function_type :=
+  match lookup_N types index with
+  | Some source =>
+      match subtype_composite source with
+      | Comp_func f => Some f
+      | _ => None
+      end
+  | None => None
+  end.
+
+(** Runtime source-index resolution goes through the module's closed names,
+    never through a source HT_type reinterpreted as a canonical address. *)
+Definition resolve_inst_type (inst : moduleinst) (index : typeidx) : option defined_type :=
+  lookup_N inst.(inst_defined_types) index.
+
+Definition expand_inst_type (s : store_record) (inst : moduleinst) (index : typeidx) :
+    option closed_subtype :=
+  match resolve_inst_type inst index with
+  | Some t => expand_defined_type s.(s_types) t
+  | None => None
+  end.
+
+Definition expand_inst_function_type (s : store_record) (inst : moduleinst)
+    (index : typeidx) : option closed_function_type :=
+  match resolve_inst_type inst index with
+  | Some t => expand_function_type s.(s_types) t
+  | None => None
+  end.
+
+Definition native_func_defined_type (fi : funcinst) : option defined_type :=
+  match fi with
+  | FC_func_native _ inst code => resolve_inst_type inst code.(modfunc_type)
+  | FC_func_host _ _ => None
+  end.
+
+Definition funcinst_defined_type (s : store_record) (fi : funcinst) : option defined_type :=
+  match fi with
+  | FC_func_native _ inst code => resolve_inst_type inst code.(modfunc_type)
+  | FC_func_host signature _ => canonical_function_identity s.(s_types) signature
+  end.
+
+Definition funcinst_type_names (fi : funcinst) : list defined_type :=
+  match fi with
+  | FC_func_native _ inst _ => inst.(inst_defined_types)
+  | FC_func_host _ _ => nil
+  end.
+
+Definition lookup_func_defined_type (s : store_record) (address : funcaddr) :
+    option defined_type :=
+  match lookup_N s.(s_funcs) address with
+  | Some fi => funcinst_defined_type s fi
   | None => None
   end.
 
@@ -854,11 +903,9 @@ Definition cl_type (cl : funcinst) : function_type :=
   | FC_func_host tf _ => tf
   end.
 
-Definition funcinst_defined_type (cl : funcinst) : option defined_type :=
-  close_defined_type (cl_type cl).
-
 Definition upd_s_func (s : store_record) (fs: list funcinst) : store_record :=
   {|
+    s_types := s.(s_types);
     s_funcs := fs;
     s_tables := s.(s_tables);
     s_mems := s.(s_mems);
@@ -867,8 +914,13 @@ Definition upd_s_func (s : store_record) (fs: list funcinst) : store_record :=
     s_datas := s.(s_datas);
   |}.
 
+Definition upd_s_types (s : store_record) (types : canonical_registry) : store_record :=
+  Build_store_record s.(s_funcs) s.(s_tables) s.(s_mems) s.(s_globals)
+    s.(s_elems) s.(s_datas) types.
+
 Definition upd_s_table (s : store_record) (ts: list tableinst) : store_record :=
   {|
+    s_types := s.(s_types);
     s_funcs := s.(s_funcs);
     s_tables := ts;
     s_mems := s.(s_mems);
@@ -879,6 +931,7 @@ Definition upd_s_table (s : store_record) (ts: list tableinst) : store_record :=
 
 Definition upd_s_mem (s : store_record) (ms : list meminst) : store_record :=
   {|
+    s_types := s.(s_types);
     s_funcs := s.(s_funcs);
     s_tables := s.(s_tables);
     s_mems := ms;
@@ -889,6 +942,7 @@ Definition upd_s_mem (s : store_record) (ms : list meminst) : store_record :=
 
 Definition upd_s_global (s : store_record) (gs : list globalinst) : store_record :=
   {|
+    s_types := s.(s_types);
     s_funcs := s.(s_funcs);
     s_tables := s.(s_tables);
     s_mems := s.(s_mems);
@@ -899,6 +953,7 @@ Definition upd_s_global (s : store_record) (gs : list globalinst) : store_record
 
 Definition upd_s_elem (s : store_record) (es : list eleminst) : store_record :=
   {|
+    s_types := s.(s_types);
     s_funcs := s.(s_funcs);
     s_tables := s.(s_tables);
     s_mems := s.(s_mems);
@@ -909,6 +964,7 @@ Definition upd_s_elem (s : store_record) (es : list eleminst) : store_record :=
 
 Definition upd_s_data (s : store_record) (ds : list datainst) : store_record :=
   {|
+    s_types := s.(s_types);
     s_funcs := s.(s_funcs);
     s_tables := s.(s_tables);
     s_mems := s.(s_mems);
@@ -921,7 +977,7 @@ Definition iota_N (offset: nat) (len: nat) : list N :=
   map N.of_nat (iota offset len).
 
 Definition stypes (s : store_record) (i : moduleinst) (j : typeidx) : option function_type :=
-  lookup_N (inst_types i) j.
+  lookup_function_type (inst_types i) j.
 
 
 Definition sfunc_ind (s : store_record) (i : moduleinst) (j : funcidx) : option funcaddr :=
@@ -985,7 +1041,7 @@ Definition stab_update (s: store_record) (inst: moduleinst) (x: tableidx) (i: el
             let: tab' := {| tableinst_type := tab.(tableinst_type);
                             tableinst_elem := TableStorage.set tab.(tableinst_elem) (N.to_nat i) tabv |} in
             let: tabs' := set_nth tab' s.(s_tables) (N.to_nat tabaddr) tab' in
-            Some (Build_store_record (s_funcs s) tabs' (s_mems s) (s_globals s) (s_elems s) (s_datas s))
+            Some (Build_store_record (s_funcs s) tabs' (s_mems s) (s_globals s) (s_elems s) (s_datas s) (s_types s))
           else None
       | None => None
       end
@@ -1174,7 +1230,7 @@ Definition stab_grow (s: store_record) (inst: moduleinst) (x: tableidx) (n: N) (
           match growtable tab n tabinit with
           | Some tab' => 
               let tabs' := (set_nth tab' s.(s_tables) (N.to_nat tabaddr) tab') in
-              Some ((Build_store_record (s_funcs s) tabs' (s_mems s) (s_globals s) (s_elems s) (s_datas s)), tab_size tab)
+              Some ((Build_store_record (s_funcs s) tabs' (s_mems s) (s_globals s) (s_elems s) (s_datas s) (s_types s)), tab_size tab)
           | None => None
           end
       | None => None
@@ -1198,7 +1254,7 @@ Definition selem_drop (s: store_record) (inst: moduleinst) (x: elemidx) : option
       | Some elem =>
           let empty_elem := {| eleminst_type := elem.(eleminst_type); eleminst_elem := [::] |} in
           let: elems' := set_nth empty_elem s.(s_elems) (N.to_nat eaddr) empty_elem in
-          Some (Build_store_record (s_funcs s) (s_tables s) (s_mems s) (s_globals s) elems' (s_datas s))
+          Some (Build_store_record (s_funcs s) (s_tables s) (s_mems s) (s_globals s) elems' (s_datas s) (s_types s))
       | None => None
       end
   | None => None
@@ -1220,7 +1276,7 @@ Definition sdata_drop (s: store_record) (inst: moduleinst) (x: dataidx) : option
       | Some data =>
           let empty_data := {| datainst_data := [::] |} in
           let: datas' := set_nth empty_data s.(s_datas) (N.to_nat daddr) empty_data in
-          Some (Build_store_record (s_funcs s) (s_tables s) (s_mems s) (s_globals s) (s_elems s) datas')
+          Some (Build_store_record (s_funcs s) (s_tables s) (s_mems s) (s_globals s) (s_elems s) datas' (s_types s))
       | None => None
       end
   | None => None
@@ -1231,7 +1287,7 @@ Definition supdate_glob_s (s : store_record) (k : globaladdr) (v : value) : opti
     (fun g =>
       let: g' := Build_globalinst (g_type g) v in
       let: gs' := set_nth g' (s_globals s) (N.to_nat k) g' in
-      Build_store_record (s_funcs s) (s_tables s) (s_mems s) gs' (s_elems s) (s_datas s))
+      Build_store_record (s_funcs s) (s_tables s) (s_mems s) gs' (s_elems s) (s_datas s) (s_types s))
     (lookup_N (s_globals s) k).
 
 Definition supdate_glob (s : store_record) (i : moduleinst) (j : globalidx) (v : value) : option store_record :=
@@ -1306,7 +1362,8 @@ Definition store_extension (s s' : store_record) : bool :=
   component_extension mem_extension s.(s_mems) s'.(s_mems) &&
   component_extension global_extension s.(s_globals) s'.(s_globals) &&
   component_extension elem_extension s.(s_elems) s'.(s_elems) &&
-  component_extension data_extension s.(s_datas) s'.(s_datas).
+  component_extension data_extension s.(s_datas) s'.(s_datas) &&
+  canonical_registry_prefixb s.(s_types) s'.(s_types).
 
 Definition to_e_list (bes : list basic_instruction) : seq administrative_instruction :=
   map AI_basic bes.
@@ -1344,6 +1401,7 @@ Definition vref_to_e (vref: value_ref) : administrative_instruction :=
   | VAL_ref_null t => AI_basic (BI_ref_null t)
   | VAL_ref_func addr => AI_ref addr
   | VAL_ref_extern eaddr => AI_ref_extern eaddr
+  | VAL_ref_i31 n => AI_ref_i31 n
   end.
 
 Definition v_to_e (v: value) : administrative_instruction :=
@@ -1363,6 +1421,7 @@ Definition e_to_vref (e: administrative_instruction) : value_ref :=
   | AI_basic (BI_ref_null t) => VAL_ref_null t
   | AI_ref addr => VAL_ref_func addr
   | AI_ref_extern eaddr => VAL_ref_extern eaddr
+  | AI_ref_i31 n => VAL_ref_i31 n
   | _ => VAL_ref_null HT_func
   end.
 
@@ -1371,6 +1430,7 @@ Definition e_to_vref_opt (e: administrative_instruction) : option value_ref :=
   | AI_basic (BI_ref_null t) => Some (VAL_ref_null t)
   | AI_ref addr => Some (VAL_ref_func addr)
   | AI_ref_extern eaddr => Some (VAL_ref_extern eaddr)
+  | AI_ref_i31 n => Some (VAL_ref_i31 n)
   | _ => None
   end.
 
@@ -1476,7 +1536,7 @@ Definition es_is_trap (es : seq administrative_instruction) : bool :=
 
 Definition expand (inst: moduleinst) (tb: block_type) : option function_type :=
   match tb with
-  | BT_id n => lookup_N inst.(inst_types) n
+  | BT_id n => lookup_function_type inst.(inst_types) n
   | BT_valtype (Some t) => Some (Tf [::] [::t])
   | BT_valtype None => Some (Tf [::] [::])
   end.

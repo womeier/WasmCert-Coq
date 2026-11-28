@@ -645,30 +645,18 @@ Lemma import_func_subtyping_eq t1 t2 :
   import_func_subtyping t1 t2 -> t1 = t2.
 Proof.
   unfold import_func_subtyping.
-  destruct (close_defined_type t1) as [d1|] eqn:E1;
-    destruct (close_defined_type t2) as [d2|] eqn:E2; try discriminate.
-  move => H.
-  apply defined_type_match_bidir in H. subst d2.
-  apply close_defined_type_expands in E1, E2.
-  by congruence.
+  by move/andP => [_ /eqP].
 Qed.
 
 Lemma import_func_subtyping_correct t1 t2 :
   import_func_subtyping t1 t2 = true <->
     function_type_closed t1 = true /\ t1 = t2.
 Proof.
-  split.
-  - move => Hmatch.
-    have Heq := import_func_subtyping_eq Hmatch.
-    split; last exact Heq.
-    unfold import_func_subtyping in Hmatch.
-    destruct (close_defined_type t1) as [dt|] eqn:Hclose; try discriminate.
-    apply close_defined_type_expands in Hclose.
-    by apply (expanded_function_type_closed Hclose).
-  - move => [Hclosed <-].
-    destruct (close_defined_type_complete Hclosed) as [dt Hdt].
-    unfold import_func_subtyping. rewrite Hdt.
-    by apply defined_type_match_bidir.
+  unfold import_func_subtyping.
+  rewrite Bool.andb_true_iff.
+  split; move => [Hclosed Heq]; split => //.
+  - by apply/eqP.
+  - by apply/eqP.
 Qed.
 
 Lemma import_subtyping_comp_len t_imps1 t_imps2:

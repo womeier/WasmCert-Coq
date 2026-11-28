@@ -1,5 +1,5 @@
 From Wasm Require Import datatypes operations typing function_references
-                         instantiation_func.
+                         instantiation_func gc_type_context.
 From Stdlib Require Import List NArith.
 Import ListNotations FunctionReferences.
 
@@ -134,30 +134,38 @@ Proof. reflexivity. Qed.
 End Runtime.
 
 Definition closed_i32_function : defined_type :=
-  Def_func (@Closed_function_type (Tf [] [T_num T_i32]) eq_refl).
+  Def_type 0%N 0%N.
 
 Definition closed_i64_function : defined_type :=
-  Def_func (@Closed_function_type (Tf [] [T_num T_i64]) eq_refl).
+  Def_type 1%N 0%N.
+
+Definition closed_function_registry : canonical_registry :=
+  [[Sub_type true [] (Comp_func (Closed_ft [] [CV_num T_i32]))];
+   [Sub_type true [] (Comp_func (Closed_ft [] [CV_num T_i64]))]].
 
 Example closed_function_expansion :
-  expand_function_type closed_i32_function = Some (Tf [] [T_num T_i32]).
+  expand_function_type closed_function_registry closed_i32_function =
+    Some (Closed_ft [] [CV_num T_i32]).
 Proof. reflexivity. Qed.
 
 Example closed_function_matching :
-  defined_type_match closed_i32_function closed_i32_function = true.
+  defined_type_matches closed_function_registry closed_i32_function closed_i32_function = true.
 Proof. vm_compute. reflexivity. Qed.
 
 Example different_closed_function_results :
-  defined_type_match closed_i32_function closed_i64_function = false.
+  defined_type_matches closed_function_registry closed_i32_function closed_i64_function = false.
 Proof. vm_compute. reflexivity. Qed.
 
 Example closing_without_an_environment_rejects_a_free_index :
-  close_defined_type (Tf [T_ref (Ref_type true (HT_type 0%N))] []) = None.
+  close_function_type [] 0%N (Tf [T_ref (Ref_type true (HT_type 0%N))] []) = None.
 Proof. reflexivity. Qed.
 
 Example resolving_flat_defined_type :
-  match resolve_defined_type [Tf [] [T_num T_i32]] 0%N with
-  | Some dt => expand_function_type dt = Some (Tf [] [T_num T_i32])
+  match resolve_inst_type
+    (Build_moduleinst [Sub_type true [] (Comp_func (Tf [] [T_num T_i32]))]
+      [] [] [] [] [] [] [] [closed_i32_function]) 0%N with
+  | Some dt => expand_function_type closed_function_registry dt =
+      Some (Closed_ft [] [CV_num T_i32])
   | None => False
   end.
 Proof. reflexivity. Qed.
@@ -167,25 +175,33 @@ Context `{ho : host}.
 Variable hf : host_function.
 
 Definition metadata_store (ft : function_type) : store_record :=
-  Build_store_record [FC_func_host ft hf] [] [] [] [] [].
+  Build_store_record [FC_func_host ft hf] [] [] [] [] [] closed_function_registry.
 
 Example closed_host_import_type :
   external_type_checker (metadata_store (Tf [] [T_num T_i32])) (EV_func 0%N) =
     Some (ET_func (Tf [] [T_num T_i32])).
-Proof. reflexivity. Qed.
+Proof. vm_compute. reflexivity. Qed.
 
 Example free_host_type_index_rejected :
   external_type_checker
     (metadata_store (Tf [T_ref (Ref_type true (HT_type 0%N))] []))
     (EV_func 0%N) = None.
-Proof. reflexivity. Qed.
+Proof. vm_compute. reflexivity. Qed.
 
 Example closed_runtime_function_identity :
   match ext_func_defined_type (metadata_store (Tf [] [T_num T_i32])) 0%N with
-  | Some dt => expand_function_type dt = Some (Tf [] [T_num T_i32])
+  | Some dt => expand_function_type closed_function_registry dt =
+      Some (Closed_ft [] [CV_num T_i32])
   | None => False
   end.
-Proof. reflexivity. Qed.
+Proof. vm_compute. reflexivity. Qed.
+
+Example unregistered_host_signature_is_rejected :
+  external_type_checker
+    (Build_store_record [FC_func_host (Tf [] [T_num T_i32]) hf]
+      [] [] [] [] [] [])
+    (EV_func 0%N) = None.
+Proof. vm_compute. reflexivity. Qed.
 
 Example zero_table_initializer_is_still_typechecked :
   module_table_type_checker empty_t_context
