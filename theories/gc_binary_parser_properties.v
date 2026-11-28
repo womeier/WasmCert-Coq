@@ -4,7 +4,7 @@
 From Stdlib Require Import List.
 From parseque Require Import Parseque.
 From Wasm Require Import gc_types gc_binary binary_format_parser
-  binary_parser_combinator_properties.
+  binary_format_printer binary_parser_combinator_properties.
 
 Definition abstract_heap_prefix bs h :=
   exists b, bs = b :: nil /\ abstract_heap_encoding b h.
@@ -138,4 +138,55 @@ Theorem gc_reference_parseque_roundtrip t rest :
 Proof.
   rewrite gc_reference_parseque_correspondence.
   apply abstract_reference_codec_roundtrip.
+Qed.
+
+(** The actual main reference-type parser now reuses the proved fragment,
+    mapping its results into the shared representation. *)
+Theorem shared_reference_parser_correspondence bs :
+  run_parse_prefix (fun _ => parse_reference_type) bs =
+  option_map
+    (fun '(t, rest) => (shared_reference_of_abstract t, rest))
+    (decode_abstract_reference bs).
+Proof.
+  unfold parse_reference_type.
+  rewrite run_parse_prefix_map.
+  change
+    (option_map
+      (fun '(t, rest) => (shared_reference_of_abstract t, rest))
+      (run_parse_gc_abstract_reference_type bs) =
+     option_map
+      (fun '(t, rest) => (shared_reference_of_abstract t, rest))
+      (decode_abstract_reference bs)).
+  now rewrite gc_reference_parseque_correspondence.
+Qed.
+
+Theorem shared_reference_parser_correct bs rt rest :
+  run_parse_prefix (fun _ => parse_reference_type) bs = Some (rt, rest) <->
+  exists t, rt = shared_reference_of_abstract t /\
+    abstract_reference_encoding bs t rest.
+Proof.
+  rewrite shared_reference_parser_correspondence.
+  split.
+  - destruct (decode_abstract_reference bs) as [[t suffix]|] eqn:D;
+      [|discriminate].
+    intro E; inversion E; subst.
+    exists t. split; [reflexivity | now apply decode_abstract_reference_sound].
+  - intros [t [E Encoding]]. subst rt.
+    apply decode_abstract_reference_complete in Encoding.
+    rewrite Encoding. reflexivity.
+Qed.
+
+Lemma shared_reference_printer_correspondence t :
+  binary_of_reference_type (shared_reference_of_abstract t) =
+  encode_abstract_reference t.
+Proof. destruct t as [nullable h]; destruct nullable, h; reflexivity. Qed.
+
+Theorem shared_reference_codec_roundtrip t rest :
+  run_parse_prefix (fun _ => parse_reference_type)
+    (binary_of_reference_type (shared_reference_of_abstract t) ++ rest) =
+  Some (shared_reference_of_abstract t, rest).
+Proof.
+  rewrite shared_reference_printer_correspondence,
+    shared_reference_parser_correspondence, abstract_reference_codec_roundtrip.
+  reflexivity.
 Qed.

@@ -478,3 +478,13 @@ Proof.
     as [prefix [E Pp]].
   exists prefix. auto.
 Qed.
+
+Lemma run_parse_prefix_map {A B} (f : A -> B)
+    (p : forall n, Parser (SizedList Byte.byte) Byte.byte option A n) bs :
+  run_parse_prefix (fun n => Combinators.map f (p n)) bs =
+  option_map (fun '(a, rest) => (f a, rest)) (run_parse_prefix p bs).
+Proof.
+  unfold run_parse_prefix, Combinators.map; simpl.
+  destruct (runParser (p (length bs)) (Nat.le_refl _) (mkSizedList bs));
+    reflexivity.
+Qed.

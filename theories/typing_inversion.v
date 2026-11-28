@@ -82,6 +82,9 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       exists t, tf = (Tf [::T_ref t] [::T_num T_i32])
   | BI_ref_i31 =>
       tf = (Tf [::T_num T_i32] [::T_ref (Ref_type false HT_i31)])
+  | BI_i31_get _ =>
+      exists nullable, tf =
+        (Tf [::T_ref (Ref_type nullable HT_i31)] [::T_num T_i32])
   | BI_ref_as_non_null =>
       exists t, tf = (Tf [::t] [::t]) /\ is_ref_t t
   | BI_call_ref _ | BI_return_call_ref _ => False

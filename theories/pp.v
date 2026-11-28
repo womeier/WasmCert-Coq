@@ -608,6 +608,8 @@ Fixpoint pp_basic_instruction (i : indentation) (be : basic_instruction) : strin
   | BI_ref_func addr => indent i (with_fg be_style "ref.func " ++ pp_addr addr ++ newline)
   | BI_ref_as_non_null => indent i (with_fg be_style "ref.as_non_null" ++ newline)
   | BI_ref_i31 => indent i (with_fg be_style "ref.i31" ++ newline)
+  | BI_i31_get SX_S => indent i (with_fg be_style "i31.get_s" ++ newline)
+  | BI_i31_get SX_U => indent i (with_fg be_style "i31.get_u" ++ newline)
   | BI_call_ref x => indent i (with_fg be_style "call_ref " ++ pp_id x ++ newline)
   | BI_return_call_ref x => indent i (with_fg be_style "return_call_ref " ++ pp_id x ++ newline)
   | BI_br_on_non_null x => indent i (with_fg be_style "br_on_non_null " ++ pp_id x ++ newline)

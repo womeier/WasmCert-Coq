@@ -94,6 +94,20 @@ Record abstract_reference_type : Set := {
   art_heap : abstract_heap_type;
 }.
 
+(** The shared main syntax is now available.  Embed this closed abstract
+    fragment rather than introducing another runtime/reference model. *)
+Definition shared_heap_of_abstract (h : abstract_heap_type) : heap_type :=
+  match h with
+  | AH_any => HT_any | AH_eq => HT_eq | AH_i31 => HT_i31
+  | AH_struct => HT_struct | AH_array => HT_array | AH_none => HT_none
+  | AH_func => HT_func | AH_nofunc => HT_nofunc
+  | AH_extern => HT_extern | AH_noextern => HT_noextern
+  end.
+
+Definition shared_reference_of_abstract (t : abstract_reference_type) :
+    reference_type :=
+  Ref_type t.(art_nullable) (shared_heap_of_abstract t.(art_heap)).
+
 Definition abstract_reference_subtyping
     (a b : abstract_reference_type) : bool :=
   implb a.(art_nullable) b.(art_nullable) &&

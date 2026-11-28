@@ -612,7 +612,8 @@ Proof.
       (* BI_call_ref x *) x |
       (* BI_return_call_ref x *) x |
       (* BI_br_on_non_null x *) x |
-      (* BI_ref_i31 *) ] |
+      (* BI_ref_i31 *) |
+      (* BI_i31_get signed *) signed ] |
       (* AI_trap *) |
       (* AI_ref a *) a |
       (* AI_ref_extern a *) a |
@@ -1913,6 +1914,29 @@ the condition that all values should live in the operand stack. *)
         (VAL_ref (VAL_ref_i31 (i31bits_of_i32 n)) :: vs0, es0), None), d>> => //.
       resolve_reduce_ctx vs0 es0.
       by apply r_simple, rs_ref_i31.
+
+    (* AI_basic BI_i31_get *)
+    - destruct vs0 as [|v vs0]; first by no_args.
+      assert_value_ref v.
+      destruct v as [h|a|a|n].
+      + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        by apply r_simple, rs_i31_get_null.
+      + { resolve_invalid_typing.
+        repeat match goal with b : bool |- _ => destruct b end.
+        all: resolve_invalid_value.
+        all: unfold value_typing in H; simpl in H;
+          destruct (ext_func_typing s a); by simpl in H. }
+      + { resolve_invalid_typing.
+        repeat match goal with b : bool |- _ => destruct b end.
+        all: resolve_invalid_value.
+        all: by unfold value_typing in H; simpl in H. }
+      + apply <<hs, (s, (fc, lcs) :: ccs',
+          (VAL_num (VAL_int32 (i32_of_i31bits
+            (match signed with SX_S => true | SX_U => false end) n)) :: vs0, es0),
+          None), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        by apply r_simple, rs_i31_get.
 
     (* AI_trap *)
     - destruct ((vs0 == nil) && (es0 == nil)) eqn:Hscnil; move/andP in Hscnil.

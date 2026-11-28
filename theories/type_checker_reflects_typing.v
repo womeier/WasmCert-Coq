@@ -643,6 +643,8 @@ Proof.
     by unfold type_update_top in Htc; simplify_tc_goal.
   - unfold type_update_ref_as_non_null in Htc.
     destruct ct as [[|t c_ts] unr]; destruct unr; simplify_tc_goal.
+  - unfold type_update_i31_get in Htc.
+    destruct ct as [[|t c_ts] unr]; destruct unr; simplify_tc_goal.
 Qed.
   
 Lemma check_single_None: forall C e,
@@ -676,6 +678,7 @@ Proof.
       do 3 (try destruct ts => //; simpl in * ); simplify_tc_goal.
       by apply type_update_extend with (l2 := ts2) in Htc.
   - by unfold type_update_ref_as_non_null in *; destruct ts; simplify_tc_goal.
+  - by unfold type_update_i31_get in *; destruct ts; simplify_tc_goal.
 Qed.
 
 Lemma check_single_extend_top: forall C e ts ts2 ts0,
@@ -694,6 +697,7 @@ Proof.
       do 3 (try destruct ts => //; simpl in * ); simplify_tc_goal.
       by apply type_update_preserve_unr in Htc.
   - by unfold type_update_ref_as_non_null in *; destruct ts; simplify_tc_goal.
+  - by unfold type_update_i31_get in *; destruct ts; simplify_tc_goal.
 Qed.
 
 Lemma value_type_select_subtyping: forall v1 v2 v3 v4 v,
@@ -728,6 +732,13 @@ Proof.
   unfold c_types_agree.
   move => ts [c_ts [|]] -> => /=; simplify_tc_goal.
   by rewrite take_size; resolve_subtyping.
+Qed.
+
+Lemma is_i31_t_subtyping t1 t2 :
+  t1 <t: t2 -> is_i31_t t2 -> is_i31_t t1.
+Proof.
+  unfold value_subtyping.
+  move => Hsub Htype. remove_bools_options; subst => //.
 Qed.
 
 Lemma check_single_subtyping: forall C e ct1 ct1' ct2,
@@ -833,6 +844,13 @@ Proof.
       by eexists; split; eauto => /=; resolve_subtyping.
     + replace (is_ref_t t1') with true; last by destruct t1, t1'.
       by eexists; split; eauto => /=; resolve_subtyping.
+  - unfold type_update_i31_get in *; simpl in *.
+    destruct ct1 as [[|t1 ts1] unr]; destruct ct1' as [[|t1' ts1'] [|]];
+      unfold ct_subtyping, c_types_agree in *; simpl in *; simplify_tc_goal;
+      try by (eexists; split; eauto => //=; try rewrite take0 => //; resolve_subtyping).
+    all: replace (is_i31_t t1') with true;
+      last by symmetry; eapply is_i31_t_subtyping; eauto.
+    all: by eexists; split; eauto => /=; resolve_subtyping.
 Qed.
 
 Lemma check_subtyping: forall C es ct1 ct1' ct2,
@@ -878,6 +896,7 @@ Proof.
       by apply type_update_preserve_top in Hcheck.
     + do 3 (try destruct cts1 => //); simplify_tc_goal; by apply type_update_preserve_top in Hcheck.
   - by unfold type_update_ref_as_non_null in Hcheck; destruct cts1; simplify_tc_goal.
+  - by unfold type_update_i31_get in Hcheck; destruct cts1; simplify_tc_goal.
 Qed.
 
 Lemma check_preserve_top: forall C es cts1 cts2 unr,
@@ -1010,6 +1029,36 @@ Proof.
       apply instr_subtyping_weaken1 with (tx1 := [::T_bot]); by resolve_subtyping.
 Qed.
       
+Lemma type_update_i31_get_bet: forall C cts cts' tm signed,
+  type_update_i31_get cts = Some cts' ->
+  c_types_agree cts' tm ->
+  exists tn, c_types_agree cts tn /\
+    be_typing C [::BI_i31_get signed] (Tf (rev tn) (rev tm)).
+Proof.
+  move => C cts cts' tm signed Hupdate Hct.
+  unfold type_update_i31_get in Hupdate.
+  destruct cts as [[ | t ts] unr]; simplify_tc_goal.
+  - apply c_types_agree_cons_split in Hct as [t' [ts' [-> [Hsub Hagree]]]].
+    exists ([::T_bot] ++ ts'); split => //.
+    rewrite rev_cons -cats1 rev_cat rev_cons -cats1.
+    apply bet_weakening => /=.
+    eapply bet_subtyping; first by apply bet_i31_get with (nullable := false).
+    resolve_subtyping.
+    apply instr_subtyping_weaken1 with (tx1 := [::T_bot]); by resolve_subtyping.
+  - apply c_types_agree_cons_split in Hct as [t' [ts' [-> [Hsub Hagree]]]].
+    exists ([::t] ++ ts'); split => //.
+    { by simpl; apply c_types_agree_cons; split; resolve_subtyping. }
+    rewrite rev_cons -cats1 rev_cat rev_cons -cats1.
+    apply bet_weakening => /=.
+    destruct t as [nt|vt|[nullable heap]|] => //.
+    + destruct heap => //.
+      eapply bet_subtyping; first by apply bet_i31_get with (nullable := nullable).
+      by resolve_subtyping.
+    + eapply bet_subtyping; first by apply bet_i31_get with (nullable := false).
+      resolve_subtyping.
+      apply instr_subtyping_weaken1 with (tx1 := [::T_bot]); by resolve_subtyping.
+Qed.
+
 Lemma type_update_ref_as_non_null_bet: forall C cts cts' tm,
   type_update_ref_as_non_null cts = Some cts' ->
   c_types_agree cts' tm ->
@@ -1563,7 +1612,8 @@ Proof.
       exists tn; split => //.
        eapply bet_subtyping; first by eapply bet_br_on_non_null; eauto.
        exact Hsub.
-    + by resolve_tc_be_typing.
+     + by resolve_tc_be_typing.
+     + by eapply type_update_i31_get_bet; eauto.
 Qed.
       
 Lemma tc_to_bet_list: forall C cts bes tm cts',
@@ -1660,9 +1710,9 @@ Proof.
           rewrite values_subtyping_cat; last by apply values_subtyping_size in IHHbet; apply values_subtyping_size in Hconjr0; lias.
           by resolve_subtyping.
       }
-    + unfold type_update_ref_as_non_null; simpl.
-      rewrite H.
-      by unfold c_types_agree; simplify_tc_goal.
+     + unfold type_update_ref_as_non_null; simpl.
+       rewrite H.
+       by unfold c_types_agree; simplify_tc_goal.
 Qed.
       
 End Host.

@@ -40,3 +40,13 @@ Qed.
 Lemma ref_i31_binary_roundtrip :
   run_parse_be (binary_of_be BI_ref_i31) = Some BI_ref_i31.
 Proof. vm_compute. reflexivity. Qed.
+
+Lemma i31_get_binary_roundtrip signed :
+  run_parse_be (binary_of_be (BI_i31_get signed)) = Some (BI_i31_get signed).
+Proof. destruct signed; vm_compute; reflexivity. Qed.
+
+Lemma gc_abstract_ref_null_binary_roundtrip h :
+  run_parse_be
+    (binary_of_be (BI_ref_null (gc_types.shared_heap_of_abstract h))) =
+  Some (BI_ref_null (gc_types.shared_heap_of_abstract h)).
+Proof. destruct h; vm_compute; reflexivity. Qed.

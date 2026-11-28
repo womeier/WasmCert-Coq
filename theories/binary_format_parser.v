@@ -172,13 +172,9 @@ Definition parse_number_type {n} : byte_parser number_type n :=
 Definition parse_vector_type {n} : byte_parser vector_type n :=
   (exact_byte x7b $> T_v128).
 
-Definition parse_reference_type {n} : byte_parser reference_type n :=
-  (exact_byte x70 $> T_funcref) <|>
-  (exact_byte x6f $> T_externref).
-
-(** Shared-reference integration can map this abstract fragment into its
-    final heap/reference representation.  Keep it distinct from the legacy
-    [parse_reference_type] until that representation is integrated. *)
+(** The verified abstract fragment is mapped into the shared main syntax.
+    Indexed/recursive references still require declaration well-formedness
+    integration before the module parser may admit them. *)
 Definition parse_gc_abstract_heap_type {n} :
     byte_parser gc_types.abstract_heap_type n :=
   guardM decode_abstract_heap anyTok.
@@ -191,6 +187,12 @@ Definition parse_gc_abstract_reference_type {n} :
     (exact_byte x64 &> parse_gc_abstract_heap_type)) <|>
   ((fun h => {| gc_types.art_nullable := true; gc_types.art_heap := h |}) <$>
     parse_gc_abstract_heap_type).
+
+Definition parse_gc_heap_type {n} : byte_parser heap_type n :=
+  gc_types.shared_heap_of_abstract <$> parse_gc_abstract_heap_type.
+
+Definition parse_reference_type {n} : byte_parser reference_type n :=
+  gc_types.shared_reference_of_abstract <$> parse_gc_abstract_reference_type.
 
 Definition parse_value_type {n} : byte_parser value_type n :=
   T_num <$> parse_number_type <|>
@@ -263,7 +265,7 @@ Definition parse_return_call_ref {n} : byte_parser basic_instruction n :=
 
 (* Reference instructions *)
 Definition parse_ref_null {n}: byte_parser basic_instruction n :=
-  exact_byte xd0 &> ((fun t => BI_ref_null (ref_heap t)) <$> parse_reference_type).
+  exact_byte xd0 &> (BI_ref_null <$> parse_gc_heap_type).
 
 Definition parse_ref_is_null {n} : byte_parser basic_instruction n :=
   exact_byte xd1 $> BI_ref_is_null.
@@ -277,6 +279,11 @@ Definition parse_ref_as_non_null {n} : byte_parser basic_instruction n :=
 Definition parse_ref_i31 {n} : byte_parser basic_instruction n :=
   (exact_byte xfb &> assert_u32 28) $> BI_ref_i31.
 
+Definition parse_i31_get {n} : byte_parser basic_instruction n :=
+  exact_byte xfb &>
+    ((assert_u32 29 $> BI_i31_get SX_S) <|>
+     (assert_u32 30 $> BI_i31_get SX_U)).
+
 Definition parse_br_on_non_null {n} : byte_parser basic_instruction n :=
   exact_byte xd6 &> (BI_br_on_non_null <$> parse_labelidx).
 
@@ -286,6 +293,7 @@ Definition parse_reference_instruction {n} : byte_parser basic_instruction n :=
   parse_ref_func <|>
   parse_ref_as_non_null <|>
   parse_ref_i31 <|>
+  parse_i31_get <|>
   parse_br_on_non_null.
 
 

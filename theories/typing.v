@@ -396,6 +396,9 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 | bet_ref_i31 : forall C,
   be_typing C [::BI_ref_i31]
     (Tf [::T_num T_i32] [::T_ref (Ref_type false HT_i31)])
+| bet_i31_get : forall C signed nullable,
+  be_typing C [::BI_i31_get signed]
+    (Tf [::T_ref (Ref_type nullable HT_i31)] [::T_num T_i32])
 .
 
 Definition expr_typing (C: t_context) (bes: list basic_instruction) (ts: result_type) : Prop :=

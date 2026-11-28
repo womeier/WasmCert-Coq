@@ -103,6 +103,22 @@ Definition type_update_ref_is_null (ct : checker_type) : option checker_type :=
       else None
   end.
 
+Definition is_i31_t (t : value_type) : bool :=
+  match t with
+  | T_ref (Ref_type _ HT_i31) | T_bot => true
+  | _ => false
+  end.
+
+Definition type_update_i31_get (ct : checker_type) : option checker_type :=
+  match ct.(CT_type) with
+  | nil =>
+      if ct.(CT_unr) then Some <<[::T_num T_i32], true>> else None
+  | t :: ts' =>
+      if is_i31_t t then
+        Some <<(T_num T_i32 :: ts'), ct.(CT_unr)>>
+      else None
+  end.
+
 Definition type_update_drop (ct : checker_type) : option checker_type :=
   match ct.(CT_type) with
   | nil =>
@@ -171,6 +187,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       | BI_ref_is_null => type_update_ref_is_null ts
       | BI_ref_i31 =>
           type_update ts [::T_num T_i32] [::T_ref (Ref_type false HT_i31)]
+      | BI_i31_get _ => type_update_i31_get ts
       | BI_ref_as_non_null => type_update_ref_as_non_null ts
       (* Parsing and dispatch are available, but accepting these instructions
          requires closed indexed function reference typing. Never substitute
