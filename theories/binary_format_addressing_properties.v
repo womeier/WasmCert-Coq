@@ -166,3 +166,25 @@ Proof.
     apply decode_limits_complete in Hlimits. rewrite Hlimits.
     destruct tt; reflexivity.
 Qed.
+
+Definition run_memarg_prefix (input: list byte) : option (datatypes.memarg * list byte) :=
+  flatten_memarg (runParser
+    (binary_format_parser.parse_memarg (Toks := SizedList byte) (M := option))
+    (Nat.le_refl (List.length input)) (mkSizedList input)).
+
+Theorem binary_memarg_parser_correct input :
+  run_memarg_prefix input = decode_memarg input.
+Proof.
+  rewrite <- decode_memarg_tokens_correct.
+  unfold run_memarg_prefix, binary_format_parser.parse_memarg,
+    AddressingParseque.parse_memarg, flatten_memarg.
+  cbn [runParser].
+  destruct (decode_memarg_tokens (mkSizedList input)); reflexivity.
+Qed.
+
+Theorem binary_memarg_parser_grammar input marg rest :
+  run_memarg_prefix input = Some (marg, rest) <-> memarg_encoding input marg rest.
+Proof.
+  rewrite binary_memarg_parser_correct.
+  split; [apply decode_memarg_sound | apply decode_memarg_complete].
+Qed.

@@ -5,7 +5,7 @@
     [decode_address_tokens_correct] connects executable token decoding to
     [AddressingBinary.decode_address], whose byte grammar is proved separately.
     It covers both the decoded value and every unconsumed byte. *)
-From Wasm Require Import datatypes addressing addressing_binary.
+From Wasm Require Import datatypes operations addressing addressing_binary.
 From parseque Require Import Parseque.
 From Stdlib Require Import Strings.Byte NArith List PeanoNat Eqdep_dec.
 Import Addressing AddressingBinary.
@@ -28,6 +28,79 @@ Definition decode_table_type (input: list byte)
             (decode_limits input)
       end
   end.
+
+Definition decode_memarg (input: list byte) : option (memarg * list byte) :=
+  match decode_address AT_i32 input with
+  | None => None
+  | Some (flags, input) =>
+      match decode_memarg_flags flags with
+      | None => None
+      | Some (align, explicit) =>
+          let selected := if explicit then decode_address AT_i32 input
+                          else Some (0%N, input) in
+          match selected with
+          | None => None
+          | Some (memory, input) =>
+              option_map (fun '(offset, rest) => (Build_memarg offset align memory, rest))
+                (decode_address AT_i64 input)
+          end
+      end
+  end.
+
+Definition unsigned_prefix (a: address_type) input value rest : Prop :=
+  (value < address_bound a)%N /\
+  exists prefix, input = prefix ++ rest /\
+    (List.length prefix <= address_bytes a)%nat /\ unsigned_leb prefix value.
+
+Inductive memarg_encoding : list byte -> memarg -> list byte -> Prop :=
+| memarg_default input flags middle align offset rest :
+    unsigned_prefix AT_i32 input flags middle ->
+    decode_memarg_flags flags = Some (align, false) ->
+    unsigned_prefix AT_i64 middle offset rest ->
+    memarg_encoding input (Build_memarg offset align 0%N) rest
+| memarg_indexed input flags middle align memory after_memory offset rest :
+    unsigned_prefix AT_i32 input flags middle ->
+    decode_memarg_flags flags = Some (align, true) ->
+    unsigned_prefix AT_i32 middle memory after_memory ->
+    unsigned_prefix AT_i64 after_memory offset rest ->
+    memarg_encoding input (Build_memarg offset align memory) rest.
+
+Lemma decode_memarg_sound input marg rest :
+  decode_memarg input = Some (marg, rest) -> memarg_encoding input marg rest.
+Proof.
+  unfold decode_memarg.
+  destruct (decode_address AT_i32 input) as [[flags middle]|] eqn:Hflags; [|discriminate].
+  destruct (decode_memarg_flags flags) as [[align explicit]|] eqn:Hflag; [|discriminate].
+  apply decode_address_spec in Hflags.
+  destruct explicit.
+  - destruct (decode_address AT_i32 middle) as [[memory after_memory]|] eqn:Hmemory; [|discriminate].
+    destruct (decode_address AT_i64 after_memory) as [[offset remaining]|] eqn:Hoffset; [|discriminate].
+    intros H; inversion H; subst.
+    eapply memarg_indexed with (flags := flags) (middle := middle)
+      (after_memory := after_memory).
+    + exact Hflags.
+    + exact Hflag.
+    + now apply decode_address_spec.
+    + now apply decode_address_spec.
+  - destruct (decode_address AT_i64 middle) as [[offset remaining]|] eqn:Hoffset; [|discriminate].
+    intros H; inversion H; subst.
+    eapply memarg_default with (flags := flags) (middle := middle).
+    + exact Hflags.
+    + exact Hflag.
+    + now apply decode_address_spec.
+Qed.
+
+Lemma decode_memarg_complete input marg rest :
+  memarg_encoding input marg rest -> decode_memarg input = Some (marg, rest).
+Proof.
+  intros Henc; destruct Henc as
+    [input flags middle align offset rest Hflags Hflag Hoffset |
+     input flags middle align memory after_memory offset rest Hflags Hflag Hmemory Hoffset];
+    apply decode_address_spec in Hflags; apply decode_address_spec in Hoffset;
+    unfold decode_memarg; rewrite Hflags, Hflag.
+  - now rewrite Hoffset.
+  - apply decode_address_spec in Hmemory. now rewrite Hmemory, Hoffset.
+Qed.
 
 Section Tokens.
 Context {Toks: nat -> Type} `{Sized Toks byte}.
@@ -105,6 +178,32 @@ Definition decode_table_type_tokens {n} (input: Toks n)
                 (Success.map (fun '(a, lim) =>
                   {| tt_limits := lim; tt_elem_type := elem; tt_address_type := a |}) lims))
           end
+      end
+  end.
+
+Definition decode_memarg_offset_tokens align memory {n} (input: Toks n)
+    : option (Success.Success Toks byte memarg n) :=
+  option_map (Success.map (fun offset => Build_memarg offset align memory))
+    (decode_address_tokens AT_i64 input).
+
+Definition decode_memarg_tokens {n} (input: Toks n)
+    : option (Success.Success Toks byte memarg n) :=
+  match decode_address_tokens AT_i32 input with
+  | None => None
+  | Some flags =>
+      match decode_memarg_flags (Success.value flags) with
+      | None => None
+      | Some (align, explicit) =>
+          if explicit then
+            match decode_address_tokens AT_i32 (Success.leftovers flags) with
+            | None => None
+            | Some memory =>
+                option_map (fun offset => Success.lt_lift (Success.small flags)
+                  (Success.lt_lift (Success.small memory) offset))
+                  (decode_memarg_offset_tokens align (Success.value memory) (Success.leftovers memory))
+            end
+          else option_map (Success.lt_lift (Success.small flags))
+            (decode_memarg_offset_tokens align 0%N (Success.leftovers flags))
       end
   end.
 
@@ -220,6 +319,50 @@ Proof.
   destruct lims as [[a lim] size small rest]. reflexivity.
 Qed.
 
+Definition flatten_memarg {n}
+    (result: option (Success.Success (SizedList byte) byte memarg n))
+    : option (memarg * list byte) :=
+  option_map (fun s => (Success.value s,
+    @Sized.value _ (@List.length byte) _ (Success.leftovers s))) result.
+
+Lemma decode_memarg_offset_tokens_correct align memory n (input: SizedList byte n) :
+  flatten_memarg (decode_memarg_offset_tokens align memory input) =
+    option_map (fun '(offset, rest) => (Build_memarg offset align memory, rest))
+      (decode_address AT_i64 (@Sized.value _ (@List.length byte) _ input)).
+Proof.
+  pose proof (decode_address_tokens_correct_sized AT_i64 n input) as Hcorrect.
+  unfold flatten in Hcorrect.
+  unfold flatten_memarg, decode_memarg_offset_tokens.
+  destruct (decode_address_tokens AT_i64 input); cbn [option_map] in Hcorrect;
+    rewrite <- Hcorrect; reflexivity.
+Qed.
+
+Lemma decode_memarg_tokens_correct input :
+  flatten_memarg (decode_memarg_tokens (mkSizedList input)) = decode_memarg input.
+Proof.
+  unfold decode_memarg_tokens, decode_memarg.
+  pose proof (decode_address_tokens_correct AT_i32 input) as Hflags.
+  unfold flatten in Hflags.
+  destruct (decode_address_tokens AT_i32 (mkSizedList input)) as [flags|];
+    cbn [option_map] in Hflags; rewrite <- Hflags; [|reflexivity].
+  destruct (decode_memarg_flags (Success.value flags)) as [[align explicit]|]; [|reflexivity].
+  destruct explicit.
+  - pose proof (decode_address_tokens_correct_sized AT_i32 (Success.size flags)
+      (Success.leftovers flags)) as Hmemory.
+    unfold flatten in Hmemory.
+    destruct (decode_address_tokens AT_i32 (Success.leftovers flags)) as [memory|];
+      cbn [option_map] in Hmemory; rewrite <- Hmemory; [|reflexivity].
+    rewrite <- (decode_memarg_offset_tokens_correct align (Success.value memory)
+      (Success.size memory) (Success.leftovers memory)).
+    unfold flatten_memarg.
+    destruct (decode_memarg_offset_tokens align (Success.value memory)
+      (Success.leftovers memory)); reflexivity.
+  - rewrite <- (decode_memarg_offset_tokens_correct align 0%N
+      (Success.size flags) (Success.leftovers flags)).
+    unfold flatten_memarg.
+    destruct (decode_memarg_offset_tokens align 0%N (Success.leftovers flags)); reflexivity.
+Qed.
+
 Section Parser.
 Context {Toks: nat -> Type} `{Sized Toks byte}
   {M: Type -> Type} `{RawAlternative M}.
@@ -232,6 +375,9 @@ Definition parse_address_limits {n} : Parser Toks byte M (address_type * limits)
 
 Definition parse_table_type {n} : Parser Toks byte M datatypes.table_type n :=
   MkParser (fun _ _ input => fromOption (decode_table_type_tokens input)).
+
+Definition parse_memarg {n} : Parser Toks byte M memarg n :=
+  MkParser (fun _ _ input => fromOption (decode_memarg_tokens input)).
 
 End Parser.
 

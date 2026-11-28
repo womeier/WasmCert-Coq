@@ -107,7 +107,13 @@ let () =
   let lim = limits "4294967296" (Some "18446744073709551615") in
   check "wide limits round trip"
     (B.decode_limits (B.encode_limits A.AT_i64 lim) =
-       Some ((A.AT_i64, lim), []));
+        Some ((A.AT_i64, lim), []));
+  check "production-selected limits parser preserves width and suffix"
+    (P.run_limits_prefix (B.encode_limits A.AT_i64 lim @ [Char.chr 255]) =
+      Some ((A.AT_i64, lim), [Char.chr 255]));
+  check "production-selected limits parser rejects overflowing u64"
+    (P.run_limits_prefix
+      (Char.chr 4 :: List.init 9 (fun _ -> Char.chr 128) @ [Char.chr 2]) = None);
   check "reject shared-memory flag in non-shared codec"
     (B.decode_limits [Char.chr 6; Char.chr 0; Char.chr 1] = None);
   check "address addition does not wrap"
