@@ -175,11 +175,14 @@ print(f"(module binary {escaped(exported_table)})")
 print('(register "M")')
 
 
-def imported_table(table_type):
-    body = b"\x00" + i64(2**32) + get + is_null + b"\x0b"
+def imported_table(table_type, source=b"M", name=b"t", instructions=None):
+    if instructions is None:
+        instructions = i64(2**32) + get + is_null
+    body = b"\x00" + instructions + b"\x0b"
     return (b"\x00asm\x01\x00\x00\x00"
             + sec(1, b"\x01\x60\x00\x01\x7f")
-            + sec(2, b"\x01\x01M\x01t\x01" + table_type)
+            + sec(2, vec([uleb(len(source)) + source + uleb(len(name)) + name
+                          + b"\x01" + table_type]))
             + sec(3, b"\x01\x00")
             + sec(7, b"\x01\x03run\x00\x00")
             + sec(10, vec([uleb(len(body)) + body])))
@@ -197,3 +200,6 @@ wrong_width = (b"\x00asm\x01\x00\x00\x00"
 for binary in (wrong_width, imported_table(tt(64, 2**32 + 2)),
                imported_table(tt(64, 0, 2**32 + 1))):
     print(f'(assert_unlinkable (module binary {escaped(binary)}) "incompatible import type")')
+
+print(f"(module binary {escaped(imported_table(tt(64, 10, 20), source=b'spectest', name=b'table64', instructions=i64(9) + get + is_null))})")
+print('(assert_return (invoke "run") (i32.const 1))')

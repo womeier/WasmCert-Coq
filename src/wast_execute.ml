@@ -475,6 +475,18 @@ let spectest_host_str =
 
 let register_spectest_host verbosity hs s = 
   let* m = Parse.parse_module verbosity true spectest_host_str in
+  (* Add the Wasm 3.0 host table in the core AST: the deferred text module
+     frontend is neither extended nor asked to understand an i64 table. *)
+  let table64 = Extract.{
+    tt_limits = {lim_min = Big_int_Z.big_int_of_int 10;
+                 lim_max = Some (Big_int_Z.big_int_of_int 20)};
+    tt_elem_type = T_funcref; tt_address_type = Addressing.AT_i64 } in
+  let table64_name = List.init 7 (String.get "table64") in
+  let table64_index = Big_int_Z.big_int_of_int (List.length m.Extract.mod_tables) in
+  let m = Extract.{ m with
+    mod_tables = m.mod_tables @ [table64];
+    mod_exports = m.mod_exports @
+      [{modexp_name = table64_name; modexp_desc = MED_table table64_index}] } in
   let modname = "spectest" in
   let* (hs', s') = Execute.instantiate_modules verbosity hs s [modname] [m] in
     debug_info verbosity stage (fun _ -> "Successfully instantiated module " ^ modname ^ ".\n");
