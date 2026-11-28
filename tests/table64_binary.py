@@ -91,6 +91,32 @@ def reject(phase, code, **kwargs):
     print(f'(assert_{phase} (module binary {escaped(module(code, **kwargs))}) "table64")')
 
 
+def declaration_case(table, phase=None):
+    """Minimal table-only modules: no unrelated functions or element segments."""
+    data = b"\x00asm\x01\x00\x00\x00" + sec(4, vec([table]))
+    command = f"(module binary {escaped(data)})"
+    print(command if phase is None else f'(assert_{phase} {command} "table type")')
+
+
+# Original official table.wast commands 14--16: explicit null initializers,
+# including the explicit nullable spelling. These must parse AND instantiate.
+for size, reference in ((0, b"\x70"), (1, b"\x70"), (1, b"\x63\x70")):
+    declaration_case(b"\x40\x00" + reference + b"\x00" + uleb(size) + null + b"\x0b")
+
+# Commands 40--41 and 43--45: parse successfully, then fail VALIDATION.
+declaration_case(b"\x40\x00\x63\x70\x00\x01" + i32(0) + b"\x0b", "invalid")
+declaration_case(b"\x40\x00\x64\x70\x00\x01\xd0\x6f\x0b", "invalid")
+declaration_case(b"\x40\x00\x64\x70\x00\x01" + null + b"\x0b", "invalid")
+declaration_case(b"\x64\x70\x00\x00", "invalid")
+declaration_case(b"\x64\x6f\x00\x00", "invalid")
+
+# Commands 21--23 are deferred quoted-text validation cases. Their oversized
+# table32 fields have NO valid u32 binary encoding: the corresponding bytes
+# must fail decoding, not be accepted as invalid modules or truncated to zero.
+for minimum, maximum in ((2**32, None), (2**32, 2**32), (0, 2**32)):
+    declaration_case(tt(32, minimum, maximum), "malformed")
+
+
 check(b"\xfc\x10\x00", 4, result=0x7e)
 check(null + i64(2) + b"\xfc\x0f\x00", 4, result=0x7e)
 check(null + i64(5) + b"\xfc\x0f\x00", -1, result=0x7e)
