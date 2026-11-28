@@ -528,6 +528,7 @@ Proof.
     | addr
     | n ces es
     | n f es
+    | a
     ]; simpl in *; try by (injection Hdecomp as <- <- <-; unfold valid_ccs).
   - destruct acc as [ | [fc lcs] ccs'] => //.
     eapply IH in Hdecomp; eauto; apply split_vals_inv in Hsplit as ->.
@@ -559,6 +560,7 @@ Proof.
     | addr
     | n ces es
     | n f es
+    | a
     ]; simpl in *; try by injection Hdecomp as <- <- <-.
   - injection Hdecomp as <- <- <- => /=.
     apply split_vals_nconst in Hsplit.
@@ -707,6 +709,7 @@ Proof.
       | addr
       | n ces es
       | n f es
+      | a
       ]; simpl in *; try by injection Hdecomp as <- <- <- => /=; apply split_vals_inv in Hsplit as ->.
     (* Label *)
     + destruct acc as [ | [fc lcs] ccs']; first by inversion Hdecomp => /=.

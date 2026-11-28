@@ -17,6 +17,7 @@ Context `{ho: host}.
 
 (* Equality for the stateful parts (instances) of the typing context *)
 Definition inst_match C C' : bool :=
+  (C.(tc_tags) == C'.(tc_tags)) &&
   (C.(tc_types) == C'.(tc_types)) &&
   (C.(tc_funcs) == C'.(tc_funcs)) &&
   (C.(tc_tables) == C'.(tc_tables)) &&
@@ -25,6 +26,31 @@ Definition inst_match C C' : bool :=
   (C.(tc_elems) == C'.(tc_elems)) &&
   (C.(tc_datas) == C'.(tc_datas)) &&
   (C.(tc_refs) == C'.(tc_refs)).
+
+Lemma inst_match_tags C C' :
+  inst_match C C' -> C.(tc_tags) = C'.(tc_tags).
+Proof. unfold inst_match; move => H; remove_bools_options; done. Qed.
+
+Lemma throw_payload_typing s C vs x ps tin tout :
+  e_typing s C (v_to_e_list vs ++ [::AI_basic (BI_throw x)]) (Tf tin tout) ->
+  lookup_N C.(tc_tags) x = Some ps ->
+  length vs = length ps ->
+  values_typing s vs ps.
+Proof.
+  move => Htype Htag Hlen.
+  apply e_composition_typing in Htype as [middle [Hvalues Hthrow]].
+  apply Values_typing_inversion in Hvalues as [vts [Hsubv Hvals]].
+  apply e_typing_inversion in Hthrow as [[args results] [Hsubt Hprincipal]].
+  simpl in Hprincipal.
+  destruct Hprincipal as [prefix [out [params [Heq Hlookup]]]].
+  injection Heq as Heq1 Heq2; subst args results.
+  rewrite Htag in Hlookup; injection Hlookup as <-.
+  assert (Hsize: size vts = size ps).
+  { pose proof (values_typing_size Hvals) as Hsizes.
+    rewrite !length_is_size in Hlen; lias. }
+  pose proof (instr_subtyping_suffix_prod_cons Hsubv Hsubt Hsize) as Hsub.
+  by eapply values_typing_trans; eauto.
+Qed.
 
 (* Preservation for some less trivial operations *)
 Lemma app_binop_type_preserve: forall op v1 v2 v,
@@ -478,6 +504,10 @@ Qed.
 Ltac rewrite_context_agree:=
   repeat match goal with
     | Hext: is_true (context_agree ?C ?C') |-
+      context [ tc_tags ?C' ] =>
+        replace (tc_tags C') with (tc_tags C) => //; eauto;
+          last by apply context_agree_tags
+    | Hext: is_true (context_agree ?C ?C') |-
       context [ tc_types ?C' ] =>
         replace (tc_types C') with (tc_types C) => //; eauto; last by unfold context_agree in Hext; remove_bools_options; destruct C, C'; lias
     | Hext: is_true (context_agree ?C ?C') |-
@@ -632,6 +662,10 @@ Proof.
   (* trap *)
   - move=> s C tf s' HST1 HST2 Hext.
     by apply ety_trap.
+  (* exception *)
+  - move=> s C a ex tf Hlookup s' HST1 HST2 Hext.
+    eapply ety_raise.
+    by eapply store_extension_lookup_exn; eauto.
   (* ref_extern *)
   - move=> s C tf s' HST1 HST2 Hext.
     by apply ety_ref_extern.
@@ -1644,6 +1678,8 @@ Proof.
     destruct Hframetype as [ts [-> Hvaltype]].
     eapply IHHReduce in Hetype; eauto.
     by unfold inst_match; lias.
+  - (* throw allocates an immutable exception instance *)
+    by apply alloc_exn_extension.
 Qed.
     
 Lemma store_typing_reduce: forall s f es s' f' es' C C' tf hs hs',
@@ -1656,7 +1692,9 @@ Lemma store_typing_reduce: forall s f es s' f' es' C C' tf hs hs',
 Proof.
   move => s f es s' f' es' C C' tf hs hs' HReduce.
   move: tf C C'.
-  induction HReduce => //; subst; try (move => tf C C' HIT Hmatch HType HST; intros; destruct tf; invert_e_typing => //).
+  induction HReduce => //; subst;
+    try (move => tf C C' HIT Hmatch HType HST; intros;
+      destruct tf; invert_e_typing => //).
   - (* host call *)
     by eapply host_application_typing; eauto.
   - (* global_set *)
@@ -1701,8 +1739,20 @@ Proof.
     destruct Hframetype as [ts [-> Hvaltype]].
     eapply IHHReduce in Hetype; eauto.
     by unfold inst_match; lias.
+  - (* throw payloads have the declared tag parameters *)
+    apply alloc_exn_typing => //.
+    exists ps; split => //.
+    destruct (inst_typing_tag_lookup HIT H) as [params [Hparams Hcontext]].
+    rewrite H0 in Hparams; injection Hparams as <-.
+    rewrite (inst_match_tags Hmatch) in Hcontext.
+    rewrite Hcontext in Hconjr; injection Hconjr as <-.
+    assert (Hsize: size ts_values = size ps).
+    { pose proof (values_typing_size H2_values) as Hsizes.
+      rewrite !length_is_size in H1; lias. }
+    pose proof (instr_subtyping_suffix_prod_cons H1_values Htisub Hsize) as Hsub.
+    by eapply values_typing_trans; eauto.
 Qed.
-    
+
 Lemma inst_typing_reduce: forall hs s f es hs' s' f' es' C C' tf,
     reduce hs s f es hs' s' f' es' ->
     store_typing s ->
@@ -1834,6 +1884,7 @@ Proof.
   move: C C' ret lab t1s t2s tlocs.
   induction HReduce; move => C C' ret lab tx ty tlocs HST1 HST2 HIT1 HIT2 Hloctype HType; subst; try eauto.
   all: try (by apply ety_trap).
+  all: try (by eapply ety_raise; apply alloc_exn_lookup).
   all: try invert_e_typing; simpl in *; unify_principal; resolve_e_typing => //.
   all: unfold_store_operations; resolve_store_inst_lookup; remove_bools_options => //=; simpl in *; simplify_multieq; unify_principal; resolve_e_typing.
   - (* reduce_simple *)

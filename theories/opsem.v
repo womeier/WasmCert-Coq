@@ -175,6 +175,14 @@ Inductive reduce_simple : seq administrative_instruction -> seq administrative_i
         es <> [::AI_trap] ->
         lfill lh [::AI_trap] = es ->
         reduce_simple es [::AI_trap]
+  | rs_raise :
+      forall a vs es,
+        v_to_e_list vs ++ [::AI_raise a] ++ es <> [::AI_raise a] ->
+        reduce_simple (v_to_e_list vs ++ [::AI_raise a] ++ es) [::AI_raise a]
+  | rs_label_raise : forall n cont a,
+      reduce_simple [::AI_label n cont [::AI_raise a]] [::AI_raise a]
+  | rs_frame_raise : forall n f a,
+      reduce_simple [::AI_frame n f [::AI_raise a]] [::AI_raise a]
 .
 
 Inductive reduce : host_state -> store_record -> frame -> list administrative_instruction ->
@@ -697,6 +705,13 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
       forall s f es s' f' es' n f0 hs hs',
         reduce hs s f es hs' s' f' es' ->
         reduce hs s f0 [::AI_frame n f es] hs' s' f0 [::AI_frame n f' es']
+  | r_throw : forall hs s f x tag ps vs,
+      lookup_N f.(f_inst).(inst_tags) x = Some tag ->
+      lookup_N s.(s_tags) tag = Some ps ->
+      length vs = length ps ->
+      let e := {| exninst_tag := tag; exninst_fields := vs |} in
+      reduce hs s f (v_to_e_list vs ++ [::AI_basic (BI_throw x)])
+        hs (fst (alloc_exn s e)) f [::AI_raise (snd (alloc_exn s e))]
   .
 
 Definition reduce_tuple hs_s_f_es hs'_s'_f'_es' : Prop :=

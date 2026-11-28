@@ -628,6 +628,8 @@ Fixpoint pp_basic_instruction (i : indentation) (be : basic_instruction) : strin
     indent i (with_fg be_style "return_call " ++ pp_id x ++ newline)
   | BI_return_call_indirect x y =>
     indent i (with_fg be_style "return_call_indirect " ++ pp_id x ++ " " ++ pp_id y ++ newline)
+  | BI_throw x =>
+    indent i (with_fg be_style "throw " ++ pp_id x ++ newline)
   | BI_local_get x =>
     indent i (with_fg be_style "local.get " ++ pp_id x ++ newline)
   | BI_local_set x =>
@@ -776,6 +778,8 @@ Fixpoint pp_administrative_instruction (n : indentation) (e : administrative_ins
     indent n (with_fg ae_style "with values " ++ pp_values_hint_empty f.(f_locs) ++ newline) ++
     pp_administrative_instructions (n.+1) es ++
     indent n (with_fg ae_style "end frame" ++ newline)
+  | AI_raise a =>
+    indent n (with_fg ae_style "exception " ++ pp_addr a ++ newline)
   end.
 
 Definition pp_administrative_instructions (n : nat) (es : list administrative_instruction) : string :=
@@ -838,6 +842,8 @@ Definition pp_res_cfg_except_store {hs: host_state} {cfg: cfg_tuple_ctx} {d: N} 
       "Invalid context decomposition. This result should not be observed when invoking valid Wasm module functions. Please submit a bug report at GitHub/WasmCert-Coq." ++ newline
   | RSC_error _ =>
       "Ill-typed input configuration. This result should not be observed when invoking valid Wasm module functions. Please submit a bug report at GitHub/WasmCert-Coq." ++ newline
+  | RSC_exception _ _ a _ =>
+      "Exception " ++ pp_addr a ++ newline
   end.
 
 End Host.

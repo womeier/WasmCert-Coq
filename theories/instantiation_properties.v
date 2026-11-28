@@ -650,7 +650,10 @@ Proof.
   dependent induction Hred; subst; (try by repeat destruct vcs => //; destruct v as [v | v | v]; destruct v => //).
   (* simple *)
   { inversion H; subst; clear H; try by destruct v as [v | v | v]; destruct v => //.
-    by destruct lh as [vs ? | ? vs]; simpl in H1; destruct v as [v | v | v]; destruct v; do 2 destruct vs => //.
+    all: try (by destruct lh as [vs ? | ? vs]; simpl in H1; destruct v as [v | v | v]; destruct v; do 2 destruct vs => //).
+    destruct vs as [|v0 vs]; simpl in H0.
+    - by destruct v as [v | v | v]; destruct v.
+    - destruct vs, es; discriminate H0.
   }
   (* block *)
   { by repeat destruct vs => //; destruct v as [v|v|v]; destruct v => //. }
@@ -669,6 +672,9 @@ Proof.
     destruct es => //=; first by apply reduce_not_nil in Hred.
     by destruct es, l => //=.
   }
+  destruct vs as [|v0 vs]; simpl in x.
+  - by destruct v as [v | v | v]; destruct v.
+  - destruct vs; discriminate x.
 Qed.
 
 Lemma reduce_trans_value hs1 s1 f1 v1 hs2 s2 f2 v2:

@@ -1511,6 +1511,14 @@ Proof.
       exists tn; split => //.
       eapply bet_subtyping; first by eapply bet_return_call_indirect with (t1s := r0) (t2s := r); eauto.
       by eauto.
+    (* Throw *)
+    + apply nth_error_map in Hoption as [ps [Hnth <-]].
+      eapply type_update_top_agree_subtyping in Hupdate; eauto.
+      destruct Hupdate as [tn [ts1 [ts2 [Hagree' Hsub]]]].
+      rewrite revK in Hsub.
+      exists tn; split => //.
+      eapply bet_subtyping; first by eapply bet_throw with (ps := ps); eauto.
+      by apply Hsub.
 Qed.
       
 Lemma tc_to_bet_list: forall C cts bes tm cts',

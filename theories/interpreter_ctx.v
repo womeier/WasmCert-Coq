@@ -89,6 +89,9 @@ Inductive run_step_ctx_result (hs: host_state) (cfg: cfg_tuple_ctx) (depth: N): 
 | RSC_error:
   (forall ts, ctx_cfg_typing cfg ts -> False) ->
   run_step_ctx_result hs cfg depth
+| RSC_exception s f a:
+  ctx_to_cfg cfg = Some (s, (f, [::AI_raise a])) ->
+  run_step_ctx_result hs cfg depth
 .
 
 (** The usual start of a crash certification.
@@ -604,15 +607,17 @@ Proof.
       (* BI_return *) |
       (* BI_call x *) x |
       (* BI_call_indirect x y *) x y  |
-      (* BI_return_call x *) x |
-      (* BI_return_call_indirect x y *) x y ] |
+       (* BI_return_call x *) x |
+       (* BI_return_call_indirect x y *) x y |
+       (* BI_throw x *) x ] |
       (* AI_trap *) |
       (* AI_ref a *) a |
       (* AI_ref_extern a *) a |
       (* AI_invoke a *) a |
       (* AI_return_invoke a *) a |
       (* AI_label ln les es *) ln les es |
-      (* AI_frame ln lf es *) ln lf es ].
+       (* AI_frame ln lf es *) ln lf es |
+       (* AI_raise a *) a ].
 
     (* AI_basic (BI_const _) *)
     (* This along with other value instructions are invalid, as it doesn't respect
@@ -1800,6 +1805,51 @@ the condition that all values should live in the operand stack. *)
         replace ($VN VAL_int32 v) with ($V (VAL_num (VAL_int32 v))); last done.
         by eapply r_return_call_indirect_failure, r_call_indirect_failure_bound; subst.
         
+    (* AI_basic (BI_throw x) *)
+    - destruct (lookup_N fc.(FC_frame).(f_inst).(inst_tags) x)
+        as [tag|] eqn:Htag.
+      + destruct (lookup_N s.(s_tags) tag) as [ps|] eqn:Hps.
+        * destruct (length vs0 >= length ps) eqn:Hlen.
+          { destruct (split_n vs0 (length ps)) as [fields rest] eqn:Hsplit.
+            set (ex := {| exninst_tag := tag; exninst_fields := rev fields |}).
+            apply <<hs, (fst (alloc_exn s ex), (fc, lcs) :: ccs',
+                         (rest, es0), Some (AI_raise (snd (alloc_exn s ex)))), d>> => //=.
+            apply reduce_focus_id => //.
+            rewrite split_n_is_take_drop in Hsplit; injection Hsplit as <- <-.
+            eapply r_label with
+              (lh := LH_base (rev (drop (length ps) vs0)) es0) => /=; infer_hole.
+            2: { instantiate (1 :=
+                    v_to_e_list (rev (take (length ps) vs0)) ++
+                    [::AI_basic (BI_throw x)]).
+                 by rewrite catA catA v_to_e_cat -rev_cat cat_take_drop -catA.
+            }
+            subst ex; eapply r_throw; eauto.
+            repeat rewrite length_is_size.
+            by rewrite size_rev size_takel.
+          }
+          { resolve_invalid_typing.
+            match goal with
+            | Hf: frame_typing _ _ ?C,
+              Hl: lookup_N (tc_tags ?C) _ = Some _ |- _ =>
+                destruct (frame_tag_lookup Hf Hl) as [a' [Hx Hparams]]
+            end.
+            simplify_multieq; by discriminate_size.
+          }
+        * resolve_invalid_typing.
+          match goal with
+          | Hf: frame_typing _ _ ?C,
+            Hl: lookup_N (tc_tags ?C) _ = Some _ |- _ =>
+              destruct (frame_tag_lookup Hf Hl) as [a' [Hx Hparams]]
+          end.
+          by simplify_multieq.
+      + resolve_invalid_typing.
+        match goal with
+        | Hf: frame_typing _ _ ?C,
+          Hl: lookup_N (tc_tags ?C) _ = Some _ |- _ =>
+            destruct (frame_tag_lookup Hf Hl) as [a' [Hx Hparams]]
+        end.
+        by simplify_multieq.
+
     (* AI_trap *)
     - destruct ((vs0 == nil) && (es0 == nil)) eqn:Hscnil; move/andP in Hscnil.
       + destruct Hscnil as [Heq1 Heq2]; move/eqP in Heq1; move/eqP in Heq2; subst.
@@ -1853,6 +1903,41 @@ the condition that all values should live in the operand stack. *)
 
     (* AI_frame ln lf es *)
     - by apply RSC_invalid => /=; move => [??].
+    (* AI_raise a: exceptions are not traps. *)
+    - destruct ((vs0 == nil) && (es0 == nil)) eqn:Hscnil; move/andP in Hscnil.
+      + destruct Hscnil as [Heq1 Heq2]; move/eqP in Heq1; move/eqP in Heq2; subst.
+        destruct lcs as [|lc lcs'].
+        * destruct fc as [fvs ? ? fes].
+          destruct ccs' as [|cc0 ccs']; first by eapply RSC_exception; eauto.
+          apply <<hs, (s, cc0 :: ccs', (fvs, fes), Some (AI_raise a)),
+                   N.sub d 1>> => //=.
+          replace (cc0 :: ccs') with (nil ++ cc0 :: ccs') at 2 => //.
+          rewrite -cat1s.
+          apply reduce_focus_pivot => //=.
+          apply (list_label_ctx_eval).(ctx_reduce) => //.
+          resolve_reduce_ctx fvs fes.
+          by apply r_simple, rs_frame_raise.
+        * destruct lc as [lvs ? ? les].
+          apply <<hs, (s, (fc, lcs') :: ccs', (lvs, les),
+                       Some (AI_raise a)), d>> => //.
+          apply reduce_focus => //=.
+          apply list_label_ctx_eval.(ctx_reduce) => //=.
+          unfold label_ctx_fill => /=.
+          resolve_reduce_ctx lvs les.
+          by apply r_simple, rs_label_raise.
+      + apply <<hs, (s, (fc, lcs) :: ccs', (nil, nil),
+                     Some (AI_raise a)), d>> => //.
+        resolve_reduce_ctx lvs les.
+        apply r_simple.
+        apply rs_raise => //.
+        move => Hcontra; apply Hscnil.
+        specialize (f_equal size Hcontra) as Hsize;
+          rewrite size_cat v_to_e_size size_rev in Hsize.
+        simpl in Hsize; clear -Hsize.
+        assert (H: size vs0 = 0); first by lias.
+        destruct vs0 => //; clear H.
+        assert (H: size es0 = 0); first by lias.
+        by destruct es0.
   }
 Defined.
 
@@ -1926,7 +2011,7 @@ Defined.
 (* One-step interpreter with cfg reformation. *)
 Definition run_one_step (hs: host_state) (cfg: cfg_tuple_ctx) (d: N): run_step_ctx_result hs cfg d.
 Proof.
-  destruct (run_one_step_ctx hs cfg d) as [hs' cfg' d' Hreduce Hvalid | | | |].
+  destruct (run_one_step_ctx hs cfg d) as [hs' cfg' d' Hreduce Hvalid | | | | |].
   - destruct cfg' as [[[s ccs] sc] oe].
     assert (valid_ccs ccs) as Hvalid'; first by destruct ccs.
     apply (run_step_reform_valid s sc oe) in Hvalid' as [cfg' [Hreform [Heq Hvalid']]].

@@ -17,6 +17,21 @@ tag = section(13, bytes.fromhex("010000"))
 empty_tags = section(13, b"\0")
 global_section = section(6, bytes.fromhex("017f0041000b"))
 memory_section = section(5, bytes.fromhex("010000"))
+
+
+def throw_function(parameters, body, start=False, export_main=False):
+    signatures = bytes.fromhex("0260000060") + bytes([len(parameters)])
+    signatures += parameters + b"\0"
+    code = b"\0" + bytes.fromhex(body) + b"\x0b"
+    return (
+        section(1, signatures) + section(3, bytes.fromhex("0100"))
+        + section(13, bytes.fromhex("010001"))
+        + (section(7, bytes.fromhex("01046d61696e0000")) if export_main else b"")
+        + (section(8, b"\0") if start else b"")
+        + section(10, b"\x01" + bytes([len(code)]) + code)
+    )
+
+
 cases = [
     ("one-tag", types + tag, None),
     ("empty-tags", empty_tags, None),
@@ -42,6 +57,18 @@ cases = [
      "error in parsing module"),
     ("oversized-index", types + section(13, bytes.fromhex("0100ffffffff10")),
      "error in parsing module"),
+    ("throw-valid-parameters", throw_function(bytes.fromhex("7f7e"), "410b42160800"),
+     None),
+    ("throw-unknown-tag", throw_function(b"", "0801"),
+     "Module type checking failure:invalid module components"),
+    ("throw-missing-parameter", throw_function(bytes.fromhex("7f"), "0800"),
+     "Module type checking failure:invalid module components"),
+    ("throw-wrong-type", throw_function(bytes.fromhex("7f"), "420b0800"),
+     "Module type checking failure:invalid module components"),
+    ("throw-wrong-order", throw_function(bytes.fromhex("7f7e"), "4216410b0800"),
+     "Module type checking failure:invalid module components"),
+    ("start-raises-exception", throw_function(b"", "0800", start=True),
+     "module instantiation raised an exception"),
 ]
 
 exe = str(pathlib.Path(sys.argv[1]).resolve())
@@ -78,4 +105,14 @@ with tempfile.TemporaryDirectory(prefix="wasm-eh-tags-") as directory:
         result.returncode, result.stdout, result.stderr
     )
 
-print(f"Extracted tag binary tests: {len(cases) + 1}/{len(cases) + 1}")
+    path = pathlib.Path(directory, "uncaught-throw.wasm")
+    path.write_bytes(header + throw_function(b"", "0800", export_main=True))
+    result = subprocess.run(
+        [exe, str(path), "-r", "main"], capture_output=True, text=True
+    )
+    output = " ".join((result.stdout + result.stderr).split())
+    assert result.returncode == 123 and "uncaught WebAssembly exception" in output, (
+        result.returncode, result.stdout, result.stderr
+    )
+
+print(f"Extracted tag binary tests: {len(cases) + 2}/{len(cases) + 2}")

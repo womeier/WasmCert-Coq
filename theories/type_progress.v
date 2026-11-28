@@ -30,7 +30,7 @@ Proof.
   destruct (interp_cfg_of_wasm (s, (f, es))) as [[[[s0 ccs] sc] oe] [Hfill Hvalid]].
   (* run the interpreter *)
   remember (@run_one_step_ctx _ _ _ host_application_impl host_application_impl_correct hs (s0, ccs, sc, oe) 0%N) as res.
-  destruct res as [hs' [[[s' ccs'] sc'] oe'] d Hred Hvalid' | s' f' vs Hvalfill | s' f' Htrapfill | Hcontra | Hcontra]; clear Heqres.
+   destruct res as [hs' [[[s' ccs'] sc'] oe'] d Hred Hvalid' | s' f' vs Hvalfill | s' f' Htrapfill | Hcontra | Hcontra | s' f' a Hraisefill]; clear Heqres.
   (* step *)
   - unfold reduce_ctx in Hred.
     rewrite Hfill in Hred.
@@ -43,13 +43,16 @@ Proof.
     by apply v_to_e_const.
   (* trap *)
   - rewrite Htrapfill in Hfill; injection Hfill as <- <- <-.
-    by left; right.
+     by left; right; left.
   (* invalid input -- impossible *)
   - by apply Hcontra in Hvalid.
   (* ill-typed -- impossible *)
   - unfold ctx_cfg_typing in Hcontra.
     rewrite Hfill in Hcontra.
-    by apply Hcontra in Htype.
+     by apply Hcontra in Htype.
+   (* unhandled exception *)
+   - rewrite Hraisefill in Hfill; injection Hfill as <- <- <-.
+     left; right; right; by exists a.
 Qed.
 
 End Host.

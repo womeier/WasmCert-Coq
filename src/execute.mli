@@ -32,6 +32,7 @@ type eval_cfg_result =
   | Cfg_trap of Interpreter.store_record * Extract.frame
   | Cfg_err
   | Cfg_exhaustion
+  | Cfg_exception of Interpreter.store_record * Extract.frame * Z.t
 
 (* Evaluating an interpreter configuration fully. *)
 val eval_interp_cfg: Output.verbosity -> int -> int -> Interpreter.interp_config_tuple -> Z.t -> eval_cfg_result

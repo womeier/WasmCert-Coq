@@ -9,12 +9,17 @@
 (library
   (name wasmcert_runtime)
   (wrapped false)
-  (modules (:standard \ wasm_coq_interpreter tag_allocation_test))
+  (modules (:standard \ wasm_coq_interpreter tag_allocation_test throw_test))
   (libraries cmdliner wasm unix parray zarith))
 
 (test
   (name tag_allocation_test)
   (modules tag_allocation_test)
+  (libraries wasmcert_runtime))
+
+(test
+  (name throw_test)
+  (modules throw_test)
   (libraries wasmcert_runtime))
 
 (executable

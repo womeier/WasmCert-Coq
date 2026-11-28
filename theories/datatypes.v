@@ -579,6 +579,7 @@ Instructions in this group affect the flow of control.
   | BI_call_indirect : tableidx -> typeidx -> basic_instruction
   | BI_return_call : funcidx -> basic_instruction                                          
   | BI_return_call_indirect : tableidx -> typeidx -> basic_instruction                                          
+  | BI_throw : tagidx -> basic_instruction
   .
 
 
@@ -1061,6 +1062,9 @@ Inductive administrative_instruction : Type := (* e *)
 | AI_return_invoke : funcaddr -> administrative_instruction
 | AI_label : nat -> list administrative_instruction -> list administrative_instruction -> administrative_instruction
 | AI_frame : nat -> frame -> list administrative_instruction -> administrative_instruction
+(** Administrative abbreviation for [ref.exn a; throw_ref]. It is not a
+    reference value and does not add a competing shared reference type. *)
+| AI_raise : exnaddr -> administrative_instruction
 .
 
 (** std-doc:

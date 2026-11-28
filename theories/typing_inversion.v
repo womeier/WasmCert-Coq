@@ -161,7 +161,11 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
   | BI_return =>
       exists tx ty ts,
       tf = (Tf (tx ++ ts) ty) /\
-        tc_return C = Some ts
+         tc_return C = Some ts
+  | BI_throw x =>
+      exists tx ty ps,
+      tf = (Tf (tx ++ ps) ty) /\
+        lookup_N C.(tc_tags) x = Some ps
   | BI_call n =>
       exists tf0,
       tf = tf0 /\
@@ -531,6 +535,8 @@ Definition e_principal_typing (s: store_record) (C: t_context) (e: administrativ
       be_principal_typing C b tf
   | AI_trap =>
       True (* Equivalently, add trivial equalities *)
+  | AI_raise a =>
+      exists ex, lookup_N s.(s_exns) a = Some ex
   | AI_ref_extern a =>
       tf = (Tf nil [::T_ref T_externref])
   | AI_ref a =>
@@ -937,6 +943,57 @@ Proof.
     | H: Some ?x = Some ?y |- _ => injection H; intros; subst; clear H
     end; done.
   }
+Qed.
+
+Lemma tag_context_store: forall s i C x ps,
+    inst_typing s i = Some C ->
+    lookup_N C.(tc_tags) x = Some ps ->
+    exists a, lookup_N i.(inst_tags) x = Some a /\
+              lookup_N s.(s_tags) a = Some ps.
+Proof.
+  move => s i C x ps Hinst Htag.
+  unfold inst_typing in Hinst; destruct i.
+  remove_bools_options; simpl in *.
+  unfold lookup_N in *.
+  eapply those_lookup_inv in Hoption5; eauto.
+  apply nth_error_map in Hoption5 as [a [Hnth Heq]].
+  by exists a.
+Qed.
+
+Lemma context_agree_tags C C' :
+  context_agree C C' -> C.(tc_tags) = C'.(tc_tags).
+Proof.
+  unfold context_agree; move => H; remove_bools_options; done.
+Qed.
+
+Lemma frame_tag_lookup s f C x ps :
+  frame_typing s f C ->
+  lookup_N C.(tc_tags) x = Some ps ->
+  exists a, lookup_N f.(f_inst).(inst_tags) x = Some a /\
+            lookup_N s.(s_tags) a = Some ps.
+Proof.
+  move => Hframe Hlookup.
+  unfold frame_typing in Hframe.
+  destruct (inst_typing s (f_inst f)) as [C0|] eqn:Hinst; last contradiction.
+  destruct Hframe as [ts [HC Hvalues]]; subst C.
+  simpl in Hlookup.
+  by eapply tag_context_store; eauto.
+Qed.
+
+Lemma frame_tag_lookup_agree s f C C' x ps :
+  frame_typing s f C ->
+  context_agree C C' ->
+  lookup_N C'.(tc_tags) x = Some ps ->
+  exists a, lookup_N f.(f_inst).(inst_tags) x = Some a /\
+            lookup_N s.(s_tags) a = Some ps.
+Proof.
+  move => Hframe Hagree Hlookup.
+  rewrite -(context_agree_tags Hagree) in Hlookup.
+  unfold frame_typing in Hframe.
+  destruct (inst_typing s (f_inst f)) as [C0|] eqn:Hinst; last contradiction.
+  destruct Hframe as [ts [HC Hvalues]]; subst C.
+  simpl in Hlookup.
+  by eapply tag_context_store; eauto.
 Qed.
 
 Lemma func_context_store: forall s i C j x,

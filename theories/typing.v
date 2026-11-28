@@ -260,6 +260,9 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 | bet_return : forall C ts t1s t2s,
   tc_return C = Some ts ->
   be_typing C [::BI_return] (Tf (t1s ++ ts) t2s)
+| bet_throw : forall C x ps t1s t2s,
+  lookup_N C.(tc_tags) x = Some ps ->
+  be_typing C [::BI_throw x] (Tf (t1s ++ ps) t2s)
 | bet_call : forall C i tf,
   lookup_N (tc_funcs C) i = Some tf ->
   be_typing C [::BI_call i] tf
@@ -534,6 +537,9 @@ Inductive e_typing : store_record -> t_context -> seq administrative_instruction
   e_typing s C es (Tf t1s' t2s')
 | ety_trap : forall s C tf,
   e_typing s C [::AI_trap] tf
+| ety_raise : forall s C a e tf,
+  lookup_N s.(s_exns) a = Some e ->
+  e_typing s C [::AI_raise a] tf
 | ety_ref_extern : forall s C a,
   e_typing s C [::AI_ref_extern a] (Tf [::] [::T_ref T_externref])
 | ety_ref : forall s C a tf,

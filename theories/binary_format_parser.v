@@ -206,6 +206,9 @@ Definition parse_br_table {n} : byte_parser basic_instruction n :=
 Definition parse_return {n} : byte_parser basic_instruction n :=
   exact_byte x0f $> BI_return.
 
+Definition parse_throw {n} : byte_parser basic_instruction n :=
+  exact_byte x08 &> (BI_throw <$> parse_u32_as_N).
+
 Definition parse_call {n} : byte_parser basic_instruction n :=
   exact_byte x10 &> (extract_funcidx BI_call <$> parse_funcidx).
 
@@ -855,6 +858,7 @@ Definition language : [ Language ] := Fix Language (fun k rec =>
     parse_br_if <|>
     parse_br_table <|>
     parse_return <|>
+    parse_throw <|>
     parse_call <|>
     parse_call_indirect <|>
     parse_return_call <|>

@@ -250,6 +250,8 @@ Ltac simplify_multieq :=
 
 Ltac resolve_e_typing :=
   repeat lazymatch goal with
+  | H: lookup_N (s_exns ?s) ?a = Some ?ex |- e_typing ?s _ [::AI_raise ?a] _ =>
+      by eapply ety_raise; eauto
     (* This is usually required and should be applied at highest priority *)
     | H: is_true (?ts1 <ts: ?ts2) |-
         e_typing _ _ _ (Tf ?ts1 ?ts2) =>

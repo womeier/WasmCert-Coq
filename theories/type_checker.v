@@ -264,6 +264,11 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           | None => None
           | Some tls => type_update_top ts (tls) nil
           end
+      | BI_throw x =>
+          match lookup_N C.(tc_tags) x with
+          | Some ps => type_update_top ts ps nil
+          | None => None
+          end
       | BI_call x =>
           match lookup_N (tc_funcs C) x with
           | None => None 
@@ -522,7 +527,7 @@ Definition context_reverse (C: t_context): t_context :=
     tc_labels := map rev C.(tc_labels);
     tc_return := option_map rev C.(tc_return);
     tc_refs := C.(tc_refs);
-    tc_tags := C.(tc_tags);
+    tc_tags := map rev C.(tc_tags);
   |}.
 
 Definition b_e_type_checker (C : t_context) (es : list basic_instruction) (tf : function_type) : bool :=

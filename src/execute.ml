@@ -61,6 +61,7 @@ type eval_cfg_result =
   | Cfg_trap of store_record * frame
   | Cfg_err
   | Cfg_exhaustion
+  | Cfg_exception of store_record * frame * Z.t
 
 let rec eval_interp_cfg_mute max_call_depth cfg d =
   let cfg_res = run_one_step cfg d in
@@ -78,7 +79,9 @@ let rec eval_interp_cfg_mute max_call_depth cfg d =
     | RSC_invalid ->
       Cfg_err
     | RSC_error ->
-      Cfg_err
+       Cfg_err
+    | RSC_exception (s, f, a) ->
+      Cfg_exception (s, f, a)
 
 let rec eval_interp_cfg verbosity gen max_call_depth cfg d =
   let print_step_header gen cfg_res =
@@ -106,6 +109,9 @@ let rec eval_interp_cfg verbosity gen max_call_depth cfg d =
     | RSC_error ->
       debug_info verbosity stage ~style:red (fun _ -> "Ill-typed input\n");
       Cfg_err
+    | RSC_exception (s, f, a) ->
+      debug_info verbosity stage (fun _ -> "Unhandled exception\n");
+      Cfg_exception (s, f, a)
 
 let eval_wasm_cfg verbosity max_call_depth cfg =
   let interp_cfg_inst = interp_cfg_of_wasm cfg in
@@ -163,6 +169,7 @@ let print_invoke_result verbosity res =
     | Cfg_trap (_, _) -> "Execution returned a trap; run the interpreter in detailed mode (--vi) for more information\n"
     | Cfg_err -> "Execution returned an error; run the interpreter in detailed mode (--vi) for more information\n"
     | Cfg_exhaustion -> "Fuel exhaustion\n"
+    | Cfg_exception (_, _, a) -> "Uncaught exception " ^ Z.to_string a ^ "\n"
   )
 
 let instantiate_imps verbosity s m imps =
@@ -214,12 +221,19 @@ let instantiate_host verbosity hs s module_name m =
       pure (hs, s', inst_res)
     | Cfg_err -> TopHost.error "invalid module instantiation"
     | Cfg_exhaustion -> TopHost.error "instantiation resulted in exhaustion"
+    | Cfg_exception (s', _, _) -> pure (hs, s', inst_res)
 
 let rec instantiate_modules verbosity hs s names modules =
   match (names, modules) with
   | ([], _) -> pure (hs, s)
   | (name :: names', m :: modules') -> 
     debug_info verbosity stage (fun () -> "Processing module: " ^ name ^ "\n");
-    let* (hs', s', _inst_res) = instantiate_host verbosity hs s name m in
-      instantiate_modules verbosity hs' s' names' modules'
+      let* (hs', s', inst_res) = instantiate_host verbosity hs s name m in
+      begin match inst_res with
+      | Cfg_res _ -> instantiate_modules verbosity hs' s' names' modules'
+      | Cfg_exception _ -> TopHost.error "module instantiation raised an exception"
+      | Cfg_trap _ -> TopHost.error "module instantiation trapped"
+      | Cfg_err -> TopHost.error "invalid module instantiation"
+      | Cfg_exhaustion -> TopHost.error "module instantiation exhausted"
+      end
   | _ -> TopHost.error "Invalid module name parsing results"

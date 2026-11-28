@@ -253,6 +253,7 @@ let run_wast_command verbosity max_call_depth cmd hs s mod_counter default_modul
       begin match res with
       | Cfg_err -> error "Invocation error"
       | Cfg_trap _ -> error "Unexpected trap"
+      | Cfg_exception _ -> error "Unexpected exception"
       | Cfg_res (s', _, _) ->
         pure (hs, s', mod_counter, default_module_name, Verdict_OK)
       | Cfg_exhaustion -> error "Unexpected exhaustion"
@@ -283,6 +284,7 @@ let run_wast_command verbosity max_call_depth cmd hs s mod_counter default_modul
               error "Result mismatches"
         | Cfg_trap _ -> 
               error "Unexpected trap"
+        | Cfg_exception _ -> error "Unexpected exception"
         end
       | Get (ovar, extname_utf8) ->
         let* res_v = run_get (ovar, extname_utf8) hs s default_module_name in
@@ -304,7 +306,8 @@ let run_wast_command verbosity max_call_depth cmd hs s mod_counter default_modul
           error "Unexpected successful execution when trap is expected"
         | Cfg_trap (s', _) -> 
           debug_info verbosity stage (fun _ -> "Test passed: execution trapped as expected\n");
-          pure (hs, s', mod_counter, default_module_name, Verdict_OK)
+           pure (hs, s', mod_counter, default_module_name, Verdict_OK)
+        | Cfg_exception _ -> error "Expected a trap, not an exception"
         end
       | Get (_ovar, _funcname) ->
         error "Unsupported wast action: Get"
@@ -318,7 +321,8 @@ let run_wast_command verbosity max_call_depth cmd hs s mod_counter default_modul
         | Cfg_res _ ->
           error "Unexpected successful execution when exhaustion is expected"
         | Cfg_trap _ -> 
-          error "Unexpected trap when exhaustion is expected"
+           error "Unexpected trap when exhaustion is expected"
+        | Cfg_exception _ -> error "Unexpected exception when exhaustion is expected"
         | Cfg_exhaustion ->
           debug_info verbosity stage (fun _ -> "Test passed: correctly exhausted\n");
           pure (hs, s, mod_counter, default_module_name, Verdict_OK)

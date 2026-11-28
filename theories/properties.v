@@ -1448,7 +1448,8 @@ Lemma not_reduce_simple_nil : forall es', ~ reduce_simple [::] es'.
 Proof.
   move => ? Hcontra.
   inversion Hcontra; subst.
-  destruct lh as [vs | ? vs] => //; by destruct vs => //.
+  all: try (by eapply cat_cons_not_nil; eauto).
+  all: destruct lh as [vs | ? vs] => //; by destruct vs => //.
 Qed.
 
 (* further list operations *)
@@ -2199,6 +2200,18 @@ Proof.
   by eauto.
 Qed.
 
+Lemma inst_typing_tag_lookup: forall s inst C n a,
+    inst_typing s inst = Some C ->
+    lookup_N inst.(inst_tags) n = Some a ->
+    exists ps, lookup_N s.(s_tags) a = Some ps /\
+               lookup_N C.(tc_tags) n = Some ps.
+Proof.
+  move => s inst C n a Hinst Hnth.
+  unfold inst_typing in Hinst.
+  destruct inst; remove_bools_options; simpl in *.
+  by eapply those_map_lookup in Hoption5; eauto.
+Qed.
+
 Lemma inst_typing_func_lookup: forall s inst C n x,
     inst_typing s inst = Some C ->
     lookup_N inst.(inst_funcs) n = Some x ->
@@ -2594,7 +2607,7 @@ Proof.
     apply const_list_split in Hconst as [_ Hconst].
     simpl in Hconst.
     move/andP in Hconst; destruct Hconst as [? Hconst].
-    destruct e as [b | | | | | | | ] => //; try destruct b => //;
+    destruct e as [b | | | | | | | | ] => //; try destruct b => //;
     exists lvs, les, (Logic.eq_refl 0); by split => //.
   - move => e lf Hconst Hlf. subst.
     exfalso.
@@ -2644,7 +2657,7 @@ Proof.
   - subst.
     left; by exists nil, ves'.
   - destruct (e_to_v_opt e) as [v | ] eqn:Hconst.
-    { destruct e as [ b | | | | | | |] => //; first destruct b => //.
+    { destruct e as [ b | | | | | | | |] => //; first destruct b => //.
       all: apply ve_inv in Hconst; destruct (IHves' fe) as [[vs [es ->]] | Hcontra]; first by (left; exists (v :: vs), es); rewrite - Hconst.
       all: right; move => vs es Heq;
       destruct vs as [| v' vs'] => //; simpl in *; first by inversion Heq.
@@ -2686,7 +2699,7 @@ Proof.
     by apply Hcontra in Heq.
   - specialize (split_vals_nconst Hsplit) as Hnconst.
     apply split_vals_inv in Hsplit as ->.
-    destruct e as [ | | | | | | j lvs les |].
+    destruct e as [ | | | | | | j lvs les | |].
     7: {
       destruct (Hrec (fun n => fe (S n)) les) as [IH | IH] => /=.
       (* measure *)
