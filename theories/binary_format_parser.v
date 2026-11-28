@@ -4,6 +4,7 @@
 *)
 
 From Wasm Require Import datatypes_properties typing leb128 utf8.
+From Wasm Require Import gc_binary.
 From compcert Require Import Integers.
 From parseque Require Import Parseque.
 From Stdlib Require Import Strings.Byte ZArith.
@@ -76,7 +77,22 @@ Definition parse_s64 {n} : byte_parser Wasm_int.Int64.int n :=
                  (Z.leb (-9223372036854775808)%Z x)) then
                   Some (Wasm_int.Int64.repr x)
                 else None)
-    (assert_sized (extract parse_signed n) (fun sz => N.leb sz 10)).
+   (assert_sized (extract parse_signed n) (fun sz => N.leb sz 10)).
+
+(** Heap type indices use s33, not u32: this keeps all u32 indices available
+    while reserving negative single-byte encodings for abstract heap types.
+    Keep this integer decoder separate from the shared heap-type syntax. *)
+Definition parse_s33 {n} : byte_parser Z n :=
+  guardM
+    (fun z =>
+       if andb (Z.leb (-4294967296) z) (Z.leb z 4294967295)
+       then Some z else None)
+    (assert_sized (extract parse_signed n) (fun sz => N.leb sz 5)).
+
+Definition parse_heap_typeidx {n} : byte_parser typeidx n :=
+  guardM
+    (fun z => if Z.leb 0 z then Some (Z.to_N z) else None)
+    parse_s33.
 
 Definition parse_vec_length {n} : byte_parser N n :=
   parse_u32_as_N.
@@ -101,7 +117,10 @@ Definition parse_vec_aux {B} {n} (f : byte_parser B n) (k : N)
 
 (* parsing a length-indexed list *)
 Definition parse_vec {B} {n} (f : byte_parser B n) : byte_parser (list B) n :=
-  exact_byte x00 $> nil <|>
+  (* Empty vectors can have a padded u32 length, not only the byte 0x00.
+     Return nil while consuming the length itself: Parseque parsers must
+     consume input, so [parse_vec_aux f 0] cannot be a pure nil parser. *)
+  guardM (fun k => if N.eqb k 0 then Some nil else None) parse_vec_length <|>
   (parse_vec_length >>= (fun k => parse_vec_aux f k)).
 
 Definition parse_16bytes {n} : byte_parser SIMD.v128 n :=
@@ -142,7 +161,9 @@ Definition parse_dataidx {n} : byte_parser dataidx n :=
   parse_u32_as_N.
 
 Definition parse_laneidx {n} : byte_parser laneidx n :=
-  parse_u8_as_N.
+  (* A lane index is one raw byte, not an unsigned LEB128 integer.
+     The shape-specific bound is checked by validation, not decoding. *)
+  to_N <$> anyTok.
 
 Definition parse_number_type {n} : byte_parser number_type n :=
   (exact_byte x7f $> T_i32) <|>
@@ -153,14 +174,44 @@ Definition parse_number_type {n} : byte_parser number_type n :=
 Definition parse_vector_type {n} : byte_parser vector_type n :=
   (exact_byte x7b $> T_v128).
 
+(** The verified abstract fragment is mapped into the shared main syntax.
+    Indexed/recursive references still require declaration well-formedness
+    integration before the module parser may admit them. *)
+Definition parse_gc_abstract_heap_type {n} :
+    byte_parser gc_types.abstract_heap_type n :=
+  guardM decode_abstract_heap anyTok.
+
+Definition parse_gc_abstract_reference_type {n} :
+    byte_parser gc_types.abstract_reference_type n :=
+  ((fun h => {| gc_types.art_nullable := true; gc_types.art_heap := h |}) <$>
+    (exact_byte x63 &> parse_gc_abstract_heap_type)) <|>
+  ((fun h => {| gc_types.art_nullable := false; gc_types.art_heap := h |}) <$>
+    (exact_byte x64 &> parse_gc_abstract_heap_type)) <|>
+  ((fun h => {| gc_types.art_nullable := true; gc_types.art_heap := h |}) <$>
+    parse_gc_abstract_heap_type).
+
+Definition parse_gc_heap_type {n} : byte_parser heap_type n :=
+  gc_types.shared_heap_of_abstract <$> parse_gc_abstract_heap_type.
+
+Definition parse_source_abstract_heap_type {n} : byte_parser heap_type n :=
+  parse_gc_heap_type <|> (exact_byte x69 $> HT_exn) <|>
+    (exact_byte x74 $> HT_noexn).
+
+Definition parse_source_heap_type {n} : byte_parser heap_type n :=
+  parse_source_abstract_heap_type <|> (HT_type <$> parse_heap_typeidx).
+
 Definition parse_reference_type {n} : byte_parser reference_type n :=
-  (exact_byte x70 $> T_funcref) <|>
-  (exact_byte x6f $> T_externref).
+  gc_types.shared_reference_of_abstract <$> parse_gc_abstract_reference_type.
+
+Definition parse_source_reference_type {n} : byte_parser reference_type n :=
+  (Ref_type true <$> (exact_byte x63 &> parse_source_heap_type)) <|>
+  (Ref_type false <$> (exact_byte x64 &> parse_source_heap_type)) <|>
+  (Ref_type true <$> parse_source_abstract_heap_type).
 
 Definition parse_value_type {n} : byte_parser value_type n :=
   T_num <$> parse_number_type <|>
   T_vec <$> parse_vector_type <|>
-  T_ref <$> parse_reference_type.
+  T_ref <$> parse_source_reference_type.
 
 Definition parse_block_type {n} : byte_parser block_type n :=
   (exact_byte x40 $> BT_valtype None) <|>
@@ -220,9 +271,15 @@ Definition parse_return_call_indirect {n} : byte_parser basic_instruction n :=
   exact_byte x13 &>
   (((fun typ tab => BI_return_call_indirect tab typ) <$> parse_typeidx) <*> parse_tableidx).
 
+Definition parse_call_ref {n} : byte_parser basic_instruction n :=
+  exact_byte x14 &> (BI_call_ref <$> parse_typeidx).
+
+Definition parse_return_call_ref {n} : byte_parser basic_instruction n :=
+  exact_byte x15 &> (BI_return_call_ref <$> parse_typeidx).
+
 (* Reference instructions *)
 Definition parse_ref_null {n}: byte_parser basic_instruction n :=
-  exact_byte xd0 &> (BI_ref_null <$> parse_reference_type).
+  exact_byte xd0 &> (BI_ref_null <$> parse_source_heap_type).
 
 Definition parse_ref_is_null {n} : byte_parser basic_instruction n :=
   exact_byte xd1 $> BI_ref_is_null.
@@ -230,10 +287,28 @@ Definition parse_ref_is_null {n} : byte_parser basic_instruction n :=
 Definition parse_ref_func {n} : byte_parser basic_instruction n :=
   exact_byte xd2 &> (BI_ref_func <$> parse_funcidx).
 
+Definition parse_ref_as_non_null {n} : byte_parser basic_instruction n :=
+  exact_byte xd4 $> BI_ref_as_non_null.
+
+Definition parse_ref_i31 {n} : byte_parser basic_instruction n :=
+  (exact_byte xfb &> assert_u32 28) $> BI_ref_i31.
+
+Definition parse_i31_get {n} : byte_parser basic_instruction n :=
+  exact_byte xfb &>
+    ((assert_u32 29 $> BI_i31_get SX_S) <|>
+     (assert_u32 30 $> BI_i31_get SX_U)).
+
+Definition parse_br_on_non_null {n} : byte_parser basic_instruction n :=
+  exact_byte xd6 &> (BI_br_on_non_null <$> parse_labelidx).
+
 Definition parse_reference_instruction {n} : byte_parser basic_instruction n :=
   parse_ref_null <|>
   parse_ref_is_null <|>
-  parse_ref_func.
+  parse_ref_func <|>
+  parse_ref_as_non_null <|>
+  parse_ref_i31 <|>
+  parse_i31_get <|>
+  parse_br_on_non_null.
 
 
 (* Variable instructions *)
@@ -859,6 +934,8 @@ Definition language : [ Language ] := Fix Language (fun k rec =>
     parse_call_indirect <|>
     parse_return_call <|>
     parse_return_call_indirect <|>
+    parse_call_ref <|>
+    parse_return_call_ref <|>
     parse_reference_instruction <|>
     parse_parametric_instruction <|>
     parse_variable_instruction <|>
@@ -883,15 +960,31 @@ Definition parse_bes_end_with_x0b : [ byte_parser (list basic_instruction) ] := 
 Definition parse_expr {n} : byte_parser (list basic_instruction) n :=
   parse_bes_end_with_x0b n.
 
+(** Declaration references use the full source index space. Scope and
+    composite-kind checking are performed by canonical module validation. *)
+Definition parse_declaration_abstract_heap_type {n} : byte_parser heap_type n :=
+  parse_source_abstract_heap_type.
+
+Definition parse_declaration_heap_type {n} : byte_parser heap_type n :=
+  parse_source_heap_type.
+
+Definition parse_declaration_reference_type {n} : byte_parser reference_type n :=
+  parse_source_reference_type.
+
+Definition parse_declaration_value_type {n} : byte_parser value_type n :=
+  (T_num <$> parse_number_type) <|> (T_vec <$> parse_vector_type) <|>
+  (T_ref <$> parse_declaration_reference_type).
+
 Definition parse_function_type {n} : byte_parser function_type n :=
-  exact_byte x60 &> (uncurry Tf <$> parse_vec parse_value_type <&> parse_vec parse_value_type).
+  exact_byte x60 &> (uncurry Tf <$>
+    parse_vec parse_declaration_value_type <&> parse_vec parse_declaration_value_type).
 
 Definition parse_limits {n} : byte_parser limits n :=
   exact_byte x00 &> ((fun min => {| lim_min := min; lim_max := None |}) <$> parse_u32_as_N) <|>
   (exact_byte x01 &> ((fun min max => {| lim_min := min; lim_max := Some max |}) <$> parse_u32_as_N) <*> parse_u32_as_N).
 
 Definition parse_table_type {n} : byte_parser table_type n :=
-  ((fun ety lims => {| tt_limits := lims; tt_elem_type := ety |}) <$> parse_reference_type) <*> parse_limits.
+  ((fun ety lims => {| tt_limits := lims; tt_elem_type := ety |}) <$> parse_source_reference_type) <*> parse_limits.
 
 Definition parse_memory_type {n} : byte_parser memory_type n :=
   (fun lim => lim) <$> parse_limits.
@@ -899,6 +992,32 @@ Definition parse_memory_type {n} : byte_parser memory_type n :=
 Definition parse_mut {n} : byte_parser mutability n :=
   exact_byte x00 $> MUT_const <|>
   exact_byte x01 $> MUT_var.
+
+Definition parse_storage_type {n} : byte_parser (storage_type value_type) n :=
+  (exact_byte x78 $> ST_packed PT_i8) <|>
+  (exact_byte x77 $> ST_packed PT_i16) <|>
+  (ST_value <$> parse_declaration_value_type).
+
+Definition parse_field_type {n} : byte_parser (field_type value_type) n :=
+  ((fun storage mut => {| field_mutability := mut; field_storage := storage |})
+    <$> parse_storage_type) <*> parse_mut.
+
+Definition parse_composite_type {n} :
+    byte_parser (composite_type value_type function_type) n :=
+  (Comp_func <$> parse_function_type) <|>
+  (exact_byte x5f &> (Comp_struct <$> parse_vec parse_field_type)) <|>
+  (exact_byte x5e &> (Comp_array <$> parse_field_type)).
+
+Definition parse_subtype {n} : byte_parser source_subtype n :=
+  ((Sub_type false <$> (exact_byte x50 &> parse_vec parse_u32_as_N))
+    <*> parse_composite_type) <|>
+  ((Sub_type true <$> (exact_byte x4f &> parse_vec parse_u32_as_N))
+    <*> parse_composite_type) <|>
+  (Sub_type true nil <$> parse_composite_type).
+
+Definition parse_recursive_type {n} : byte_parser recursive_type n :=
+  (exact_byte x4e &> parse_vec parse_subtype) <|>
+  ((fun t => cons t nil) <$> parse_subtype).
 
 Definition parse_global_type {n} : byte_parser global_type n :=
   ((fun x y => Build_global_type y x) <$> parse_value_type) <*> parse_mut.
@@ -979,21 +1098,21 @@ Definition parse_module_element_5 {n} : byte_parser module_element n :=
       {| modelem_type := t;
         modelem_init := els;
         modelem_mode := ME_passive; |})
-     <$> parse_reference_type) <*> parse_vec parse_expr.
+      <$> parse_source_reference_type) <*> parse_vec parse_expr.
 
 Definition parse_module_element_6 {n} : byte_parser module_element n :=
   ((((fun (x: tableidx) es t els =>
         {| modelem_type := t;
           modelem_init := els;
           modelem_mode := ME_active x es; |})
-       <$> parse_tableidx) <*> parse_expr) <*> parse_reference_type) <*> parse_vec parse_expr.
+        <$> parse_tableidx) <*> parse_expr) <*> parse_source_reference_type) <*> parse_vec parse_expr.
 
 Definition parse_module_element_7 {n} : byte_parser module_element n :=
   ((fun t els =>
       {| modelem_type := t;
         modelem_init := els;
         modelem_mode := ME_declarative; |})
-     <$> parse_reference_type) <*> parse_vec parse_expr.
+      <$> parse_source_reference_type) <*> parse_vec parse_expr.
 
 Definition parse_module_element {n}: byte_parser module_element n :=
   assert_u32 0%N &> parse_module_element_0 <|>
@@ -1077,8 +1196,8 @@ Definition parse_customsec {n} : byte_parser (name * list byte) n :=
          ))).
          
 (* Low priority: check that the sections have the correct byte sizes? *)
-Definition parse_typesec {n} : byte_parser (list function_type) n :=
-  exact_byte x01 &> parse_u32_as_N &> parse_vec parse_function_type.
+Definition parse_typesec {n} : byte_parser (list recursive_type) n :=
+  exact_byte x01 &> parse_u32_as_N &> parse_vec parse_recursive_type.
 
 Definition parse_importsec {n} : byte_parser (list module_import) n :=
   exact_byte x02 &> parse_u32_as_N &> parse_vec parse_module_import.
@@ -1129,7 +1248,7 @@ Definition parse_with_customsec_star_after {A : Type} {n} f :=
   @iteratel _ _ _ _ _ _ _ _ _ A n f parse_customsec_forget.
 
 Record parsing_module : Type := {
-  pmod_types : list function_type;
+  pmod_types : list recursive_type;
   pmod_funcs : list typeidx;
   pmod_tables : list module_table;
   pmod_mems : list module_mem;
@@ -1142,7 +1261,7 @@ Record parsing_module : Type := {
   pmod_code : list module_func_without_type;
   }.
 
-Definition parse_typesec_wrapper {n} : byte_parser (list function_type) n :=
+Definition parse_typesec_wrapper {n} : byte_parser (list recursive_type) n :=
   (parse_with_customsec_star_before parse_typesec).
 
 Definition parse_importsec_wrapper {n} : byte_parser (list module_import) n :=
@@ -1339,6 +1458,22 @@ End Run.
 
 Definition run_parse_be (bs : list byte) : option basic_instruction :=
   run bs parse_be.
+
+Definition run_parse_heap_typeidx (bs : list byte) : option typeidx :=
+  run bs (fun _ => parse_heap_typeidx).
+
+(** A prefix entry point, retaining the suffix rather than requiring end of
+    input.  The parser and token/monad instances are the same as [run]. *)
+Definition run_parse_prefix {A}
+    (p : forall n, Parser (SizedList byte) byte option A n) (bs : list byte) :
+    option (A * list byte) :=
+  option_map
+    (fun s => (Success.value s, @Sized.value _ _ _ (Success.leftovers s)))
+    (runParser (p (List.length bs)) (Nat.le_refl _) (mkSizedList bs)).
+
+Definition run_parse_gc_abstract_reference_type (bs : list byte) :
+    option (gc_types.abstract_reference_type * list byte) :=
+  run_parse_prefix (fun _ => parse_gc_abstract_reference_type) bs.
 
 Definition run_parse_expr (bs : list byte) : option (list basic_instruction) :=
   run bs (fun n => parse_expr).

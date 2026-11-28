@@ -20,7 +20,7 @@ fi
 
 exe="${EXE:-_build/default/src/wasm_coq_interpreter.exe}"
 if [[ ! -x "$exe" ]]; then
-  dune build
+  dune build -j 1
 fi
 
 results_dir=$(mktemp -d)
@@ -28,7 +28,9 @@ lockfile="$results_dir/.lock"
 : > "$lockfile"
 trap 'rm -rf "$results_dir"' EXIT
 
-# Worker function: run one .wast file, print output, write "passed total" to a result file.
+# Worker function: write "passed total errors" to a result file.
+# A crash or missing/malformed summary must fail the aggregate run, even when
+# other files passed.  In particular, it must not disappear as "0 0".
 # Output is grouped per-file under flock so parallel jobs don't interleave their reports.
 run_one() {
   local wastfile="$1"
@@ -55,20 +57,26 @@ run_one() {
   local summary
   if (( rc != 0 )); then
     summary="CRASH: $base"
-    echo "0 0" > "$results_dir/$base"
+    echo "0 0 1" > "$results_dir/$base"
   else
     local result_line
-    if result_line=$(printf '%s' "$cleaned" | grep -m1 "Result: "); then
-      if [[ "$result_line" =~ Result:\ ([0-9]+)/([0-9]+) ]]; then
-        echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]}" > "$results_dir/$base"
-        summary="DONE: $base — $result_line"
+    if result_line=$(printf '%s' "$cleaned" | grep "Result: "); then
+      if [[ "$result_line" != *$'\n'* && "$result_line" =~ Result:\ ([0-9]+)/([0-9]+)([[:space:]]|$) ]]; then
+        local passed="${BASH_REMATCH[1]}" total="${BASH_REMATCH[2]}"
+        if (( 10#$total == 0 || 10#$passed > 10#$total )); then
+          summary="PARSE ERROR: $base — empty or inconsistent result counts"
+          echo "0 0 1" > "$results_dir/$base"
+        else
+          echo "$((10#$passed)) $((10#$total)) 0" > "$results_dir/$base"
+          summary="DONE: $base — $result_line"
+        fi
       else
         summary="PARSE ERROR: $base — could not parse result line"
-        echo "0 0" > "$results_dir/$base"
+        echo "0 0 1" > "$results_dir/$base"
       fi
     else
       summary="NO RESULT: $base"
-      echo "0 0" > "$results_dir/$base"
+      echo "0 0 1" > "$results_dir/$base"
     fi
   fi
 
@@ -90,13 +98,25 @@ printf '%s\n' "${files[@]}" | xargs -P "$jobs" -I {} bash -c 'run_one "$@"' _ {}
 # Aggregate results
 total_passed=0
 total_tests=0
-for f in "$results_dir"/*; do
-  read -r p t < "$f"
+total_errors=0
+reports=( "$results_dir"/* )
+if (( ${#reports[@]} != ${#files[@]} )); then
+  echo "FAILED: expected ${#files[@]} result reports, found ${#reports[@]}." >&2
+  exit 1
+fi
+for f in "${reports[@]}"; do
+  read -r p t e < "$f"
   total_passed=$((total_passed + p))
   total_tests=$((total_tests + t))
+  total_errors=$((total_errors + e))
 done
 
 echo "================"
+if (( total_errors != 0 )); then
+  echo "FAILED: $total_errors file(s) crashed or had missing/invalid result summaries." >&2
+  echo "Reported assertions (excluding those files): $total_passed/$total_tests" >&2
+  exit 1
+fi
 if (( total_tests == 0 )); then
   echo "No tests run." >&2
   exit 1

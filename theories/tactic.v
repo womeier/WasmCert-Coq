@@ -1,5 +1,5 @@
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
-From Wasm Require Import properties typing_inversion.
+From Wasm Require Import properties typing_inversion closed_typing_properties.
 
 (* see common.v *)
 Set SsrOldRewriteGoalsOrder.
@@ -75,7 +75,7 @@ Ltac solve_progress :=
 Ltac inst_typing_lookup :=
   try multimatch goal with
   | H1: inst_typing ?s ?i = Some ?t,
-    H2: lookup_N (inst_types ?i) ?n = Some _ |- _ =>
+    H2: lookup_function_type (inst_types ?i) ?n = Some _ |- _ =>
       let Hteq := fresh "Hteq" in
       specialize (Logic.eq_sym (inst_typing_type_lookup n H1)) as Hteq;
       rewrite H2 in Hteq
@@ -85,14 +85,14 @@ Ltac inst_typing_lookup :=
       let Hextft := fresh "Hextft" in
       let Hnthft := fresh "Hnthft" in
       specialize (inst_typing_func_lookup H1 H2) as [ft [Hextft Hnthft]];
-      unfold ext_func_typing in Hextft
+      unfold instance_function_view, lookup_func_defined_type in Hextft
   | H1: inst_typing ?s ?i = Some ?t,
     H2: lookup_N (inst_tables ?i) _ = Some _ |- _ =>
       let tabt := fresh "tabt" in
       let Hexttabt := fresh "Hexttabt" in
       let Hnthtabt := fresh "Hnthtabt" in
       specialize (inst_typing_table_lookup H1 H2) as [tabt [Hexttabt Hnthtabt]];
-      unfold ext_table_typing in Hexttabt
+      unfold instance_table_view, ext_table_typing in Hexttabt
   | H1: inst_typing ?s ?i = Some ?t,
     H2: lookup_N (inst_mems ?i) _ = Some _ |- _ =>
       let mt := fresh "mt" in
@@ -106,7 +106,7 @@ Ltac inst_typing_lookup :=
       let Hextgt := fresh "Hextgt" in
       let Hnthgt := fresh "Hnthgt" in
       specialize (inst_typing_global_lookup H1 H2) as [gt [Hextgt Hnthgt]];
-      unfold ext_global_typing in Hextgt
+      unfold instance_global_view, ext_global_typing in Hextgt
   | H1: inst_typing ?s ?i = Some ?t,
     H2: lookup_N (inst_elems ?i) _ = Some _ |- _ =>
       let et := fresh "et" in
@@ -114,7 +114,8 @@ Ltac inst_typing_lookup :=
       let Hnthselem := fresh "Hnthselem" in
       let Helemtype := fresh "Helemtype" in
       let Hnthet := fresh "Hnthet" in
-      specialize (inst_typing_elem_lookup H1 H2) as [et [ei [Hnthselem [Helemtype Hnthet]]]]
+      specialize (inst_typing_elem_lookup H1 H2) as [et [ei [Hnthselem [Helemtype Hnthet]]]];
+      unfold instance_element_view in Helemtype
   | H1: inst_typing ?s ?i = Some ?t,
     H2: lookup_N (inst_datas ?i) _ = Some _ |- _ =>
       let dt := fresh "et" in
@@ -248,6 +249,81 @@ Ltac simplify_multieq :=
      injection H as Hinj; try subst
     end.
 
+Ltac simplify_closed_operands :=
+  repeat match goal with
+  | H: is_true (closed_value_typing ?s (VAL_num ?n) ?t) |- _ =>
+    let Equal := fresh "NumberType" in
+    pose proof (closed_num_type s n t H) as Equal; clear H;
+    first [is_var t; subst t | inversion Equal; subst; clear Equal]
+  | H: is_true (closed_value_typing ?s (VAL_vec ?v) ?t) |- _ =>
+    let Equal := fresh "VectorType" in
+    pose proof (closed_vec_type s v t H) as Equal; clear H;
+    first [is_var t; subst t | inversion Equal; subst; clear Equal]
+  | H: closed_stack_results_subtyping _ nil _ |- _ =>
+    inversion H; subst; clear H
+  | H: closed_stack_results_subtyping _ (cons _ _) (cons _ _) |- _ =>
+    inversion H; subst; clear H
+  | H: closed_stack_value_subtyping ?registry (CO_value (CV_num ?n)) ?t |- _ =>
+    let Equal := fresh "NumberSubtype" in
+    pose proof (closed_num_operand_subtype registry n t H) as Equal;
+    clear H; cbn [interpret_operand_type close_operand_type
+      gc_type_context.close_value_type] in Equal;
+    inversion Equal; subst; clear Equal
+  | H: closed_stack_value_subtyping ?registry (CO_value (CV_vec ?v)) ?t |- _ =>
+    let Equal := fresh "VectorSubtype" in
+    pose proof (closed_vec_operand_subtype registry v t H) as Equal;
+    clear H; cbn [interpret_operand_type close_operand_type
+      gc_type_context.close_value_type] in Equal;
+    inversion Equal; subst; clear Equal
+  end.
+
+Ltac fold_closed_subtyping :=
+  repeat match goal with
+  | H: (exists p p' ins outs,
+      ?expected_inputs = p ++ ins /\
+      ?expected_outputs = p' ++ outs /\
+      closed_stack_results_subtyping ?registry p p' /\
+      closed_stack_results_subtyping ?registry ins ?inputs /\
+      closed_stack_results_subtyping ?registry ?outputs outs) |- _ =>
+    progress change (closed_instr_subtyping registry (Closed_ft inputs outputs)
+      (Closed_ft expected_inputs expected_outputs)) in H
+  end.
+
+(** Only established closed algebra is used here. Unequal-sized overlaps are
+    left to explicit proof rather than guessed concrete/source intermediates. *)
+Ltac unify_closed_principal :=
+  fold_closed_subtyping;
+  repeat match goal with
+  | First: closed_instr_subtyping ?registry (Closed_ft ?a ?b) (Closed_ft ?x ?y),
+    Last: closed_instr_subtyping ?registry (Closed_ft ?b' ?c) (Closed_ft ?y ?z) |- _ =>
+    let Principal := fresh "Hprincipal" in
+    let Middle := fresh "Hsub" in
+    first [
+      constr_eq b (@nil closed_operand_type);
+      pose proof (closed_instr_compose_nil1 registry a b' c x y z First Last) as Principal
+    | constr_eq b' (@nil closed_operand_type);
+      pose proof (closed_instr_compose_nil2 registry a b c x y z First Last) as Principal
+    | let Length := fresh "MiddleLength" in
+      assert (Length : length b = length b') by reflexivity;
+      destruct (closed_instr_compose_eq registry a b b' c x y z First Last Length)
+        as [Principal Middle]; clear Length
+    ]; clear First Last
+  end;
+  simplify_closed_operands.
+
+Ltac resolve_closed_subtyping :=
+  fold_closed_subtyping;
+  try fold closed_instr_subtyping;
+  first [assumption
+    | match goal with
+      | First: closed_instr_subtyping ?r ?a ?b,
+        Last: closed_instr_subtyping ?r ?b ?c |-
+          closed_instr_subtyping ?r ?a ?c =>
+        exact (closed_instr_trans r a b c First Last)
+      end
+    | apply closed_instr_refl | apply closed_stack_results_refl
+    | apply csv_refl | apply csv_bot].
+
 Ltac resolve_e_typing :=
   repeat lazymatch goal with
     (* This is usually required and should be applied at highest priority *)
@@ -257,28 +333,33 @@ Ltac resolve_e_typing :=
     | H: ((Tf ?ts1 ?ts2) <ti: (Tf ?ts3 ?ts4)) |-
         e_typing _ _ _ (Tf ?ts3 ?ts4) =>
         eapply ety_subtyping; try by apply H
-    | |- e_typing _ _ nil _ =>
-        try eapply ety_subtyping; first (by apply ety_a' => //; apply bet_empty; eauto; try apply instr_subtyping_eq); eauto => //
+     | |- e_typing _ _ nil _ =>
+         try eapply ety_subtyping; first (by apply ety_empty); eauto => //
     | |- e_typing _ _ [::AI_basic _] _ =>
-        try eapply ety_subtyping; first (by apply ety_a' => //; econstructor; eauto; try apply instr_subtyping_eq); eauto => //
+         try eapply ety_subtyping; first (by apply ety_a' => //; econstructor; eauto; try apply instr_subtyping_eq); eauto => //
+     | |- e_typing _ _ [::AI_ref_i31 _] _ =>
+          try eapply ety_subtyping;
+           first (apply ety_ref_i31 with (t := Closed_ref false (CH_abstract HT_i31)); reflexivity);
+          eauto => //
     | |- e_typing _ _ (v_to_e_list _) _ =>
         try eapply ety_subtyping; first (by eapply et_values_typing; eauto); eauto => //
     | |- e_typing _ _ ((cons ($VN ?v) ?es)) _ =>
         apply value_num_cons_e_typing
     | |- e_typing _ _ ((cons ($V (VAL_vec ?v)) ?es)) _ =>
         apply value_vec_cons_e_typing
-    | H: is_true (value_typing ?s ?v ?t) |-
+     | H: is_true (value_typing ?s ?names ?v ?t) |-
         e_typing _ _ ((cons ($V ?v) ?es)) _ =>
         apply (value_cons_e_typing H)
-    | H: is_true (value_typing ?s (VAL_ref ?v) ?t) |-
+     | H: is_true (value_typing ?s ?names (VAL_ref ?v) ?t) |-
         e_typing _ _ ((cons (vref_to_e ?v) ?es)) _ =>
         replace (vref_to_e v) with ($V (VAL_ref v)); last done;
         apply (value_cons_e_typing H)
-    | H: is_true (values_typing ?s ?vs ?ts) |-
+     | H: is_true (values_typing ?s ?names ?vs ?ts) |-
         e_typing _ _ ((v_to_e_list ?vs ++ ?es)) _ =>
         apply (values_cat_e_typing H)
     | H : is_true (const_list _) |- _ =>
         let vs := fresh "vs" in
         apply const_es_exists in H as [vs ->]; invert_e_typing
-    | _ => unfold_store_operations; resolve_subtyping => //; simplify_lists; simplify_multieq; simpl in * => //
+     | _ => try solve [resolve_closed_subtyping];
+         unfold_store_operations; resolve_subtyping => //; simplify_lists; simplify_multieq; simpl in * => //
     end.

@@ -21,18 +21,37 @@ Definition binary_of_vector_type (t: vector_type) : byte :=
   | T_v128 => x7b
   end.
 
-Definition binary_of_reference_type (t: reference_type) : byte :=
+Definition binary_of_heap_type (t: heap_type) : list byte :=
   match t with
-  | T_funcref => x70
-  | T_externref => x6f
+  | HT_func => [::x70]
+  | HT_extern => [::x6f]
+  | HT_any => [::x6e]
+  | HT_eq => [::x6d]
+  | HT_i31 => [::x6c]
+  | HT_struct => [::x6b]
+  | HT_array => [::x6a]
+  | HT_none => [::x71]
+  | HT_nofunc => [::x73]
+  | HT_noextern => [::x72]
+  | HT_exn => [::x69]
+  | HT_noexn => [::x74]
+  | HT_type i => leb128.encode_signed (Z.of_N i)
   end.
 
-Definition binary_of_value_type (t : value_type) : byte :=
+Definition binary_of_reference_type (t: reference_type) : list byte :=
+  if ref_nullable t then
+    match ref_heap t with
+    | HT_type _ => x63 :: binary_of_heap_type (ref_heap t)
+    | _ => binary_of_heap_type (ref_heap t)
+    end
+  else x64 :: binary_of_heap_type (ref_heap t).
+
+Definition binary_of_value_type (t : value_type) : list byte :=
   match t with
-  | T_num t' => binary_of_number_type t'
-  | T_vec t' => binary_of_vector_type t'
+  | T_num t' => [::binary_of_number_type t']
+  | T_vec t' => [::binary_of_vector_type t']
   | T_ref t' => binary_of_reference_type t'
-  | T_bot => x00 (* will not happen *)
+  | T_bot => [::x00] (* will not happen *)
   end.
 
 Definition binary_of_N (n: N) : list byte :=
@@ -49,6 +68,13 @@ Definition binary_of_idx n := binary_of_u32 n.
 
 Definition binary_of_typeidx (t : typeidx) : list byte :=
   binary_of_idx t.
+
+(** Unlike ordinary typeidx immediates, a type index occurring as a heap
+    type uses a signed 33-bit encoding.  Reject indices outside u32. *)
+Definition binary_of_heap_typeidx (t : typeidx) : option (list byte) :=
+  if N.leb t 4294967295
+  then Some (leb128.encode_signed (Z.of_N t))
+  else None.
 
 Definition binary_of_funcidx (t : funcidx) : list byte :=
   binary_of_idx t.
@@ -91,14 +117,14 @@ Definition binary_of_block_type (tb : block_type) : list byte :=
   match tb with
   | BT_id x => binary_of_idx x
   | BT_valtype None => x40 :: nil
-  | BT_valtype (Some t) => binary_of_value_type t :: nil
+  | BT_valtype (Some t) => binary_of_value_type t
   end.
 
 Definition binary_of_value_types bt : list byte := 
-  binary_of_vec (fun v => binary_of_value_type v :: nil) bt.
+  binary_of_vec binary_of_value_type bt.
 
 Definition binary_of_result_type rt : list byte :=
-  binary_of_vec (fun v => binary_of_value_type v :: nil) rt.
+  binary_of_vec binary_of_value_type rt.
 
 (** An opaque definition for cases that can’t happen because of the well-formed properties. **)
 Definition dummy : list byte.
@@ -224,10 +250,17 @@ Fixpoint binary_of_be (be : basic_instruction) : list byte :=
   | BI_call_indirect x y => x11 :: binary_of_idx y ++ binary_of_idx x
   | BI_return_call x => x12 :: binary_of_idx x
   | BI_return_call_indirect x y => x13 :: binary_of_idx y ++ binary_of_idx x
+  | BI_call_ref x => x14 :: binary_of_idx x
+  | BI_return_call_ref x => x15 :: binary_of_idx x
+  | BI_br_on_non_null x => xd6 :: binary_of_idx x
 
-  | BI_ref_null t => xd0 :: binary_of_reference_type t :: nil
+  | BI_ref_null t => xd0 :: binary_of_heap_type t
   | BI_ref_is_null => xd1 :: nil
   | BI_ref_func x => xd2 :: binary_of_idx x
+  | BI_ref_as_non_null => [::xd4]
+  | BI_ref_i31 => [::xfb; x1c]
+  | BI_i31_get SX_S => [::xfb; x1d]
+  | BI_i31_get SX_U => [::xfb; x1e]
                         
   | BI_drop => x1a :: nil
   | BI_select None => x1b :: nil
@@ -488,8 +521,41 @@ Definition binary_of_functype (ft : function_type) : list byte :=
   let 'Tf rt1 rt2 := ft in
   x60 :: binary_of_result_type rt1 ++ binary_of_result_type rt2.
 
-Definition binary_of_typesec (ts : list function_type) : list byte :=
-  x01 :: with_length (binary_of_vec binary_of_functype ts).
+Definition binary_of_storage_type (t : storage_type value_type) : list byte :=
+  match t with
+  | ST_value v => binary_of_value_type v
+  | ST_packed PT_i8 => x78 :: nil
+  | ST_packed PT_i16 => x77 :: nil
+  end.
+
+Definition binary_of_field_type (f : field_type value_type) : list byte :=
+  binary_of_storage_type f.(field_storage) ++
+    (match f.(field_mutability) with MUT_const => x00 | MUT_var => x01 end) :: nil.
+
+Definition binary_of_composite_type
+    (t : composite_type value_type function_type) : list byte :=
+  match t with
+  | Comp_func f => binary_of_functype f
+  | Comp_struct fields => x5f :: binary_of_vec binary_of_field_type fields
+  | Comp_array field => x5e :: binary_of_field_type field
+  end.
+
+Definition binary_of_subtype (t : source_subtype) : list byte :=
+  let composite := binary_of_composite_type t.(subtype_composite) in
+  match t.(subtype_final), t.(subtype_supers) with
+  | true, nil => composite
+  | final, supers => (if final then x4f else x50) ::
+      binary_of_vec binary_of_typeidx supers ++ composite
+  end.
+
+Definition binary_of_recursive_type (group : recursive_type) : list byte :=
+  match group with
+  | cons t nil => binary_of_subtype t
+  | _ => x4e :: binary_of_vec binary_of_subtype group
+  end.
+
+Definition binary_of_typesec (ts : list recursive_type) : list byte :=
+  x01 :: with_length (binary_of_vec binary_of_recursive_type ts).
 
 Definition binary_of_name (n : name) : list byte :=
   binary_of_vec (fun n => cons n nil) n.
@@ -504,7 +570,7 @@ Definition binary_of_limits (l : limits) : list byte :=
   end.
 
 Definition binary_of_table_type (t_ty : table_type) : list byte :=
-  binary_of_reference_type t_ty.(tt_elem_type) ::
+  binary_of_reference_type t_ty.(tt_elem_type) ++
   binary_of_limits t_ty.(tt_limits).
 
 Definition binary_of_mutability (m : mutability) : list byte :=
@@ -514,7 +580,7 @@ Definition binary_of_mutability (m : mutability) : list byte :=
   end.
 
 Definition binary_of_global_type (g_ty : global_type) : list byte :=
-  cons (binary_of_value_type g_ty.(tg_t)) nil ++
+  binary_of_value_type g_ty.(tg_t) ++
   binary_of_mutability g_ty.(tg_mut).
 
 Definition binary_of_memory_type (m : memory_type) : list byte :=
@@ -605,13 +671,13 @@ Definition elem_of_wasm_1_0 (e: module_element): option (list byte) :=
 Definition binary_of_module_elem (e : module_element) : list byte :=
   match e.(modelem_mode) with
   | ME_passive =>
-      x05 :: binary_of_reference_type e.(modelem_type) :: binary_of_vec binary_of_expr e.(modelem_init)
+      x05 :: binary_of_reference_type e.(modelem_type) ++ binary_of_vec binary_of_expr e.(modelem_init)
   | ME_declarative =>
-      x07 :: binary_of_reference_type e.(modelem_type) :: binary_of_vec binary_of_expr e.(modelem_init)
+      x07 :: binary_of_reference_type e.(modelem_type) ++ binary_of_vec binary_of_expr e.(modelem_init)
   | ME_active x offset =>
       match elem_of_wasm_1_0 e with
       | Some bs => bs
-      | None => x06 :: binary_of_tableidx x ++ binary_of_expr offset ++ binary_of_reference_type e.(modelem_type) :: binary_of_vec binary_of_expr e.(modelem_init)
+      | None => x06 :: binary_of_tableidx x ++ binary_of_expr offset ++ binary_of_reference_type e.(modelem_type) ++ binary_of_vec binary_of_expr e.(modelem_init)
       end
   end.
 
@@ -621,7 +687,7 @@ Definition binary_of_elemsec (es : list module_element) : list byte :=
 Definition binary_of_local (n_t : nat * value_type) : list byte :=
   let '(n, t) := n_t in
   leb128.encode_unsigned (bin_of_nat n) ++
-  cons (binary_of_value_type t) nil.
+  binary_of_value_type t.
 
 (* tail recursive and trying to minimize the output *)
 Fixpoint bunch_locals_aux (cur_ty : value_type) (cur_count : nat) (acc : list (nat * value_type)) (tys : list value_type) : list (nat * value_type) :=

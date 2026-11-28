@@ -17,6 +17,14 @@ For more details on the GC proposal, check
 **)
 Section Subtyping.
 
+(* Shared validation entry point. This compatibility profile implements exact
+   matching only, just like value_subtyping below. The explicit declaration
+   context is the boundary at which recursive/declared matching must be added;
+   a source HT_type index is not a closed runtime identity. *)
+Definition reference_type_match (_C : type_context)
+    (t1 t2 : reference_type) : bool :=
+  t1 == t2.
+
 Definition value_subtyping (t1: value_type) (t2: value_type) : bool :=
   (t1 == t2) || (t1 == T_bot).
 

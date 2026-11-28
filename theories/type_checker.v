@@ -103,6 +103,22 @@ Definition type_update_ref_is_null (ct : checker_type) : option checker_type :=
       else None
   end.
 
+Definition is_i31_t (t : value_type) : bool :=
+  match t with
+  | T_ref (Ref_type _ HT_i31) | T_bot => true
+  | _ => false
+  end.
+
+Definition type_update_i31_get (ct : checker_type) : option checker_type :=
+  match ct.(CT_type) with
+  | nil =>
+      if ct.(CT_unr) then Some <<[::T_num T_i32], true>> else None
+  | t :: ts' =>
+      if is_i31_t t then
+        Some <<(T_num T_i32 :: ts'), ct.(CT_unr)>>
+      else None
+  end.
+
 Definition type_update_drop (ct : checker_type) : option checker_type :=
   match ct.(CT_type) with
   | nil =>
@@ -111,6 +127,13 @@ Definition type_update_drop (ct : checker_type) : option checker_type :=
       else None
   | t :: ts' =>
       Some <<ts', ct.(CT_unr)>>
+  end.
+
+Definition type_update_ref_as_non_null (ct : checker_type) : option checker_type :=
+  match ct.(CT_type) with
+  | nil =>
+      if ct.(CT_unr) then Some <<[::T_bot], true>> else None
+  | t :: _ => if is_ref_t t then Some ct else None
   end.
 
 (** With subtyping in Wasm 2.0, br_table now needs to find the common subtype to be consumed. **)
@@ -160,8 +183,27 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       match be with
       | BI_const_num v => type_update ts [::] [::T_num (typeof_num v)]
       | BI_const_vec v => type_update ts [::] [::T_vec (typeof_vec v)]
-      | BI_ref_null t => type_update ts [::]  [::T_ref t]
+      | BI_ref_null t =>
+          if source_heap_scopedb C.(tc_types) t then
+            type_update ts [::] [::T_ref (Ref_type true t)]
+          else None
       | BI_ref_is_null => type_update_ref_is_null ts
+      | BI_ref_i31 =>
+          type_update ts [::T_num T_i32] [::T_ref (Ref_type false HT_i31)]
+      | BI_i31_get _ => type_update_i31_get ts
+      | BI_ref_as_non_null => type_update_ref_as_non_null ts
+      (* Parsing and dispatch are available, but accepting these instructions
+         requires closed indexed function reference typing. Never substitute
+         abstract funcref validation or a dynamic signature-checking trap. *)
+      | BI_call_ref _ | BI_return_call_ref _ => None
+      | BI_br_on_non_null x =>
+          match lookup_N C.(tc_labels) x with
+          | Some label_types =>
+              if (label_types != nil) && is_ref_t (head T_bot label_types)
+              then type_update ts label_types (behead label_types)
+              else None
+          | None => None
+          end
       | BI_ref_func x =>
           match lookup_N C.(tc_funcs) x with
           | Some _ =>
@@ -273,8 +315,8 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       | BI_call_indirect x y =>
           match lookup_N C.(tc_tables) x with
           | Some tabt =>
-              if tabt.(tt_elem_type) == T_funcref then
-                match lookup_N (tc_types C) y with
+               if reference_type_match C.(tc_types) tabt.(tt_elem_type) T_funcref then
+                match lookup_function_type (tc_types C) y with
                 | Some (Tf tn tm) =>
                     type_update ts ((T_num T_i32 :: tn)) tm
                 | None => None 
@@ -299,8 +341,8 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           | Some t2s =>
               match lookup_N C.(tc_tables) x with
               | Some tabt =>
-                  if tabt.(tt_elem_type) == T_funcref then
-                    match lookup_N (tc_types C) y with
+                   if reference_type_match C.(tc_types) tabt.(tt_elem_type) T_funcref then
+                    match lookup_function_type (tc_types C) y with
                     | Some (Tf tn tm) =>
                         if (t2s == tm) then
                           type_update_top ts ((T_num T_i32 :: tn)) nil
@@ -509,9 +551,17 @@ Definition rev_tf (tf: function_type) :=
   | Tf tn tm => Tf (rev tn) (rev tm)
   end.
 
+Definition rev_source_subtype (t : source_subtype) : source_subtype :=
+  Sub_type t.(subtype_final) t.(subtype_supers)
+    (match t.(subtype_composite) with
+     | Comp_func f => Comp_func (rev_tf f)
+     | Comp_struct fields => Comp_struct fields
+     | Comp_array field => Comp_array field
+     end).
+
 Definition context_reverse (C: t_context): t_context :=
   {|
-    tc_types := map rev_tf C.(tc_types);
+    tc_types := map rev_source_subtype C.(tc_types);
     tc_funcs := map rev_tf C.(tc_funcs);
     tc_tables := C.(tc_tables);
     tc_mems := C.(tc_mems);
@@ -522,6 +572,7 @@ Definition context_reverse (C: t_context): t_context :=
     tc_labels := map rev C.(tc_labels);
     tc_return := option_map rev C.(tc_return);
     tc_refs := C.(tc_refs);
+    tc_defined_types := C.(tc_defined_types);
   |}.
 
 Definition b_e_type_checker (C : t_context) (es : list basic_instruction) (tf : function_type) : bool :=

@@ -4,6 +4,7 @@
 (* (C) J. Pichon, M. Bodin - see LICENSE.txt *)
 
 From Wasm Require Export common numerics bytes memory simd.
+From Wasm Require Export gc_storage_types.
 From compcert Require common.Memdata.
 From Stdlib Require Import ZArith.
 
@@ -36,6 +37,13 @@ Definition u32_bound : N := 4294967296%N.
 Definition u8_bound : N := 256%N.
 
 Definition typeidx : Set := u32.
+
+(** Runtime defined-type identities are canonical registry entries, never
+    module-local HT_type indices. Group members retain their binder position. *)
+Record defined_type : Set := Def_type {
+  defined_group : N;
+  defined_member : N;
+}.
 Definition funcidx : Set := u32.
 Definition tableidx : Set := u32.
 Definition memidx : Set := u32.
@@ -132,10 +140,21 @@ Reference types are opaque, meaning that neither their size nor their bit patter
 
 [https://www.w3.org/TR/wasm-core-2/syntax/types.html#reference-types]
 *)
-Inductive reference_type : Set := 
-| T_funcref
-| T_externref
-.
+(* Shared source heap syntax. HT_type denotes a module-local type index, NOT a
+   runtime type identity. Closing recursive declared types is a separate step
+   at the module/store boundary. *)
+Inductive heap_type : Set :=
+| HT_func | HT_extern
+| HT_any | HT_eq | HT_i31 | HT_struct | HT_array
+| HT_none | HT_nofunc | HT_noextern
+| HT_exn | HT_noexn
+| HT_type : typeidx -> heap_type.
+
+Record reference_type : Set := Ref_type {
+  ref_nullable : bool;
+  ref_heap : heap_type
+}.
+
 
 (** std-doc:
 
@@ -170,6 +189,81 @@ and outputs of instructions.
 Inductive function_type := (* tf *)
 | Tf : result_type -> result_type -> function_type
 .
+
+Inductive function_type_gen (V : Type) : Type :=
+| Closed_ft : list V -> list V -> function_type_gen V.
+
+Arguments Closed_ft {V} _ _.
+
+(** Source and canonical declaration phases share the same composite,
+    field/storage and function shapes. Only their reference leaves differ. *)
+Inductive composite_type (V F : Type) : Type :=
+| Comp_func : F -> composite_type V F
+| Comp_struct : list (field_type V) -> composite_type V F
+| Comp_array : field_type V -> composite_type V F.
+
+Arguments Comp_func {V F} _.
+Arguments Comp_struct {V F} _.
+Arguments Comp_array {V F} _.
+
+Record subtype (V I F : Type) : Type := Sub_type {
+  subtype_final : bool;
+  subtype_supers : list I;
+  subtype_composite : composite_type V F;
+}.
+
+Arguments Sub_type {V I F} _ _ _.
+Arguments subtype_final {V I F} _.
+Arguments subtype_supers {V I F} _.
+Arguments subtype_composite {V I F} _.
+
+Definition source_subtype := subtype value_type typeidx function_type.
+Definition recursive_type := list source_subtype.
+
+Inductive closed_type_use : Set :=
+| CT_rec : N -> closed_type_use
+| CT_def : defined_type -> closed_type_use.
+
+Inductive closed_heap_type : Set :=
+| CH_abstract : heap_type -> closed_heap_type
+| CH_defined : closed_type_use -> closed_heap_type.
+
+Inductive closed_value_type : Set :=
+| CV_num : number_type -> closed_value_type
+| CV_vec : vector_type -> closed_value_type
+| CV_ref : bool -> closed_heap_type -> closed_value_type.
+
+Definition closed_function_type := function_type_gen closed_value_type.
+
+(** Bottom belongs only to the internal operand-stack calculus. It is not a
+    value, declaration component, heap type, or binary syntax constructor. *)
+Inductive closed_operand_type : Set :=
+| CO_value : closed_value_type -> closed_operand_type
+| CO_bot : closed_operand_type.
+
+Definition closed_operand_result_type := list closed_operand_type.
+Definition lift_closed_result_type (ts : list closed_value_type) :
+    closed_operand_result_type := List.map CO_value ts.
+Definition lift_closed_function_type (tf : closed_function_type) :
+    function_type_gen closed_operand_type :=
+  let '(Closed_ft inputs outputs) := tf in
+  Closed_ft (lift_closed_result_type inputs) (lift_closed_result_type outputs).
+
+Record closed_reference_type : Set := Closed_ref {
+  closed_ref_nullable : bool;
+  closed_ref_heap : closed_heap_type;
+}.
+
+Definition closed_reference_value (r : closed_reference_type) : closed_value_type :=
+  CV_ref r.(closed_ref_nullable) r.(closed_ref_heap).
+Definition closed_subtype :=
+  subtype closed_value_type closed_type_use closed_function_type.
+Definition canonical_group := list closed_subtype.
+Definition canonical_registry := list canonical_group.
+
+(* Context entries retain composite kind and the source index space.
+   An inst_types entry is never a globally allocated runtime identity. *)
+Definition type_context := list source_subtype.
 
 (* This is a definition for future extensions, where instruction types are no longer
 the same as function types. *)
@@ -215,20 +309,22 @@ optionally maximum size. The limits are given in numbers of entries.
 
 [https://www.w3.org/TR/wasm-core-2/syntax/types.html#table-types]
 *)
-Record table_type : Set := {
+Record table_type_gen (R : Set) : Set := Build_table_type {
   tt_limits : limits;
-  tt_elem_type : reference_type;
+  tt_elem_type : R;
 }.
+
+Arguments Build_table_type {R} _ _.
+Arguments tt_limits {R} _.
+Arguments tt_elem_type {R} _.
+Definition table_type := table_type_gen reference_type.
+Definition closed_table_type := table_type_gen closed_reference_type.
 
 
 (** std-doc:
 
 [https://www.w3.org/TR/wasm-core-2/syntax/types.html#global-types]
 *)
-Inductive mutability : Set := (* mut *)
-  | MUT_const
-  | MUT_var
-  .
 
 
 (** std-doc:
@@ -236,10 +332,16 @@ Global types classify global variables, which hold a value and can either be mut
 
 [https://www.w3.org/TR/wasm-core-2/syntax/types.html#global-types]
 *)
-Record global_type : Set := (* tg *) {
+Record global_type_gen (V : Type) : Type := Build_global_type { (* tg *)
   tg_mut : mutability;
-  tg_t : value_type
+  tg_t : V
 }.
+
+Arguments Build_global_type {V} _ _.
+Arguments tg_mut {V} _.
+Arguments tg_t {V} _.
+Definition global_type := global_type_gen value_type.
+Definition closed_global_type := global_type_gen closed_value_type.
 
   
 (** std-doc:
@@ -254,6 +356,12 @@ Inductive extern_type : Set :=
 | ET_mem : memory_type -> extern_type
 | ET_global : global_type -> extern_type
 .
+
+Inductive closed_extern_type : Set :=
+| CET_func : defined_type -> closed_extern_type
+| CET_table : closed_table_type -> closed_extern_type
+| CET_mem : memory_type -> closed_extern_type
+| CET_global : closed_global_type -> closed_extern_type.
 
 (** std-doc:
 A structured instruction can consume input and produce output on the operand stack according to its annotated block type. 
@@ -270,9 +378,23 @@ Most types are universally valid. However, restrictions apply to limits, which m
 Definition functype_valid (ft: function_type) : bool :=
   true.
 
+Definition source_subtype_valid (t : source_subtype) : bool :=
+  match subtype_composite t with
+  | Comp_func f => functype_valid f
+  | Comp_struct _ | Comp_array _ => true
+  end.
+
+(** Like the pre-existing functype_valid predicate, this is only the
+    compatibility context-shape check. Actual source declaration validity is
+    checked by canonical closing, registry validation and identity agreement;
+    it must never be inferred from this universally true legacy predicate. *)
+Lemma source_subtype_valid_true t : source_subtype_valid t = true.
+Proof. destruct t as [final supers composite]; destruct composite; reflexivity. Qed.
+
 Definition table_limit_bound : N := (N.sub u32_bound 1%N).
 
 Definition tabletype_valid (tt: table_type) : bool :=
+  ref_nullable tt.(tt_elem_type) &&
   limit_valid_range tt.(tt_limits) table_limit_bound.
 
 Definition mem_limit_bound : N := 65536%N.
@@ -284,6 +406,20 @@ Definition globaltype_valid (gt: global_type) : bool :=
   true.
 
 End Types.
+
+Arguments Closed_ft {V} _ _.
+Arguments Comp_func {V F} _.
+Arguments Comp_struct {V F} _.
+Arguments Comp_array {V F} _.
+Arguments Build_table_type {R} _ _.
+Arguments tt_limits {R} _.
+Arguments tt_elem_type {R} _.
+Arguments Build_global_type {V} _ _.
+Arguments tg_mut {V} _.
+Arguments tg_t {V} _.
+
+Notation T_funcref := (Ref_type true HT_func).
+Notation T_externref := (Ref_type true HT_extern).
 
 
 Definition static_offset := (* off *) u32. 
@@ -516,7 +652,7 @@ Replace lanes: consume a v128 operand and a numeric value for a given lane, and 
 (** std-doc:
 Instructions in this group are concerned with accessing references.
 **)
-  | BI_ref_null : reference_type -> basic_instruction  
+  | BI_ref_null : heap_type -> basic_instruction
   | BI_ref_is_null
   | BI_ref_func : funcidx -> basic_instruction
 (** std-doc:
@@ -576,6 +712,12 @@ Instructions in this group affect the flow of control.
   | BI_call_indirect : tableidx -> typeidx -> basic_instruction
   | BI_return_call : funcidx -> basic_instruction                                          
   | BI_return_call_indirect : tableidx -> typeidx -> basic_instruction                                          
+  | BI_ref_as_non_null
+  | BI_call_ref : typeidx -> basic_instruction
+  | BI_return_call_ref : typeidx -> basic_instruction
+  | BI_br_on_non_null : labelidx -> basic_instruction
+  | BI_ref_i31
+  | BI_i31_get : sx -> basic_instruction
   .
 
 
@@ -598,9 +740,10 @@ const instructions and ref.null producing them.
 References other than null are represented with additional administrative instructions. They either are function references, pointing to a specific function address, or external references pointing to an uninterpreted form of extern address that can be defined by the embedder to represent its own objects.
 *)
 Inductive value_ref : Set :=
-| VAL_ref_null: reference_type -> value_ref
+| VAL_ref_null: heap_type -> value_ref
 | VAL_ref_func: funcaddr -> value_ref
 | VAL_ref_extern: externaddr -> value_ref
+| VAL_ref_i31: i31bits -> value_ref
 .
 
 Inductive value : Type :=
@@ -738,7 +881,7 @@ WebAssembly programs are organized into modules, which are the unit of deploymen
 [https://webassembly.github.io/spec/core/syntax/modules.html]
 *)
 Record module : Type := {
-  mod_types : list function_type;
+  mod_types : list recursive_type;
   mod_funcs : list module_func;
   mod_tables : list module_table;
   mod_mems : list module_mem;
@@ -792,19 +935,42 @@ as validation of an instruction sequence proceeds.
 
 Definition ok: Set := unit.
 
-Record t_context : Set := {
-  tc_types : list function_type;
-  tc_funcs : list function_type;
-  tc_tables : list table_type;
+Record t_context_gen (V R F O : Set) : Set := Build_t_context {
+  tc_types : type_context;
+  tc_funcs : list F;
+  tc_tables : list (table_type_gen R);
   tc_mems : list memory_type;
-  tc_globals : list global_type;
-  tc_elems : list reference_type;
+  tc_globals : list (global_type_gen V);
+  tc_elems : list R;
   tc_datas : list ok;
-  tc_locals : list value_type;
-  tc_labels : list result_type;
-  tc_return : option result_type;
+  tc_locals : list V;
+  tc_labels : list (list O);
+  tc_return : option (list O);
   tc_refs : list funcidx;
+  (* Empty during source validation; populated from the executing instance
+     for administrative/value typing. Not an alternative identity registry. *)
+  tc_defined_types : list defined_type;
 }.
+
+Arguments Build_t_context {V R F O} _ _ _ _ _ _ _ _ _ _ _ _.
+Arguments tc_types {V R F O} _.
+Arguments tc_funcs {V R F O} _.
+Arguments tc_tables {V R F O} _.
+Arguments tc_mems {V R F O} _.
+Arguments tc_globals {V R F O} _.
+Arguments tc_elems {V R F O} _.
+Arguments tc_datas {V R F O} _.
+Arguments tc_locals {V R F O} _.
+Arguments tc_labels {V R F O} _.
+Arguments tc_return {V R F O} _.
+Arguments tc_refs {V R F O} _.
+Arguments tc_defined_types {V R F O} _.
+
+Definition t_context := t_context_gen value_type reference_type function_type value_type.
+Definition closed_t_context :=
+  t_context_gen closed_value_type closed_reference_type closed_function_type closed_operand_type.
+Definition closed_result_type := list closed_value_type.
+Definition closed_instr_type := function_type_gen closed_operand_type.
 
 Inductive result : Type :=
 | result_values : list value -> result
@@ -831,7 +997,7 @@ never exceeds the maximum size of tabletype, if present.
 [https://www.w3.org/TR/wasm-core-2/exec/runtime.html#table-instances]
 *)
 Record tableinst : Set := {
-  tableinst_type : table_type;
+  tableinst_type : closed_table_type;
   tableinst_elem : list value_ref;
 }.
 
@@ -873,7 +1039,7 @@ It is an invariant of the semantics that the value has a type equal to the value
 [https://www.w3.org/TR/wasm-core-2/exec/runtime.html#global-instances]
 *)
 Record globalinst : Type := {
-  g_type : global_type;
+  g_type : closed_global_type;
   g_val : value;
 }.
 
@@ -885,7 +1051,7 @@ of references and their common type.
 [https://www.w3.org/TR/wasm-core-2/exec/runtime.html#element-instances]
 *)
 Record eleminst : Set := {
-  eleminst_type : reference_type;
+  eleminst_type : closed_reference_type;
   eleminst_elem : list value_ref;
 }.
 
@@ -943,7 +1109,7 @@ instance have different names.
 [https://www.w3.org/TR/wasm-core-2/exec/runtime.html#module-instances]
 *)
 Record moduleinst : Type := (* inst *) {
-  inst_types : list function_type;
+  inst_types : type_context;
   inst_funcs : list funcaddr;
   inst_tables : list tableaddr;
   inst_mems : list memaddr;
@@ -951,9 +1117,17 @@ Record moduleinst : Type := (* inst *) {
   inst_elems : list elemaddr;
   inst_datas : list dataaddr;
   inst_exports: list exportinst;  
+  (* Source type index -> canonical closed identity in the shared store. *)
+  inst_defined_types : list defined_type;
+  (* The consumer's source view of its component index spaces. Stored
+     components carry only closed descriptors; these declarations are checked
+     against them using inst_defined_types, never the producer's indices. *)
+  inst_context : t_context;
   }.
 
-Definition empty_moduleinst := Build_moduleinst nil nil nil nil nil nil nil nil.
+Definition empty_moduleinst :=
+  Build_moduleinst nil nil nil nil nil nil nil nil nil
+    (Build_t_context nil nil nil nil nil nil nil nil nil None nil nil).
 
 
 (** We assume a family of host functions. **)
@@ -1003,6 +1177,8 @@ Record store_record : Type := (* s *) {
   s_globals : list globalinst;
   s_elems: list eleminst;
   s_datas: list datainst;
+  (* Append-only canonical groups shared by instantiated modules. *)
+  s_types : canonical_registry;
 }.
 
                             
@@ -1045,6 +1221,8 @@ Inductive administrative_instruction : Type := (* e *)
 | AI_return_invoke : funcaddr -> administrative_instruction
 | AI_label : nat -> list administrative_instruction -> list administrative_instruction -> administrative_instruction
 | AI_frame : nat -> frame -> list administrative_instruction -> administrative_instruction
+| AI_ref_i31 : i31bits -> administrative_instruction
+| AI_ref_null : heap_type -> administrative_instruction
 .
 
 (** std-doc:
