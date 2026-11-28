@@ -58,3 +58,23 @@
   (setenv EXE %{exe:../src/wasm_coq_interpreter.exe}
    (setenv JOBS 1
     (run bash %{dep:../run_wast.sh} . official_multi_memory)))))
+
+(rule
+ (target multi_memory_root_expectations.wast)
+ (deps
+  multi_memory_root_expectations.py binary_fixtures.py
+  ../wast_testsuite/memory.wast ../wast_testsuite/imports.wast
+  ../wast_testsuite/binary.wast ../wast_testsuite/align.wast)
+ (action
+  (with-stdout-to %{target}
+   (run python3 %{dep:multi_memory_root_expectations.py}
+    %{dep:../wast_testsuite/memory.wast} %{dep:../wast_testsuite/imports.wast}
+    %{dep:../wast_testsuite/binary.wast} %{dep:../wast_testsuite/align.wast}))))
+
+(rule
+ (alias runtest)
+ (deps multi_memory_root_expectations.wast ../run_wast.sh)
+ (action
+  (setenv EXE %{exe:../src/wasm_coq_interpreter.exe}
+   (setenv JOBS 1
+    (run bash %{dep:../run_wast.sh} . multi_memory_root_expectations)))))
