@@ -193,13 +193,25 @@ Definition parse_gc_abstract_reference_type {n} :
 Definition parse_gc_heap_type {n} : byte_parser heap_type n :=
   gc_types.shared_heap_of_abstract <$> parse_gc_abstract_heap_type.
 
+Definition parse_source_abstract_heap_type {n} : byte_parser heap_type n :=
+  parse_gc_heap_type <|> (exact_byte x69 $> HT_exn) <|>
+    (exact_byte x74 $> HT_noexn).
+
+Definition parse_source_heap_type {n} : byte_parser heap_type n :=
+  parse_source_abstract_heap_type <|> (HT_type <$> parse_heap_typeidx).
+
 Definition parse_reference_type {n} : byte_parser reference_type n :=
   gc_types.shared_reference_of_abstract <$> parse_gc_abstract_reference_type.
+
+Definition parse_source_reference_type {n} : byte_parser reference_type n :=
+  (Ref_type true <$> (exact_byte x63 &> parse_source_heap_type)) <|>
+  (Ref_type false <$> (exact_byte x64 &> parse_source_heap_type)) <|>
+  (Ref_type true <$> parse_source_abstract_heap_type).
 
 Definition parse_value_type {n} : byte_parser value_type n :=
   T_num <$> parse_number_type <|>
   T_vec <$> parse_vector_type <|>
-  T_ref <$> parse_reference_type.
+  T_ref <$> parse_source_reference_type.
 
 Definition parse_block_type {n} : byte_parser block_type n :=
   (exact_byte x40 $> BT_valtype None) <|>
@@ -267,7 +279,7 @@ Definition parse_return_call_ref {n} : byte_parser basic_instruction n :=
 
 (* Reference instructions *)
 Definition parse_ref_null {n}: byte_parser basic_instruction n :=
-  exact_byte xd0 &> (BI_ref_null <$> parse_gc_heap_type).
+  exact_byte xd0 &> (BI_ref_null <$> parse_source_heap_type).
 
 Definition parse_ref_is_null {n} : byte_parser basic_instruction n :=
   exact_byte xd1 $> BI_ref_is_null.
@@ -951,16 +963,13 @@ Definition parse_expr {n} : byte_parser (list basic_instruction) n :=
 (** Declaration references use the full source index space. Scope and
     composite-kind checking are performed by canonical module validation. *)
 Definition parse_declaration_abstract_heap_type {n} : byte_parser heap_type n :=
-  parse_gc_heap_type <|> (exact_byte x69 $> HT_exn) <|>
-  (exact_byte x74 $> HT_noexn).
+  parse_source_abstract_heap_type.
 
 Definition parse_declaration_heap_type {n} : byte_parser heap_type n :=
-  parse_declaration_abstract_heap_type <|> (HT_type <$> parse_heap_typeidx).
+  parse_source_heap_type.
 
 Definition parse_declaration_reference_type {n} : byte_parser reference_type n :=
-  (Ref_type true <$> (exact_byte x63 &> parse_declaration_heap_type)) <|>
-  (Ref_type false <$> (exact_byte x64 &> parse_declaration_heap_type)) <|>
-  (Ref_type true <$> parse_declaration_abstract_heap_type).
+  parse_source_reference_type.
 
 Definition parse_declaration_value_type {n} : byte_parser value_type n :=
   (T_num <$> parse_number_type) <|> (T_vec <$> parse_vector_type) <|>
@@ -975,7 +984,7 @@ Definition parse_limits {n} : byte_parser limits n :=
   (exact_byte x01 &> ((fun min max => {| lim_min := min; lim_max := Some max |}) <$> parse_u32_as_N) <*> parse_u32_as_N).
 
 Definition parse_table_type {n} : byte_parser table_type n :=
-  ((fun ety lims => {| tt_limits := lims; tt_elem_type := ety |}) <$> parse_reference_type) <*> parse_limits.
+  ((fun ety lims => {| tt_limits := lims; tt_elem_type := ety |}) <$> parse_source_reference_type) <*> parse_limits.
 
 Definition parse_memory_type {n} : byte_parser memory_type n :=
   (fun lim => lim) <$> parse_limits.
@@ -1089,21 +1098,21 @@ Definition parse_module_element_5 {n} : byte_parser module_element n :=
       {| modelem_type := t;
         modelem_init := els;
         modelem_mode := ME_passive; |})
-     <$> parse_reference_type) <*> parse_vec parse_expr.
+      <$> parse_source_reference_type) <*> parse_vec parse_expr.
 
 Definition parse_module_element_6 {n} : byte_parser module_element n :=
   ((((fun (x: tableidx) es t els =>
         {| modelem_type := t;
           modelem_init := els;
           modelem_mode := ME_active x es; |})
-       <$> parse_tableidx) <*> parse_expr) <*> parse_reference_type) <*> parse_vec parse_expr.
+        <$> parse_tableidx) <*> parse_expr) <*> parse_source_reference_type) <*> parse_vec parse_expr.
 
 Definition parse_module_element_7 {n} : byte_parser module_element n :=
   ((fun t els =>
       {| modelem_type := t;
         modelem_init := els;
         modelem_mode := ME_declarative; |})
-     <$> parse_reference_type) <*> parse_vec parse_expr.
+      <$> parse_source_reference_type) <*> parse_vec parse_expr.
 
 Definition parse_module_element {n}: byte_parser module_element n :=
   assert_u32 0%N &> parse_module_element_0 <|>

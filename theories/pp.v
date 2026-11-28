@@ -773,6 +773,7 @@ Fixpoint pp_administrative_instruction (n : indentation) (e : administrative_ins
     String.concat "" (List.map (pp_administrative_instruction n) es) in
   match e with
   | AI_basic be => pp_basic_instruction n be
+  | AI_ref_null heap => pp_basic_instruction n (BI_ref_null heap)
   | AI_trap => indent n (with_fg ae_style "trap" ++ newline)
   | AI_ref a =>
     indent n (with_fg ae_style "ref " ++ pp_addr a ++ newline)
@@ -815,8 +816,25 @@ Definition pp_mutability (m : mutability) : string :=
 Definition pp_global_type (gt: global_type) : string :=
   pp_mutability gt.(tg_mut) ++ " " ++ pp_value_type gt.(tg_t).
 
+Definition pp_closed_heap_type (heap : closed_heap_type) : string :=
+  match heap with
+  | CH_abstract h => pp_heap_type h
+  | CH_defined (CT_rec member) => "rec " ++ pp_N member
+  | CH_defined (CT_def id) =>
+      "defined " ++ pp_N id.(defined_group) ++ "." ++ pp_N id.(defined_member)
+  end.
+
+Definition pp_closed_value_type (t : closed_value_type) : string :=
+  match t with
+  | CV_num n => pp_value_type (T_num n)
+  | CV_vec v => pp_value_type (T_vec v)
+  | CV_ref nullable heap =>
+      "(ref " ++ (if nullable then "null " else "") ++ pp_closed_heap_type heap ++ ")"
+  end.
+
 Definition pp_global (g : globalinst) : string :=
-  pp_global_type g.(g_type) ++ " " ++ pp_value g.(g_val).
+  pp_mutability g.(g_type).(tg_mut) ++ " " ++
+    pp_closed_value_type g.(g_type).(tg_t) ++ " " ++ pp_value g.(g_val).
 
 Definition pp_globals (n : indentation) (gs : list globalinst) : string :=
   String.concat "" (mapi (fun i g => indent n (string_of_nat i ++ ": " ++ pp_global g ++ newline)) gs).

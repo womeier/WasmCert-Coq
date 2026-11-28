@@ -1392,7 +1392,8 @@ Proof.
     (* Replace_vec *)
     + by resolve_tc_be_typing.
     (* Ref_null *)
-    + by resolve_tc_be_typing.
+    + rewrite source_heap_scopedb_map in Hif.
+      by resolve_tc_be_typing.
     (* Ref_is_null *)
     + by apply type_update_ref_is_null_bet with (cts' := cts').
     (* Ref_func *)
@@ -1576,7 +1577,7 @@ Proof.
       destruct Hupdate as [tn [ts1 [ts2 [Hagree' Hsub]]]].
       rewrite revK in Hsub.
       exists tn; split => //.
-      eapply bet_subtyping; first by apply bet_return with (ts := r) => //.
+      eapply bet_subtyping; first by eapply bet_return; eauto.
       by apply Hsub.
     (* Call *)
     + apply nth_error_map in Hoption as [ts [Hnth <-]].
@@ -1608,7 +1609,7 @@ Proof.
       apply (f_equal rev) in Hrevr; repeat rewrite revK in Hrevr; subst.
       rewrite revK in Hsub.
       exists tn; split => //.
-      eapply bet_subtyping; first by apply bet_return_call with (t1s := r0) (t2s := r).
+      eapply bet_subtyping; first by eapply bet_return_call; eauto.
       by eauto.
     (* Return_call_indirect *)      
     + destruct f as [tn0 tm0].
@@ -1623,10 +1624,10 @@ Proof.
       apply (f_equal rev) in Hrevr; repeat rewrite revK in Hrevr; subst.
       rewrite rev_cons revK -cats1 in Hsub.
       exists tn; split => //.
-      eapply bet_subtyping; first by eapply bet_return_call_indirect with (t1s := r0) (t2s := r); eauto.
+      eapply bet_subtyping; first by eapply bet_return_call_indirect; eauto.
       by eauto.
     + by eapply type_update_ref_as_non_null_bet; eauto.
-    + destruct r as [|t labels] => //=.
+    + destruct l0 as [|t labels] => //=.
       simpl in *.
       apply nth_error_map in Hoption as [source_labels [Hnth Hrev]].
       apply (f_equal rev) in Hrev.
@@ -1675,6 +1676,9 @@ Proof.
     move => Hbet.
     assert (b_e_type_checker C bes (Tf tn tm)) as H; (try by rewrite H in Htc_bool); clear Htc_bool.
     induction Hbet; subst => //=; (try rewrite H); unfold type_update, type_update_top, produce; simplify_tc_goal; (try by unfold c_types_agree in *; simplify_tc_goal).
+    (* Ref_null *)
+    + rewrite source_heap_scopedb_map H.
+      by unfold c_types_agree; simplify_tc_goal.
     (* Ref_func *)
     + move/inP in H0.
       by rewrite H0.

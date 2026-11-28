@@ -140,8 +140,10 @@ Proof.
   apply abstract_reference_codec_roundtrip.
 Qed.
 
-(** The actual main reference-type parser now reuses the proved fragment,
-    mapping its results into the shared representation. *)
+(** The shared abstract-reference fragment retains its exact suffix/error
+    contract. Source value/table/local/element positions use its indexed/EH
+    extension [parse_source_reference_type]; these theorems do not assert
+    that the larger grammar contains only abstract references. *)
 Theorem shared_reference_parser_correspondence bs :
   run_parse_prefix (fun _ => parse_reference_type) bs =
   option_map

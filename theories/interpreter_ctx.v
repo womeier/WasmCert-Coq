@@ -1,9 +1,11 @@
 (** Proof-carrying interpreter for Wasm, optimised for contexts **)
 
 From Wasm Require Export common properties tactic typing_inversion contexts.
-From Stdlib Require Import ZArith Program.Equality.
+From Stdlib Require Import ZArith NArith Program.Equality Lia.
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From Wasm Require Export operations host.
+From Wasm Require Import gc_runtime_type_properties closed_typing_properties
+  gc_declaration_typing_properties closed_source_translation closed_operand_properties.
 
 (* see common.v *)
 Set SsrOldRewriteGoalsOrder.
@@ -134,7 +136,31 @@ Ltac get_cc ccs :=
   Note that this destroys the original premises, so should only be used as a terminal most of time. *)
 Ltac discriminate_size :=
   repeat match goal with
-  | H: is_true (values_typing _ _ _) |- _ =>
+  | H: exists _, _ |- _ => destruct H
+  | H: _ /\ _ |- _ => destruct H
+  | H: @eq (list closed_operand_type) _ _ |- _ =>
+    apply (f_equal (@List.length closed_operand_type)) in H
+  | H: closed_stack_results_subtyping _ _ _ |- _ =>
+    apply List.Forall2_length in H
+  | H: is_true (closed_values_typing _ _ _) |- _ =>
+    apply closed_values_length in H
+  | H: closed_instr_subtyping _ (Closed_ft _ _) (Closed_ft _ _) |- _ =>
+    let Exact := fresh "Hsize_add" in
+    let Inputs := fresh "Hsize_bound1" in
+    let Outputs := fresh "Hsize_bound2" in
+    pose proof (closed_instr_size_exact _ _ _ _ _ H) as Exact;
+    apply closed_instr_size_bound in H as [Inputs Outputs]
+  | H: context [length (lift_closed_result_type _)] |- _ =>
+    unfold lift_closed_result_type in H; rewrite List.length_map in H
+  | H: context [size (lift_closed_result_type ?types)] |- _ =>
+    rewrite -(length_is_size (lift_closed_result_type types))
+      lift_closed_result_length length_is_size in H
+  | H: context [length (interpret_operand_results _ _)] |- _ =>
+    rewrite interpret_operand_results_length in H
+  | H: context [size (interpret_operand_results ?names ?types)] |- _ =>
+    rewrite -(length_is_size (interpret_operand_results names types))
+      interpret_operand_results_length length_is_size in H
+  | H: is_true (values_typing _ _ _ _) |- _ =>
     apply values_typing_size in H
   | H: Tf _ _ <ti: Tf _ _ |- _ =>
     let Hsize_add := fresh "Hsize_add" in
@@ -154,7 +180,8 @@ Ltac discriminate_size :=
     apply nth_error_Some_length in H
   | H: List.nth_error _ _ = None |- _ =>
     apply List.nth_error_None in H
-  | _ => unfold lookup_N in *; simplify_lists; simpl in *; subst; try by lias
+  | _ => unfold lookup_N in *; simplify_lists; simpl in *; subst;
+      try solve [lias | lia]
     end.
 
 Definition empty_label_ctx := Build_label_ctx nil 0 nil nil.
@@ -198,15 +225,16 @@ Proof.
     (* Not enough values *)
     + resolve_invalid_typing.
       destruct fc as [fvs fk [flocs fi] fes]; simpl in *.
-      unfold frame_typing in Hftype; remove_bools_options; simpl in *.
-      destruct Hftype as [ts0 [-> Hvt]].
+      have EmptyLabels := closed_frame_typing_label_empty Hftype.
       eapply all2_projection in Hagree; eauto.
       move/eqP in Hagree; simpl in Hagree; subst.
       by discriminate_size.
       
   (* Not enough labels *)
   - resolve_invalid_typing.
-    by discriminate_size.
+    discriminate_size.
+    rewrite Hagree in Hconjr.
+    exact (Nat.lt_irrefl _ (Nat.le_lt_trans _ _ _ Htar Hconjr)).
 Defined.
 
 (** Return exits from the innermost frame and all label contexts.
@@ -240,8 +268,20 @@ Proof.
     }
   (* Not enough values *)
   - resolve_invalid_typing.
-    assert (length extr1 = lk) as <-; first by injection Hretcons; destruct ccs'.
-    by discriminate_size.
+    change (ret = Some extr1) in Hconjr.
+    rewrite Hconjr in Hretcons.
+    have Nonempty : rcons ccs' cc0 != nil by destruct ccs'.
+    specialize (Hretcons Nonempty). simpl in Hretcons.
+    injection Hretcons as <-.
+    destruct (closed_instr_size_bound _ _ _ _ _ Hconjl) as [Inputs Outputs].
+    have ValuesLength := closed_values_length s (rev vs) ts3 Hvstype.
+    have Enough : length extr1 <= length vs.
+    { apply/leP.
+      rewrite List.length_app lift_closed_result_length in Inputs.
+      rewrite !length_is_size in Inputs ValuesLength |- *.
+      rewrite size_rev in ValuesLength.
+      clear -Inputs ValuesLength. lia. }
+    by rewrite Enough in Hvslen.
 Defined.
 
 Definition run_ctx_invoke hs s ccs vs0 es0 a d:
@@ -257,7 +297,7 @@ Proof.
       destruct (length vs0 >= n) eqn:Hlen.
       (* true *)
       * destruct (split_n vs0 n) as [vs' vs''] eqn:Hsplit.
-        destruct (default_vals ts) as [zs |] eqn:Hdefault.
+         destruct (runtime_default_vals s.(s_types) i.(inst_defined_types) ts) as [zs |] eqn:Hdefault.
         (* All types are defaultable as of Wasm 2.0. This potentially needs a 
            small change in 3.0 where non-defaultable types are introduced. In particular,
            the `default_vals` function needs to be made partial, and there should be
@@ -282,15 +322,15 @@ Proof.
           specialize (store_typing_func_lookup Hstype Heqo) as [ft [<- [_ Hfunctype]]].
           simpl in *.
           remove_bools_options.
-          destruct f.
-          destruct Hfunctype as [Heqtf [Hetype Hdefault']].
+          destruct Hfunctype as [_ Hdefault'].
           by apply Hdefault'.
         }
-      * (* not enough arguments *)
-        resolve_invalid_typing.
-        unfold ext_func_typing in Hconjr.
-        remove_bools_options; simpl in *.
-        by discriminate_size.
+       * (* not enough arguments *)
+         resolve_invalid_typing.
+         destruct extr as [caller_args caller_results].
+          pose proof (closed_function_view_arities _ _ _ _ _ _ _
+           Hstype Heqo (Logic.eq_refl _) Hconjr) as [Arguments Results].
+         by discriminate_size.
     + (* FC_func_host (Tf t1s t2s) cl' *)
       remember (length t1s) as n eqn:?.
       remember (length t2s) as m eqn:?.
@@ -343,12 +383,13 @@ Proof.
           by rewrite size_rev size_takel => //. }
       * (* false *)
         resolve_invalid_typing.
-        unfold ext_func_typing in Hconjr.
-        remove_bools_options; simpl in *.
+        destruct extr as [caller_args caller_results].
+        pose proof (closed_function_view_arities _ _ _ _ _ _ _
+          Hstype Heqo (Logic.eq_refl _) Hconjr) as [Arguments Results].
         by discriminate_size.
   - (* None *)
     resolve_invalid_typing.
-    unfold ext_func_typing in Hconjr.
+    unfold closed_function_view, lookup_func_defined_type in Hconjr.
     by remove_bools_options; simpl in *.
 Defined.
 
@@ -387,20 +428,22 @@ Proof.
       (* Not enough values *)
       * resolve_invalid_typing; simpl in *.
         clear Hretcons Hretnil.
-        unfold ext_func_typing in Hconjl0.
-        rewrite Heqo Hcltype in Hconjl0.
-        injection Hconjl0 as <- <-.
-        by discriminate_size.
+         pose proof (closed_function_view_arities _ _ _ _ _ _ _
+           Hstype Heqo Hcltype Hconjl0) as [Arguments Results].
+         by discriminate_size.
     (* Arity mismatch *)
     + resolve_invalid_typing; simpl in *.
-      unfold ext_func_typing in Hconjl0.
-      rewrite Heqo Hcltype in Hconjl0.
-      injection Hconjl0 as <- <-.
+      pose proof (closed_function_view_arities _ _ _ _ _ _ _
+        Hstype Heqo Hcltype Hconjl0) as [Arguments Results].
       apply Hfarity.
-      injection Hretcons => //; by destruct ccs'.
+      have Nonempty : rcons ccs' cc0 != nil by destruct ccs'.
+      specialize (Hretcons Nonempty).
+      injection Hretcons as Arity.
+      rewrite lift_closed_result_length in Arity.
+      by rewrite -Results.
   (* None *)
   - resolve_invalid_typing.
-    unfold ext_func_typing in Hconjl0.
+    unfold closed_function_view, lookup_func_defined_type in Hconjl0.
     by remove_bools_options; simpl in *.
 Defined.
 
@@ -429,7 +472,58 @@ Ltac get_cons_chain_firstn T l n :=
 
 Ltac resolve_invalid_value_aux_expanded :=
   repeat match goal with
-  | Hvaltype: is_true (values_typing ?s (rev (cons ?t ?vts1)) ?vts2),
+  | Hsub: context [interpret_operand_results _ (_ ++ _)] |- _ =>
+    unfold interpret_operand_results in Hsub; rewrite List.map_app in Hsub;
+    cbn [List.map] in Hsub
+  | Hsub: context [List.app ?left (List.app ?middle ?right)] |- _ =>
+    rewrite (List.app_assoc left middle right) in Hsub
+  | Hsub: context [List.map ?f (List.app ?left ?right)] |- _ =>
+    rewrite (List.map_app f left right) in Hsub; cbn [List.map] in Hsub
+  | Hsub: context [List.map ?f (seq.cat ?left ?right)] |- _ =>
+    rewrite (List.map_app f left right) in Hsub; cbn [List.map] in Hsub
+  | Hsub: closed_instr_subtyping _ (Closed_ft (List.map _ (_ ++ _)) _) _ |- _ =>
+    rewrite List.map_app in Hsub
+  | Hsub: (exists p p' ins outs,
+      lift_closed_result_type ?actual = p ++ ins /\
+      ?result = p' ++ outs /\
+      closed_stack_results_subtyping ?registry p p' /\
+      closed_stack_results_subtyping ?registry ins ?inputs /\
+      closed_stack_results_subtyping ?registry ?outputs outs) |- _ =>
+      progress change (closed_instr_subtyping registry (Closed_ft inputs outputs)
+        (Closed_ft (lift_closed_result_type actual) result)) in Hsub
+  | Store: store_typing ?s,
+    Hvaltype: is_true (closed_values_typing ?s (rev (cons ?t ?vts1)) ?vts2),
+    Hsub: closed_instr_subtyping _ (Closed_ft (cons ?h ?l') _)
+      (Closed_ft (lift_closed_result_type ?vts2) _) |- _ =>
+      let n := get_cons_chain_length (cons h l') in
+      let T := type of t in
+      let ret := get_cons_chain_firstn T (cons t vts1) n in
+      match ret with
+      | (?top, ?rest) =>
+        let Typed := fresh "ClosedOperands" in
+        assert (Typed : closed_operands_typing s (rev top) (cons h l'));
+        [eapply closed_operand_top_typing;
+          [apply canonical_registry_validb_sound; exact (proj1 Store)
+          |exact Hvaltype|exact Hsub|reflexivity]
+        |clear Hsub; cbn -[closed_value_typing interpret_operand_type] in Typed;
+          repeat match goal with
+          | Parts : is_true (_ && _) |- _ => move/andP: Parts => [? ?]
+          end]
+      end
+  | Store: store_typing ?s,
+    Hvaltype: is_true (closed_values_typing ?s (rev (cons ?t ?rest)) ?actual),
+    Hsub: closed_instr_subtyping _ (Closed_ft (List.app ?before [::?last]) _)
+      (Closed_ft (lift_closed_result_type ?actual) _) |- _ =>
+    let Typed := fresh "ClosedTop" in
+    assert (Typed : closed_operands_typing s (rev [::t]) [::last]);
+    [eapply closed_operand_top_suffix;
+      [apply canonical_registry_validb_sound; exact (proj1 Store)
+      |exact Hvaltype|exact Hsub|reflexivity]
+    |clear Hsub; cbn -[closed_value_typing interpret_operand_type] in Typed;
+      repeat match goal with
+      | Parts : is_true (_ && _) |- _ => move/andP: Parts => [? ?]
+      end]
+  | Hvaltype: is_true (values_typing ?s ?names (rev (cons ?t ?vts1)) ?vts2),
       Hsub: (Tf (cons ?h ?l') _ <ti: Tf ?vts2 _) |- _ =>
       let n := get_cons_chain_length (cons h l') in
       let T := type of t in
@@ -437,26 +531,57 @@ Ltac resolve_invalid_value_aux_expanded :=
       match ret with
       | (?l_extract, ?rest) =>
           let Hopsub := fresh "Hopsub" in
-          assert (values_typing s l_extract (rev (cons h l'))) as Hopsub;
+          assert (values_typing s names l_extract (rev (cons h l'))) as Hopsub;
           [ eapply operand_subtyping; by [apply Hvaltype | apply Hsub | reflexivity ] | clear Hsub; simpl in * => //= ]
       end
     end.
 
 Ltac resolve_invalid_value :=
   repeat (resolve_invalid_value_aux_expanded; match goal with
+  | Typed: is_true (closed_operand_typing _ _ (interpret_operand_type _ _)) |- _ =>
+    rewrite interpret_operand_acceptance in Typed
+  | Typed: is_true (closed_value_typing _ (VAL_ref _) (CV_num _)) |- _ =>
+    rewrite closed_ref_not_num in Typed; discriminate
+  | Typed: is_true (closed_value_typing _ (VAL_ref _) (CV_vec _)) |- _ =>
+    rewrite closed_ref_not_vec in Typed; discriminate
+  | Typed: is_true (closed_value_typing _ (VAL_vec _) (CV_num _)) |- _ =>
+    rewrite closed_vec_not_num in Typed; discriminate
+  | Typed: is_true (closed_value_typing _ (VAL_num _) (CV_vec _)) |- _ =>
+    rewrite closed_num_not_vec in Typed; discriminate
+  | Typed: is_true (closed_value_typing _ (VAL_num _) (CV_ref _ _)) |- _ =>
+    rewrite closed_num_not_ref in Typed; discriminate
+  | Typed: is_true (closed_value_typing _ (VAL_vec _) (CV_ref _ _)) |- _ =>
+    rewrite closed_vec_not_ref in Typed; discriminate
+  | Typed: is_true (closed_value_typing ?s (VAL_num ?number) (CV_num ?expected)) |- _ =>
+    let Equal := fresh "NumExpected" in
+    pose proof (closed_num_expected s number expected Typed) as Equal;
+    let Numeric := fresh "H" in
+    assert (Numeric : T_num (typeof_num number) <t: T_num expected) by
+      (rewrite Equal; apply value_subtyping_eq);
+    clear Typed Equal
   | Href : is_true (is_ref_t ?t) |- _ =>
       is_var t; destruct t; simpl in Href => //
-  | Hvaltype : is_true (values_typing _ (rev (_ :: _)) _),
+  | Hvaltype : is_true (values_typing _ _ (rev (_ :: _)) _),
     Hsub: (Tf (_ ++ [::_]) _ <ti: _) |- _ =>
       specialize (operand_subtyping_suffix1 Hvaltype Hsub) as Hopsub; clear Hsub; simpl in * => //=
-  | Hvaltype : is_true (values_typing _ (rev (_ :: _)) _),
+  | Hvaltype : is_true (values_typing _ _ (rev (_ :: _)) _),
     Hsub: (Tf (_ ++ _ ++ [::_]) _ <ti: _) |- _ =>
       rewrite catA in Hsub; specialize (operand_subtyping_suffix1 Hvaltype Hsub) as Hopsub; clear Hsub; simpl in * => //=
-  | Hvaltype : is_true (value_typing _ (VAL_ref _) (T_num _)) |- _ =>
+  | Hvaltype : is_true (value_typing _ _ (VAL_ref _) (T_num _)) |- _ =>
       apply value_typing_ref_impl in Hvaltype as [? Hteq] => //
-  | Hvaltype : is_true (value_typing _ (VAL_num _) (T_num _)) |- _ =>
-      unfold value_typing in Hvaltype; simpl in Hvaltype; remove_bools_options => //
-  | Hvaltype : is_true (value_typing _ (VAL_ref _) (T_vec _)) |- _ =>
+  | Hvaltype : is_true (value_typing _ _ (VAL_num ?v) ?expected) |- _ =>
+      let E := fresh "NumExpected" in
+       pose proof (value_num_expected Hvaltype) as E;
+       try discriminate E;
+      let H := fresh "NumericSubtype" in
+      assert (T_num (typeof_num v) <t: expected) as H by
+        (rewrite E; apply value_subtyping_eq);
+      clear Hvaltype E; rename H into Hvaltype
+  | Hvaltype : is_true (value_typing _ _ (VAL_vec _) (T_num _)) |- _ =>
+      apply value_vec_expected in Hvaltype; discriminate
+  | Hvaltype : is_true (value_typing _ _ (VAL_vec _) (T_ref _)) |- _ =>
+      apply value_vec_expected in Hvaltype; discriminate
+  | Hvaltype : is_true (value_typing _ _ (VAL_ref _) (T_vec _)) |- _ =>
       apply value_typing_ref_impl in Hvaltype as [? Hteq] => //
   | _ => simpl in *; remove_bools_options; subst => //
 end).
@@ -485,7 +610,112 @@ Ltac unfold_frame_type Hftype :=
   unfold frame_typing in Hftype; remove_bools_options; simpl in *;
   let ts0 := fresh "ts0" in
   let Hvaltype := fresh "Hvaltype" in
-  destruct Hftype as [ts0 [-> Hvaltype]]; simpl in *.
+   destruct Hftype as [ts0 [-> Hvaltype]]; simpl in *.
+
+Ltac resolve_missing_table :=
+  match goal with
+  | Context : close_t_context ?source = Some _,
+    Frame : closed_frame_typing ?s ?frame ?C,
+    Lookup : lookup_N (tc_tables ?source) ?index = Some _,
+    Missing : stab ?s (f_inst ?frame) ?index = None |- _ =>
+    let Count := fresh "TableCount" in
+    let Bound := fresh "TableBound" in
+    pose proof (close_context_tables_length _ _ Context) as Count;
+    simpl in Count;
+    pose proof (nth_error_Some_length Lookup) as Bound;
+    rewrite -Count in Bound;
+    let table := fresh "table" in
+    let Exists := fresh "TableExists" in
+    destruct (closed_frame_table_exists _ _ _ _ Frame Bound) as [table Exists];
+    rewrite Missing in Exists; discriminate
+  end.
+
+Ltac resolve_missing_elem :=
+  match goal with
+  | Context : close_t_context ?source = Some _,
+    Frame : closed_frame_typing ?s ?frame ?C,
+    Lookup : lookup_N (tc_elems ?source) ?index = Some _ |- _ =>
+    let Count := fresh "ElemCount" in
+    let Bound := fresh "ElemBound" in
+    pose proof (close_context_elems_length _ _ Context) as Count;
+    simpl in Count;
+    pose proof (nth_error_Some_length Lookup) as Bound;
+    rewrite -Count in Bound;
+    let address := fresh "ElemAddress" in
+    let elem := fresh "ElemValue" in
+    let Address := fresh "ElemInstance" in
+    let Elem := fresh "ElemStore" in
+    destruct (closed_frame_elem_exists _ _ _ _ Frame Bound)
+      as [address [elem [Address Elem]]];
+    match goal with
+    | Missing : selem _ _ index = None |- _ =>
+      unfold selem in Missing; rewrite Address Elem in Missing; discriminate
+    | Missing : selem_drop _ _ index = None |- _ =>
+      unfold selem_drop in Missing; rewrite Address Elem in Missing; discriminate
+    end
+  end.
+
+Ltac resolve_missing_memory :=
+  match goal with
+  | Context : close_t_context ?source = Some _,
+    Frame : closed_frame_typing ?s ?frame ?C,
+    Lookup : lookup_N (tc_mems ?source) _ = Some _,
+    Missing : smem ?s _ = None |- _ =>
+    let Memories := fresh "FrameMemories" in
+    pose proof (close_context_memories _ _ Context) as Memories;
+    simpl in Memories;
+    let Nonempty := fresh "HasMemory" in
+    assert (Nonempty : tc_mems C <> nil) by
+      (let Empty := fresh "Empty" in
+       intro Empty; rewrite -Memories Empty in Lookup; discriminate);
+    let mem := fresh "mem" in
+    let Exists := fresh "MemoryExists" in
+    destruct (closed_frame_memory_exists _ _ _ Frame Nonempty) as [mem Exists];
+    rewrite Missing in Exists; discriminate
+  end.
+
+Ltac resolve_missing_data :=
+  match goal with
+  | Context : close_t_context ?source = Some _,
+    Frame : closed_frame_typing ?s ?frame ?C,
+    Lookup : lookup_N (tc_datas ?source) ?index = Some _ |- _ =>
+    let Datas := fresh "DataCount" in
+    let Bound := fresh "DataBound" in
+    pose proof (close_context_datas _ _ Context) as Datas;
+    simpl in Datas;
+    pose proof (nth_error_Some_length Lookup) as Bound;
+    rewrite -Datas in Bound;
+    let address := fresh "DataAddress" in
+    let data := fresh "DataValue" in
+    let Address := fresh "DataInstance" in
+    let Data := fresh "DataStore" in
+    destruct (closed_frame_data_exists _ _ _ _ Frame Bound)
+      as [address [data [Address Data]]];
+    match goal with
+    | Missing : sdata _ _ index = None |- _ =>
+      unfold sdata in Missing; rewrite Address Data in Missing; discriminate
+    | Missing : sdata_drop _ _ index = None |- _ =>
+      unfold sdata_drop in Missing; rewrite Address Data in Missing; discriminate
+    end
+  end.
+
+Ltac resolve_missing_function :=
+  match goal with
+  | Context : close_t_context ?source = Some _,
+    Frame : closed_frame_typing ?s ?frame ?C,
+    Lookup : lookup_N (tc_funcs ?source) ?index = Some _,
+    Missing : lookup_N _ ?index = None |- _ =>
+    let Count := fresh "FunctionCount" in
+    let Bound := fresh "FunctionBound" in
+    pose proof (close_context_functions_length _ _ Context) as Count;
+    simpl in Count;
+    pose proof (nth_error_Some_length Lookup) as Bound;
+    rewrite -Count in Bound;
+    let address := fresh "address" in
+    let Exists := fresh "FunctionExists" in
+    destruct (closed_frame_function_index _ _ _ _ Frame Bound) as [address Exists];
+    rewrite Missing in Exists; discriminate
+  end.
 
 Notation "$u32oz v" := (Wasm_int.int_of_Z i32m v) (at level 90).
 Notation "$zou32 v" := (Wasm_int.Z_of_uint i32m v) (at level 90).
@@ -621,7 +851,8 @@ Proof.
       (* AI_return_invoke a *) a |
       (* AI_label ln les es *) ln les es |
       (* AI_frame ln lf es *) ln lf es |
-      (* AI_ref_i31 n *) n ].
+      (* AI_ref_i31 n *) n |
+      (* AI_ref_null h *) h ].
 
     (* AI_basic (BI_const _) *)
     (* This along with other value instructions are invalid, as it doesn't respect
@@ -639,7 +870,9 @@ the condition that all values should live in the operand stack. *)
         by apply r_simple, rs_unop.
       (* Ill-typed *)
       + resolve_invalid_typing; resolve_invalid_value.
-        apply num_subtyping in H; injection H as ->.
+         match goal with Numeric : is_true (T_num _ <t: T_num _) |- _ =>
+           apply num_subtyping in Numeric; injection Numeric as ->
+         end.
         unfold unop_typecheck in Htc.
         by rewrite Hconjr eq_refl in Htc.
 
@@ -663,8 +896,12 @@ the condition that all values should live in the operand stack. *)
       (* Ill-typed *)
       {
         resolve_invalid_typing; resolve_invalid_value.
-        apply num_subtyping in H; injection H as ->.
-        apply num_subtyping in H0; injection H0 as Hteq.
+        match goal with Numeric : is_true (T_num _ <t: T_num _) |- _ =>
+          apply num_subtyping in Numeric; injection Numeric as ->
+        end.
+        match goal with Numeric : is_true (T_num _ <t: T_num _) |- _ =>
+          apply num_subtyping in Numeric; injection Numeric as Hteq
+        end.
         unfold binop_typecheck in Htc.
         by rewrite Hconjr Hteq eq_refl in Htc.
       }
@@ -702,8 +939,12 @@ the condition that all values should live in the operand stack. *)
       (* Ill-typed *)
       {
         resolve_invalid_typing; resolve_invalid_value.
-        apply num_subtyping in H; injection H as ->.
-        apply num_subtyping in H0; injection H0 as Hteq.
+        match goal with Numeric : is_true (T_num _ <t: T_num _) |- _ =>
+          apply num_subtyping in Numeric; injection Numeric as ->
+        end.
+        match goal with Numeric : is_true (T_num _ <t: T_num _) |- _ =>
+          apply num_subtyping in Numeric; injection Numeric as Hteq
+        end.
         unfold relop_typecheck in Htc.
         by rewrite Hconjr Hteq eq_refl in Htc.
       }
@@ -731,7 +972,9 @@ the condition that all values should live in the operand stack. *)
         * by resolve_invalid_typing; lias.
       (* false *)
       + discriminate_value_type.
-        apply num_subtyping in H; by inversion H; subst.
+        match goal with Numeric : is_true (T_num _ <t: T_num _) |- _ =>
+          apply num_subtyping in Numeric; inversion Numeric; subst
+        end; done.
 
     (* AI_basic BI_const_vec v *)
     - apply RSC_invalid => /=; by move => [??].
@@ -806,7 +1049,19 @@ the condition that all values should live in the operand stack. *)
       + by resolve_invalid_typing; lias.
       
     (* AI_basic BI_ref_null t *)
-    - apply RSC_invalid => /=; by move => [??].
+    - destruct (lower_source_null s fc.(FC_frame).(f_inst) t) as [ref|] eqn:Lowered.
+      + apply <<hs, (s, (fc, lcs) :: ccs', (VAL_ref ref :: vs0, es0), None), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        by apply r_ref_null.
+      + resolve_invalid_typing.
+        destruct (closed_frame_source_context _ _ _ Hftype)
+          as [ActualSource [Instance [InstanceTypes InstanceNames]]].
+        destruct (closing_context_metadata _ _ HSourceContext)
+          as [SourceTypes SourceNames].
+        simpl in SourceTypes.
+        rewrite -SourceTypes InstanceTypes in Hconjr.
+        destruct (inst_typing_null_total _ _ _ _ Instance Hconjr) as [ref Lowered'].
+        by rewrite Lowered in Lowered'.
 
     (* AI_basic BI_ref_is_null *)
     - destruct vs0 as [|v vs0]; first by no_args.
@@ -837,8 +1092,11 @@ the condition that all values should live in the operand stack. *)
         resolve_reduce_ctx vs0 es0.
         by apply r_ref_func.
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        eapply inst_typing_func_lookup_inv in Hconjl0 as [f [Hext Hnthf]]; eauto.
+        have Count := close_context_functions_length _ _ HSourceContext.
+        simpl in Count.
+        have Bound := nth_error_Some_length Hconjl0.
+        rewrite -Count in Bound.
+        destruct (closed_frame_function_index _ _ _ _ Hftype Bound) as [f Hnthf].
         by rewrite Hnthf in Hnth.
       
     (* AI_basic BI_drop *)
@@ -872,9 +1130,13 @@ the condition that all values should live in the operand stack. *)
         by eapply r_local_get; subst.
       (* None *)
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        erewrite inst_t_context_local_empty in Hconjr; eauto.
-        by discriminate_size.
+        have Count := close_context_locals_length _ _ HSourceContext.
+        simpl in Count.
+        have Locals := closed_frame_locals_length Hftype.
+        have Bound := nth_error_Some_length Hconjr.
+        rewrite -Count Locals in Bound.
+        unfold lookup_N in Heqo. apply List.nth_error_None in Heqo.
+        exact (Nat.lt_irrefl _ (Nat.le_lt_trans _ _ _ Heqo Bound)).
         
     (* AI_basic (BI_local_set j) *)
     - destruct vs0 as [|v vs0]; first by no_args.
@@ -886,10 +1148,16 @@ the condition that all values should live in the operand stack. *)
         eapply r_local_set with (vd := v) => //=; by lias.
       (* false *)
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        erewrite inst_t_context_local_empty in Hconjr; eauto.
-        move/N.ltb_spec0 in Hlen.
-        by discriminate_size.
+        have Count := close_context_locals_length _ _ HSourceContext.
+        simpl in Count.
+        have Locals := closed_frame_locals_length Hftype.
+        have Bound := nth_error_Some_length Hconjr.
+        rewrite -Count Locals in Bound.
+        have Enough : N.ltb j (N.of_nat (length (f_locs (FC_frame fc)) )) = true.
+        { apply N.ltb_lt. unfold N.lt.
+          rewrite Nnat.N2Nat.inj_compare. apply Nat.compare_lt_iff.
+          rewrite Nat2N.id. exact Bound. }
+        by rewrite Enough in Hlen.
 
     (* AI_basic (BI_local_tee j) *)
     - destruct vs0 as [|v vs0]; first by no_args.
@@ -906,11 +1174,16 @@ the condition that all values should live in the operand stack. *)
         by apply r_global_get.
       (* None *)
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        * by inst_typing_lookup; remove_bools_options.
-        * eapply inst_typing_global_lookup_inv in Hoption as [? [? Hnthg]]; eauto.
-          by simplify_multieq.
+        have Count := close_context_globals_length _ _ HSourceContext.
+        simpl in Count.
+        match goal with Lookup : lookup_N (tc_globals SourceContext) j = Some _ |- _ =>
+          pose proof (nth_error_Some_length Lookup) as Bound
+        end.
+        rewrite -Count in Bound.
+        destruct (closed_frame_global_exists _ _ _ _ Hftype Bound)
+          as [address [global [Address Global]]].
+        unfold sglob_val, sglob, sglob_ind in Hsglob.
+        rewrite Address /= Global in Hsglob. discriminate.
 
     (* AI_basic (BI_global_set j) *)
     - destruct vs0 as [|v vs0]; first by no_args.
@@ -922,11 +1195,16 @@ the condition that all values should live in the operand stack. *)
         by eapply r_global_set; subst.
       (* None *)
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        * by inst_typing_lookup; remove_bools_options.
-        * eapply inst_typing_global_lookup_inv in Hconjl0 as [? [? Hnthg]]; eauto.
-          by simplify_multieq.
+        have Count := close_context_globals_length _ _ HSourceContext.
+        simpl in Count.
+        match goal with Lookup : lookup_N (tc_globals SourceContext) j = Some _ |- _ =>
+          pose proof (nth_error_Some_length Lookup) as Bound
+        end.
+        rewrite -Count in Bound.
+        destruct (closed_frame_global_exists _ _ _ _ Hftype Bound)
+          as [address [global [Address Global]]].
+        unfold supdate_glob, sglob_ind, supdate_glob_s in Hsupdate.
+        rewrite Address /= Global in Hsupdate. discriminate.
 
     (* AI_basic (BI_table_get x) *)
     - destruct vs0 as [|v vs0]; first by no_args.
@@ -965,12 +1243,7 @@ the condition that all values should live in the operand stack. *)
         by eapply r_table_size; eauto.
       (* None *)
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        * inst_typing_lookup.
-          by rewrite Hstab in Hexttabt.
-        * eapply inst_typing_table_lookup_inv in Hconjr as [? [? Hnthtab]]; eauto.
-          by simplify_multieq.
+        resolve_missing_table.
 
     (* AI_basic (BI_table_grow x) *)
     - destruct vs0 as [|v2 [|v1 vs0]]; try by no_args.
@@ -1015,12 +1288,7 @@ the condition that all values should live in the operand stack. *)
           }
       (* None *)
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        * inst_typing_lookup.
-          by rewrite Hstab in Hexttabt.
-        * eapply inst_typing_table_lookup_inv in Hconjl0 as [? [? Hnthtab]]; eauto.
-          by simplify_multieq.
+        resolve_missing_table.
           
     (* AI_basic (BI_table_copy x y) *)
     - destruct vs0 as [|n [|src [|dst vs0]]]; try by no_args.
@@ -1074,25 +1342,11 @@ the condition that all values should live in the operand stack. *)
 
         (* staby = None *)
         * resolve_invalid_typing.
-          unfold_frame_type Hftype.
-          unfold_store_operations.
-          {  inst_typing_lookup.
-             by rewrite Hstaby in Hexttabt.
-          }
-          { eapply inst_typing_table_lookup_inv in Hconjl2 as [? [? Hnthtab]]; eauto.
-            by simplify_multieq.
-          }
+          resolve_missing_table.
           
       (* stabx = None *)
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        {  inst_typing_lookup.
-           by rewrite Hstabx in Hexttabt.
-        }
-        { eapply inst_typing_table_lookup_inv in Hconjl0 as [? [? Hnthtab]]; eauto.
-          by simplify_multieq.
-        }
+        resolve_missing_table.
         
     (* AI_basic (BI_table_init x y) *)
     - destruct vs0 as [|n [|src [|dst vs0]]]; try by no_args.
@@ -1161,19 +1415,11 @@ the condition that all values should live in the operand stack. *)
 
         (* selem = None *)
         * resolve_invalid_typing.
-          unfold_frame_type Hftype.
-          unfold_store_operations; eapply inst_typing_elem_lookup_inv in Hconjr as [? [? [? [??]]]]; eauto; by simplify_multieq.
+          resolve_missing_elem.
           
       (* stab = None *)
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        {  inst_typing_lookup.
-           by rewrite Hstab in Hexttabt.
-        }
-        { eapply inst_typing_table_lookup_inv in Hconjl0 as [? [??]]; eauto.
-          by simplify_multieq.
-        }
+        resolve_missing_table.
         
     (* AI_basic BI_elem_drop x *)
     - destruct (selem_drop s fc.(FC_frame).(f_inst) x) as [s'|] eqn:Hs'.
@@ -1181,14 +1427,7 @@ the condition that all values should live in the operand stack. *)
         resolve_reduce_ctx vs0 es0.
         by apply r_elem_drop.
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        { eapply inst_typing_elem_lookup_inv in Hconjr as [? [? [? [? ?]]]]; eauto.
-          by simplify_multieq.
-        }
-        { eapply inst_typing_elem_lookup_inv in Hconjr as [? [? [? [? ?]]]]; eauto.
-          by simplify_multieq.
-        }
+        resolve_missing_elem.
 
     (* AI_basic (BI_load t ops (Some (tp, sx)) marg) *)
     - destruct vs0 as [|v vs0]; first by no_args.
@@ -1219,12 +1458,7 @@ the condition that all values should live in the operand stack. *)
       }
       (* None *)
       { resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        { inst_typing_lookup; by remove_bools_options. }
-        { eapply inst_typing_mem_lookup_inv in Hconjl0 as [? [??]]; eauto.
-          by simplify_multieq.
-        }
+        resolve_missing_memory.
       }
 
     (* AI_basic (BI_load_vec lvarg marg) *)
@@ -1243,12 +1477,7 @@ the condition that all values should live in the operand stack. *)
       }
       (* None *)
       { resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        { inst_typing_lookup; by remove_bools_options. }
-        { eapply inst_typing_mem_lookup_inv in Hconjl0 as [? [??]]; eauto.
-          by simplify_multieq.
-        }
+        resolve_missing_memory.
       }
 
     (* AI_basic (BI_load_vec_lane width marg x) *)
@@ -1268,19 +1497,18 @@ the condition that all values should live in the operand stack. *)
       }
       (* None *)
       { resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        { inst_typing_lookup; by remove_bools_options. }
-        { eapply inst_typing_mem_lookup_inv in Hconjl0 as [? [??]]; eauto.
-          by simplify_multieq.
-        }
+        resolve_missing_memory.
       }
 
     (* AI_basic (BI_store t (Some tp) a off) *)
     - destruct vs0 as [|v2 [|v1 vs0]]; try by no_args.
       assert_i32 v1.
       assert_value_num v2.
-      destruct (typeof_num v2 == t) eqn:Heq; move/eqP in Heq; last by discriminate_value_type; apply num_subtyping in H; inversion H; subst.
+      destruct (typeof_num v2 == t) eqn:Heq; move/eqP in Heq.
+      2: { discriminate_value_type.
+           match goal with Numeric : is_true (T_num _ <t: T_num _) |- _ =>
+             apply num_subtyping in Numeric; inversion Numeric; subst
+           end; contradiction. }
       destruct op as [tp | ].
       (* packed *)
       + destruct (smem_store_packed s fc.(FC_frame).(f_inst) ($nou32 v1) marg.(memarg_offset) v2 tp) as [s' | ] eqn:Hsmem.
@@ -1333,15 +1561,7 @@ the condition that all values should live in the operand stack. *)
         by subst; eapply r_memory_size; eauto.
       (* None *)
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        { eapply inst_typing_mem_lookup_inv in Hconjr as [? [Hextmt ?]]; eauto.
-          unfold ext_mem_typing in Hextmt; remove_bools_options.
-          by simplify_multieq.
-        }
-        { eapply inst_typing_mem_lookup_inv in Hconjr as [? [??]]; eauto.
-          by simplify_multieq.
-        }
+        resolve_missing_memory.
 
     (* AI_basic BI_memory_grow *)
     - destruct vs0 as [|v vs0]; first by no_args.
@@ -1389,15 +1609,7 @@ the condition that all values should live in the operand stack. *)
           }
       (* None *)
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        { eapply inst_typing_mem_lookup_inv in Hconjr as [? [Hextmt ?]]; eauto.
-          unfold ext_mem_typing in Hextmt; remove_bools_options.
-          by simplify_multieq.
-        }
-        { eapply inst_typing_mem_lookup_inv in Hconjr as [? [??]]; eauto.
-          by simplify_multieq.
-        }
+        resolve_missing_memory.
         
     (* AI_basic BI_memory_copy *)
     - destruct vs0 as [|n [|src [|dst vs0]]]; try by no_args.
@@ -1448,15 +1660,7 @@ the condition that all values should live in the operand stack. *)
         }
       (* None *)
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        { eapply inst_typing_mem_lookup_inv in Hconjr as [? [Hextmt ?]]; eauto.
-          unfold ext_mem_typing in Hextmt; remove_bools_options.
-          by simplify_multieq.
-        }
-        { eapply inst_typing_mem_lookup_inv in Hconjr as [? [??]]; eauto.
-          by simplify_multieq.
-        }
+        resolve_missing_memory.
         
     (* AI_basic BI_memory_init *)
     - destruct vs0 as [|n [|src [|dst vs0]]]; try by no_args.
@@ -1525,26 +1729,11 @@ the condition that all values should live in the operand stack. *)
 
         (* sdata = None *)
         * resolve_invalid_typing.
-          unfold_frame_type Hftype.
-          unfold_store_operations.
-          { eapply inst_typing_data_lookup_inv in Hconjr0 as [? [? [? [??]]]]; eauto.
-            by simplify_multieq.
-          }
-          { eapply inst_typing_data_lookup_inv in Hconjr0 as [? [? [? [??]]]]; eauto.
-            by simplify_multieq.
-          }
+          resolve_missing_data.
 
       (* None *)
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        { eapply inst_typing_mem_lookup_inv in Hconjl0 as [? [Hextmt ?]]; eauto.
-          unfold ext_mem_typing in Hextmt; remove_bools_options.
-          by simplify_multieq.
-        }
-        { eapply inst_typing_mem_lookup_inv in Hconjl0 as [? [??]]; eauto.
-          by simplify_multieq.
-        }
+        resolve_missing_memory.
           
     (* AI_basic BI_data_drop x *)
     - destruct (sdata_drop s fc.(FC_frame).(f_inst) x) as [s'|] eqn:Hs'.
@@ -1552,14 +1741,7 @@ the condition that all values should live in the operand stack. *)
         resolve_reduce_ctx vs0 es0.
         by apply r_data_drop.
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        { eapply inst_typing_data_lookup_inv in Hconjr as [? [? [? [??]]]]; eauto.
-          by simplify_multieq.
-        }
-        { eapply inst_typing_data_lookup_inv in Hconjr as [? [? [? [??]]]]; eauto.
-          by simplify_multieq.
-        }
+        resolve_missing_data.
 
     (* AI_basic BI_nop *)
     - apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), None), d>> => //=.
@@ -1594,14 +1776,16 @@ the condition that all values should live in the operand stack. *)
           by rewrite size_rev size_takel.
         (* false *)
         * resolve_invalid_typing.
-          unfold_frame_type Hftype.
-          erewrite <- inst_typing_expand_eq in Hconjl0; eauto. 
+          have FrameExpand := closed_frame_expand _ _ _ bt Hftype.
+          change (expand_t C bt = Some (Tf extr extr0)) in Hconjl0.
+          rewrite -FrameExpand in Hconjl0.
           rewrite Hconjl0 in Hexpand; injection Hexpand as <- <-.
           by discriminate_size.
       (* None *)
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        erewrite <- inst_typing_expand_eq in Hconjl0; eauto.
+        have FrameExpand := closed_frame_expand _ _ _ bt Hftype.
+        change (expand_t C bt = Some (Tf extr extr0)) in Hconjl0.
+        rewrite -FrameExpand in Hconjl0.
         by rewrite Hconjl0 in Hexpand.
 
     (* AI_basic (BI_loop bt es) *)
@@ -1627,14 +1811,16 @@ the condition that all values should live in the operand stack. *)
           by rewrite size_rev size_takel.
         (* false *)
         * resolve_invalid_typing.
-          unfold_frame_type Hftype.
-          erewrite <- inst_typing_expand_eq in Hconjl0; eauto.
+          have FrameExpand := closed_frame_expand _ _ _ bt Hftype.
+          change (expand_t C bt = Some (Tf extr extr0)) in Hconjl0.
+          rewrite -FrameExpand in Hconjl0.
           rewrite Hconjl0 in Hexpand; injection Hexpand as <- <-.
           by discriminate_size.
       (* None *)
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        erewrite <- inst_typing_expand_eq in Hconjl0; eauto.
+        have FrameExpand := closed_frame_expand _ _ _ bt Hftype.
+        change (expand_t C bt = Some (Tf extr extr0)) in Hconjl0.
+        rewrite -FrameExpand in Hconjl0.
         by rewrite Hconjl0 in Hexpand.
         
     (* AI_basic (BI_if tb es1 es2) *)
@@ -1696,9 +1882,7 @@ the condition that all values should live in the operand stack. *)
         by apply r_call.
       (* None *)
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        eapply inst_typing_func_lookup_inv in Hconjr as [? [??]]; eauto.
-        by simplify_multieq.
+        resolve_missing_function.
 
     (* AI_basic (BI_call_indirect x y) *)
     - destruct vs0 as [|v vs0]; first by no_args.
@@ -1713,7 +1897,7 @@ the condition that all values should live in the operand stack. *)
         (* funcref *)
         * destruct (lookup_N s.(s_funcs) a) as [cl | ] eqn:Hnthcl.
           (* Some *)
-          -- destruct (lookup_function_type (inst_types (f_inst (fc.(FC_frame)))) y == Some (cl_type cl)) eqn:Hcl; move/eqP in Hcl.
+          -- destruct (function_reference_match s (f_inst (fc.(FC_frame))) a y) eqn:Hcl.
             (* true *)
             ++ apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_invoke a)), d>> => //.
               resolve_reduce_ctx vs0 es0.
@@ -1724,35 +1908,20 @@ the condition that all values should live in the operand stack. *)
               by eapply r_call_indirect_failure_mismatch; subst; eauto.
           (* None *)
           -- resolve_invalid_typing.
-             unfold_frame_type Hftype.
-             unfold_store_operations.
-             resolve_store_inst_lookup.
-             destruct t1; remove_bools_options; simpl in *.
-             eapply all_projection in Hif1; eauto.
-             unfold value_typing in Hif1; simpl in Hif1.
-             unfold ext_func_typing in Hif1.
-             by remove_bools_options.
+             pose proof (closed_frame_funcref_table_element
+               _ _ _ _ _ _ _ _ _ _ Hstype Hftype HSourceContext Hconjl0 Hconjl1 Heqo) as TypedElement.
+             unfold closed_value_typing, typeof_closed_value,
+               typeof_closed_ref, lookup_func_defined_type in TypedElement.
+             by rewrite Hnthcl in TypedElement.
         (* externref *)
         * resolve_invalid_typing.
-          unfold_frame_type Hftype.
-          unfold_store_operations.
-          resolve_store_inst_lookup.
-          destruct t1; remove_bools_options; simpl in *.
-          eapply all_projection in Hif1; eauto.
-          unfold value_typing in Hif1; simpl in *.
-          simplify_multieq.
-          apply ref_subtyping in Hif1.
-          by rewrite Hconjl1 in Hif1.
+          pose proof (closed_frame_funcref_table_element
+            _ _ _ _ _ _ _ _ _ _ Hstype Hftype HSourceContext Hconjl0 Hconjl1 Heqo) as TypedElement.
+          discriminate.
         * resolve_invalid_typing.
-          unfold_frame_type Hftype.
-          unfold_store_operations.
-          resolve_store_inst_lookup.
-          destruct t1; remove_bools_options; simpl in *.
-          eapply all_projection in Hif1; eauto.
-          unfold value_typing in Hif1; simpl in *.
-          simplify_multieq.
-          apply ref_subtyping in Hif1.
-          by rewrite Hconjl1 in Hif1.
+          pose proof (closed_frame_funcref_table_element
+            _ _ _ _ _ _ _ _ _ _ Hstype Hftype HSourceContext Hconjl0 Hconjl1 Heqo) as TypedElement.
+          discriminate.
       (* None *)
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_trap)), d>> => //.
         resolve_reduce_ctx vs0 es0.
@@ -1767,9 +1936,7 @@ the condition that all values should live in the operand stack. *)
         by apply r_return_call, r_call.
       (* None *)
       + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        eapply inst_typing_func_lookup_inv in Hconjl0 as [? [??]]; eauto.
-        by simplify_multieq.
+        resolve_missing_function.
 
     (* AI_basic (BI_return_call_indirect x y) *)
     - destruct vs0 as [|v vs0]; first by no_args.
@@ -1785,7 +1952,7 @@ the condition that all values should live in the operand stack. *)
         (* funcref *)
         * destruct (lookup_N s.(s_funcs) a) as [cl | ] eqn:Hnthcl.
           (* Some *)
-          -- destruct (lookup_function_type (inst_types (f_inst (fc.(FC_frame)))) y == Some (cl_type cl)) eqn:Hcl; move/eqP in Hcl.
+          -- destruct (function_reference_match s (f_inst (fc.(FC_frame))) a y) eqn:Hcl.
             (* true *)
             ++ apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_return_invoke a)), d>> => //.
               resolve_reduce_ctx vs0 es0.
@@ -1798,35 +1965,20 @@ the condition that all values should live in the operand stack. *)
               by eapply r_return_call_indirect_failure, r_call_indirect_failure_mismatch; subst; eauto.
           (* None *)
           -- resolve_invalid_typing.
-             unfold_frame_type Hftype.
-             unfold_store_operations.
-             resolve_store_inst_lookup.
-             destruct t1; remove_bools_options; simpl in *.
-             eapply all_projection in Hif1; eauto.
-             unfold value_typing in Hif1; simpl in Hif1.
-             unfold ext_func_typing in Hif1.
-             by remove_bools_options.
+             pose proof (closed_frame_funcref_table_element
+               _ _ _ _ _ _ _ _ _ _ Hstype Hftype HSourceContext Hconjl0 Hconjl1 Heqo) as TypedElement.
+             unfold closed_value_typing, typeof_closed_value,
+               typeof_closed_ref, lookup_func_defined_type in TypedElement.
+             by rewrite Hnthcl in TypedElement.
         (* externref *)
         * resolve_invalid_typing.
-          unfold_frame_type Hftype.
-          unfold_store_operations.
-          resolve_store_inst_lookup.
-          destruct t1; remove_bools_options; simpl in *.
-          eapply all_projection in Hif1; eauto.
-          unfold value_typing in Hif1; simpl in *.
-          simplify_multieq.
-          apply ref_subtyping in Hif1.
-          by rewrite Hconjl1 in Hif1.
+          pose proof (closed_frame_funcref_table_element
+            _ _ _ _ _ _ _ _ _ _ Hstype Hftype HSourceContext Hconjl0 Hconjl1 Heqo) as TypedElement.
+          discriminate.
         * resolve_invalid_typing.
-          unfold_frame_type Hftype.
-          unfold_store_operations.
-          resolve_store_inst_lookup.
-          destruct t1; remove_bools_options; simpl in *.
-          eapply all_projection in Hif1; eauto.
-          unfold value_typing in Hif1; simpl in *.
-          simplify_multieq.
-          apply ref_subtyping in Hif1.
-          by rewrite Hconjl1 in Hif1.
+          pose proof (closed_frame_funcref_table_element
+            _ _ _ _ _ _ _ _ _ _ Hstype Hftype HSourceContext Hconjl0 Hconjl1 Heqo) as TypedElement.
+          discriminate.
       (* None *)
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_trap)), d>> => //.
         resolve_reduce_ctx vs0 es0.
@@ -1925,8 +2077,9 @@ the condition that all values should live in the operand stack. *)
       + { resolve_invalid_typing.
         repeat match goal with b : bool |- _ => destruct b end.
         all: resolve_invalid_value.
-        all: unfold value_typing in H; simpl in H;
-          destruct (ext_func_typing s a); by simpl in H. }
+        all: move: (function_reference_not_i31 s nil a true Hstype)
+          (function_reference_not_i31 s nil a false Hstype);
+          rewrite /value_typing /=; intros; congruence. }
       + { resolve_invalid_typing.
         repeat match goal with b : bool |- _ => destruct b end.
         all: resolve_invalid_value.
@@ -1992,6 +2145,8 @@ the condition that all values should live in the operand stack. *)
     (* AI_frame ln lf es *)
     - by apply RSC_invalid => /=; move => [??].
     (* AI_ref_i31 *)
+    - by apply RSC_invalid => /=; move => [??].
+    (* AI_ref_null *)
     - by apply RSC_invalid => /=; move => [??].
   }
 Defined.

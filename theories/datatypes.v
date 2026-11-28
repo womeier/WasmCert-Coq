@@ -235,6 +235,20 @@ Inductive closed_value_type : Set :=
 
 Definition closed_function_type := function_type_gen closed_value_type.
 
+(** Bottom belongs only to the internal operand-stack calculus. It is not a
+    value, declaration component, heap type, or binary syntax constructor. *)
+Inductive closed_operand_type : Set :=
+| CO_value : closed_value_type -> closed_operand_type
+| CO_bot : closed_operand_type.
+
+Definition closed_operand_result_type := list closed_operand_type.
+Definition lift_closed_result_type (ts : list closed_value_type) :
+    closed_operand_result_type := List.map CO_value ts.
+Definition lift_closed_function_type (tf : closed_function_type) :
+    function_type_gen closed_operand_type :=
+  let '(Closed_ft inputs outputs) := tf in
+  Closed_ft (lift_closed_result_type inputs) (lift_closed_result_type outputs).
+
 Record closed_reference_type : Set := Closed_ref {
   closed_ref_nullable : bool;
   closed_ref_heap : closed_heap_type;
@@ -318,7 +332,7 @@ Global types classify global variables, which hold a value and can either be mut
 
 [https://www.w3.org/TR/wasm-core-2/syntax/types.html#global-types]
 *)
-Record global_type_gen (V : Set) : Set := Build_global_type { (* tg *)
+Record global_type_gen (V : Type) : Type := Build_global_type { (* tg *)
   tg_mut : mutability;
   tg_t : V
 }.
@@ -921,19 +935,42 @@ as validation of an instruction sequence proceeds.
 
 Definition ok: Set := unit.
 
-Record t_context : Set := {
+Record t_context_gen (V R F O : Set) : Set := Build_t_context {
   tc_types : type_context;
-  tc_funcs : list function_type;
-  tc_tables : list table_type;
+  tc_funcs : list F;
+  tc_tables : list (table_type_gen R);
   tc_mems : list memory_type;
-  tc_globals : list global_type;
-  tc_elems : list reference_type;
+  tc_globals : list (global_type_gen V);
+  tc_elems : list R;
   tc_datas : list ok;
-  tc_locals : list value_type;
-  tc_labels : list result_type;
-  tc_return : option result_type;
+  tc_locals : list V;
+  tc_labels : list (list O);
+  tc_return : option (list O);
   tc_refs : list funcidx;
+  (* Empty during source validation; populated from the executing instance
+     for administrative/value typing. Not an alternative identity registry. *)
+  tc_defined_types : list defined_type;
 }.
+
+Arguments Build_t_context {V R F O} _ _ _ _ _ _ _ _ _ _ _ _.
+Arguments tc_types {V R F O} _.
+Arguments tc_funcs {V R F O} _.
+Arguments tc_tables {V R F O} _.
+Arguments tc_mems {V R F O} _.
+Arguments tc_globals {V R F O} _.
+Arguments tc_elems {V R F O} _.
+Arguments tc_datas {V R F O} _.
+Arguments tc_locals {V R F O} _.
+Arguments tc_labels {V R F O} _.
+Arguments tc_return {V R F O} _.
+Arguments tc_refs {V R F O} _.
+Arguments tc_defined_types {V R F O} _.
+
+Definition t_context := t_context_gen value_type reference_type function_type value_type.
+Definition closed_t_context :=
+  t_context_gen closed_value_type closed_reference_type closed_function_type closed_operand_type.
+Definition closed_result_type := list closed_value_type.
+Definition closed_instr_type := function_type_gen closed_operand_type.
 
 Inductive result : Type :=
 | result_values : list value -> result
@@ -960,7 +997,7 @@ never exceeds the maximum size of tabletype, if present.
 [https://www.w3.org/TR/wasm-core-2/exec/runtime.html#table-instances]
 *)
 Record tableinst : Set := {
-  tableinst_type : table_type;
+  tableinst_type : closed_table_type;
   tableinst_elem : list value_ref;
 }.
 
@@ -1002,7 +1039,7 @@ It is an invariant of the semantics that the value has a type equal to the value
 [https://www.w3.org/TR/wasm-core-2/exec/runtime.html#global-instances]
 *)
 Record globalinst : Type := {
-  g_type : global_type;
+  g_type : closed_global_type;
   g_val : value;
 }.
 
@@ -1014,7 +1051,7 @@ of references and their common type.
 [https://www.w3.org/TR/wasm-core-2/exec/runtime.html#element-instances]
 *)
 Record eleminst : Set := {
-  eleminst_type : reference_type;
+  eleminst_type : closed_reference_type;
   eleminst_elem : list value_ref;
 }.
 
@@ -1082,9 +1119,15 @@ Record moduleinst : Type := (* inst *) {
   inst_exports: list exportinst;  
   (* Source type index -> canonical closed identity in the shared store. *)
   inst_defined_types : list defined_type;
+  (* The consumer's source view of its component index spaces. Stored
+     components carry only closed descriptors; these declarations are checked
+     against them using inst_defined_types, never the producer's indices. *)
+  inst_context : t_context;
   }.
 
-Definition empty_moduleinst := Build_moduleinst nil nil nil nil nil nil nil nil nil.
+Definition empty_moduleinst :=
+  Build_moduleinst nil nil nil nil nil nil nil nil nil
+    (Build_t_context nil nil nil nil nil nil nil nil nil None nil nil).
 
 
 (** We assume a family of host functions. **)
@@ -1179,6 +1222,7 @@ Inductive administrative_instruction : Type := (* e *)
 | AI_label : nat -> list administrative_instruction -> list administrative_instruction -> administrative_instruction
 | AI_frame : nat -> frame -> list administrative_instruction -> administrative_instruction
 | AI_ref_i31 : i31bits -> administrative_instruction
+| AI_ref_null : heap_type -> administrative_instruction
 .
 
 (** std-doc:

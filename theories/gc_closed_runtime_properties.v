@@ -5,7 +5,7 @@
 From Wasm Require Import typing instantiation_spec gc_types gc_type_context
   gc_type_context_properties gc_declaration_typing
   gc_declaration_typing_properties gc_runtime_type_properties gc_type_transport.
-From Stdlib Require Import List Bool NArith.
+From Stdlib Require Import List Bool NArith Lia.
 From mathcomp Require Import ssrbool.
 Import ListNotations.
 
@@ -41,7 +41,7 @@ Theorem source_value_typing_correct s inst value source :
       close_value_type inst.(inst_defined_types) 0 source = Some expected /\
       closed_runtime_value_typing s value expected).
 Proof.
-  intro WF. unfold source_value_typing.
+  intro WF. unfold source_value_typing, value_typing.
   destruct (close_value_type inst.(inst_defined_types) 0 source) as [expected|] eqn:Closed.
   - rewrite closed_value_typing_correct by exact WF. split.
     + intro Typed. exists expected. auto.
@@ -85,7 +85,7 @@ Theorem lower_source_null_typed s inst heap value :
   lower_source_null s inst heap = Some value ->
   source_value_typing s inst (VAL_ref value) (T_ref (Ref_type true heap)) = true.
 Proof.
-  unfold lower_source_null, source_value_typing.
+  unfold lower_source_null, source_value_typing, value_typing.
   destruct (close_heap_type (inst_defined_types inst) 0 heap) as [expected|] eqn:Closed;
     [|discriminate].
   intro Lowered.
@@ -104,6 +104,167 @@ Proof.
   destruct (lookup_func_defined_type s address) as [id|] eqn:Identity; [|discriminate].
   rewrite (store_extension_native_function_identity _ _ _ _ Extension Identity).
   exact Principal.
+Qed.
+
+Lemma defined_matches_prefix base suffix a b :
+  defined_type_matches base a b = true ->
+  defined_type_matches (base ++ suffix) a b = true.
+Proof.
+  unfold defined_type_matches.
+  intro Match. apply defined_type_matches_fuel_sound in Match.
+  destruct Match as [n [Bound Path]].
+  assert (Embedding : registry_embedding (fun x => x) base (base ++ suffix)).
+  { apply registry_embedding_prefix. now exists suffix. }
+  pose proof (registry_embedding_path _ _ _ _ _ _ Embedding Path) as Transported.
+  rewrite !rename_defined_type_identity in Transported.
+  apply (defined_type_matches_fuel_complete _ _ _ _ Transported).
+  assert (Size : canonical_registry_size (base ++ suffix) =
+      canonical_registry_size base + canonical_registry_size suffix).
+  { clear - base suffix. induction base; simpl; lia. }
+  lia.
+Qed.
+
+Lemma defined_kind_prefix base suffix id kind :
+  defined_heap_kind base id = Some kind ->
+  defined_heap_kind (base ++ suffix) id = Some kind.
+Proof.
+  unfold defined_heap_kind.
+  destruct (expand_defined_type base id) as [declaration|] eqn:Expanded;
+    [|discriminate].
+  assert (Embedding : registry_embedding (fun x => x) base (base ++ suffix)).
+  { apply registry_embedding_prefix. now exists suffix. }
+  pose proof (registry_embedding_expansion _ _ _ _ _ Embedding Expanded) as Transported.
+  rewrite rename_defined_type_identity, rename_subtype_identity in Transported.
+  now rewrite Transported.
+Qed.
+
+Lemma closed_heap_matchesb_prefix base suffix a b :
+  closed_heap_matchesb base a b = true ->
+  closed_heap_matchesb (base ++ suffix) a b = true.
+Proof.
+  destruct a as [ha|[ra|da]], b as [hb|[rb|db]];
+    simpl; intro Match; try exact Match; try discriminate.
+  - destruct (defined_heap_kind base db) as [kind|] eqn:Kind; [|discriminate].
+    now rewrite (defined_kind_prefix _ suffix _ _ Kind).
+  - destruct (defined_heap_kind base da) as [kind|] eqn:Kind; [|discriminate].
+    now rewrite (defined_kind_prefix _ suffix _ _ Kind).
+  - now apply defined_matches_prefix.
+Qed.
+
+Lemma closed_value_matchesb_prefix base suffix a b :
+  closed_value_matchesb base a b = true ->
+  closed_value_matchesb (base ++ suffix) a b = true.
+Proof.
+  destruct a, b; simpl; intro Match; try exact Match; try discriminate.
+  apply andb_true_iff in Match as [Nullability Heap].
+  apply andb_true_iff. split; [exact Nullability|].
+  now apply closed_heap_matchesb_prefix.
+Qed.
+
+Lemma closed_value_validb_prefix base suffix value :
+  closed_value_validb base value = true ->
+  closed_value_validb (base ++ suffix) value = true.
+Proof.
+  rewrite !closed_value_validb_correct. intro Valid.
+  assert (Embedding : registry_embedding (fun x => x) base (base ++ suffix)).
+  { apply registry_embedding_prefix. now exists suffix. }
+  pose proof (registry_embedding_value_valid _ _ _ _ Embedding Valid) as Transported.
+  now rewrite rename_value_type_identity in Transported.
+Qed.
+
+Lemma closed_value_list_matchesb_prefix base suffix actual expected :
+  declaration_list_matchesb (closed_value_matchesb base) actual expected = true ->
+  declaration_list_matchesb (closed_value_matchesb (base ++ suffix)) actual expected = true.
+Proof.
+  revert expected. induction actual; destruct expected; simpl; try discriminate; auto.
+  rewrite !andb_true_iff. intros [Head Tail]. split.
+  - now apply closed_value_matchesb_prefix.
+  - now apply IHactual.
+Qed.
+
+Lemma source_value_matchesb_prefix base suffix actual_names expected_names actual expected :
+  source_value_matchesb base actual_names expected_names actual expected = true ->
+  source_value_matchesb (base ++ suffix) actual_names expected_names actual expected = true.
+Proof.
+  unfold source_value_matchesb.
+  destruct (close_value_type actual_names 0 actual) as [a|]; [|discriminate].
+  destruct (close_value_type expected_names 0 expected) as [b|]; [|discriminate].
+  rewrite !andb_true_iff. intros [[Actual Expected] Matches].
+  split; [split; now apply closed_value_validb_prefix|].
+  now apply closed_value_matchesb_prefix.
+Qed.
+
+Lemma source_results_matchb_prefix base suffix actual_names expected_names actual expected :
+  source_results_matchb base actual_names expected_names actual expected = true ->
+  source_results_matchb (base ++ suffix) actual_names expected_names actual expected = true.
+Proof.
+  unfold source_results_matchb. revert expected.
+  induction actual; destruct expected; simpl; try discriminate; auto.
+  rewrite !andb_true_iff. intros [Head Tail]. split.
+  - now apply source_value_matchesb_prefix.
+  - now apply IHactual.
+Qed.
+
+Lemma lower_closed_null_prefix base suffix heap ref :
+  lower_closed_null base heap = Some ref ->
+  lower_closed_null (base ++ suffix) heap = Some ref.
+Proof.
+  destruct heap as [abstract|[member|id]]; simpl; try (intro E; exact E).
+  destruct (defined_heap_kind base id) as [kind|] eqn:Kind; [|discriminate].
+  now rewrite (defined_kind_prefix _ suffix _ _ Kind).
+Qed.
+
+Lemma runtime_default_val_prefix base suffix names source value :
+  runtime_default_val base names source = Some value ->
+  runtime_default_val (base ++ suffix) names source = Some value.
+Proof.
+  unfold runtime_default_val.
+  destruct (close_value_type names 0 source) as [[number|vector|nullable heap]|];
+    try (intro E; exact E).
+  destruct nullable; [|discriminate].
+  destruct (lower_closed_null base heap) as [ref|] eqn:Lowered; [|discriminate].
+  rewrite (lower_closed_null_prefix _ suffix _ _ Lowered).
+  exact (fun E => E).
+Qed.
+
+Lemma runtime_default_vals_prefix base suffix names source values :
+  runtime_default_vals base names source = Some values ->
+  runtime_default_vals (base ++ suffix) names source = Some values.
+Proof.
+  unfold runtime_default_vals. rewrite <-!those_those0.
+  revert values. induction source as [|t ts IH]; intros values; cbn [map seq.map those0]; auto.
+  destruct (runtime_default_val base names t) as [value|] eqn:Head; [|discriminate].
+  rewrite (runtime_default_val_prefix _ suffix _ _ _ Head).
+  destruct (those0 (seq.map (runtime_default_val base names) ts)) as [tail|] eqn:Tail;
+    [|discriminate].
+  rewrite (IH _ eq_refl). exact (fun E => E).
+Qed.
+
+Theorem closed_value_typing_store_extension s s' value expected :
+  store_extension s s' ->
+  closed_value_typing s value expected = true ->
+  closed_value_typing s' value expected = true.
+Proof.
+  intros Extension Typed.
+  unfold closed_value_typing in *.
+  destruct (typeof_closed_value s value) as [actual|] eqn:Principal; [|discriminate].
+  rewrite (typeof_closed_value_extension _ _ _ _ Extension Principal).
+  destruct (properties.store_extension_type_groups Extension) as [suffix Prefix].
+  rewrite Prefix.
+  rewrite !andb_true_iff in *.
+  destruct Typed as [[Actual Expected] Matches].
+  split; [split; now apply closed_value_validb_prefix|].
+  now apply closed_value_matchesb_prefix.
+Qed.
+
+Lemma closed_value_validb_store_extension s s' expected :
+  store_extension s s' ->
+  closed_value_validb s.(s_types) expected = true ->
+  closed_value_validb s'.(s_types) expected = true.
+Proof.
+  intros Extension Valid.
+  destruct (properties.store_extension_type_groups Extension) as [suffix Prefix].
+  rewrite Prefix. now apply closed_value_validb_prefix.
 Qed.
 
 Theorem closed_value_typing_extension s s' value expected :

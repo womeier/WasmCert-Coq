@@ -9,14 +9,10 @@
     check index scope and acyclic single-supertype syntax, but do not claim
     structural compatibility/finality validation of a declared supertype.
     The legacy module validator must not use closing alone as validation. *)
-From Wasm Require Import datatypes_properties list_extra.
+From Wasm Require Export datatypes_properties.
+From Wasm Require Import list_extra.
 From Stdlib Require Import List NArith Bool Lia Relations Relation_Operators.
 Import ListNotations.
-
-Scheme Equality for defined_type.
-Scheme Equality for closed_type_use.
-Scheme Equality for closed_heap_type.
-Scheme Equality for closed_value_type.
 
 Definition closed_function_type_eq_dec (a b : closed_function_type) :
     {a = b} + {a <> b}.

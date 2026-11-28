@@ -1,6 +1,10 @@
 (** Correctness of the terminating extended-constant evaluator. *)
 From mathcomp Require Import ssreflect ssrbool ssrnat eqtype seq.
 From Wasm Require Import instantiation_func type_checker_reflects_typing type_preservation.
+From Wasm Require Import closed_initializer_properties closed_typing_properties
+  closed_context_properties closed_source_translation closed_operand_properties
+  gc_closed_runtime_properties gc_runtime_type_properties gc_declaration_typing_properties
+  gc_declaration_typing.
 From Stdlib Require Import Relations Relation_Operators NArith Arith.Wf_nat Arith.PeanoNat.
 
 Set SsrOldRewriteGoalsOrder.
@@ -27,7 +31,7 @@ Definition const_admin (e : administrative_instruction) : bool :=
   | AI_basic (BI_ref_null _) | AI_basic (BI_ref_func _)
    | AI_basic (BI_global_get _) | AI_basic (BI_binop _ _)
    | AI_basic BI_ref_i31
-   | AI_ref _ | AI_ref_extern _ | AI_ref_i31 _ | AI_trap => true
+   | AI_ref_null _ | AI_ref _ | AI_ref_extern _ | AI_ref_i31 _ | AI_trap => true
   | _ => false
   end.
 
@@ -43,16 +47,18 @@ Lemma const_admin_preservation hs s f es hs' s' f' es' :
   forall C tf,
   all const_admin es ->
   e_typing s C es tf ->
+  registered_function_references s ->
+  C.(tc_defined_types) = f.(f_inst).(inst_defined_types) ->
   (forall n addr, List.nth_error f.(f_inst).(inst_funcs) n = Some addr ->
      (addr < N.of_nat (length s.(s_funcs)))%N) ->
   (forall gidx v gt, sglob_val s f.(f_inst) gidx = Some v ->
      lookup_N C.(tc_globals) gidx = Some gt ->
-     value_typing s v gt.(tg_t)) ->
+      closed_value_typing s v gt.(tg_t)) ->
   hs' = hs /\ s' = s /\ f' = f /\
   all const_admin es' /\ e_typing s C es' tf.
 Proof.
   move => Hred.
-  induction Hred; move => C tf Hcode Htype Hfunc Hglob;
+   induction Hred; move => C tf Hcode Htype Hregistered Hnames Hfunc Hglob;
     subst; try (by repeat rewrite all_cat in Hcode; simpl in Hcode;
                    rewrite ?andbF ?andFb in Hcode).
   - (* simple *)
@@ -73,14 +79,43 @@ Proof.
         exfalso; lias.
     }
     eapply ety_subtyping; last eauto.
-    eapply ety_ref.
-    by unfold ext_func_typing; rewrite Hcl.
+    apply ety_ref with (t := Closed_ref true (CH_abstract HT_func)).
+    exact (Hregistered addr cl Hcl).
+  - (* Source nulls are lowered under the actual initializer instance names. *)
+    repeat split => //.
+    + exact (const_admin_values [::VAL_ref ref]).
+    + destruct tf as [tx ty]. invert_e_typing.
+      fold_closed_subtyping.
+      have Names := close_context_names _ _ HSourceContext.
+      have Value : closed_operand_typing s (VAL_ref ref)
+          (interpret_operand_type (tc_defined_types SourceContext)
+            (T_ref (Ref_type true heap))).
+      { rewrite interpret_operand_acceptance -Names Hnames.
+        exact (lower_source_null_typed _ _ _ _ H). }
+      cbn [interpret_operand_results List.map] in Htisub.
+      remember (interpret_operand_type (tc_defined_types SourceContext)
+        (T_ref (Ref_type true heap))) as operand eqn:Operand.
+      destruct operand as [concrete|]; last discriminate.
+      eapply ety_subtyping; last exact Htisub.
+      change (e_typing s C [::v_to_e (VAL_ref ref)]
+        (Closed_ft nil [::CO_value concrete])).
+      by apply et_value_typing.
   - (* global.get *)
     repeat split => //.
     + exact: (const_admin_values [::v]).
     + destruct tf as [tx ty].
       invert_e_typing.
-      eapply et_value_typing'; eauto.
+      destruct (close_context_global_lookup HSourceContext Hconjl0)
+        as [expected [Closed Lookup]].
+      destruct (close_global_type_agreement _ _ _ Closed) as [_ ValueClosed].
+      have Operand : interpret_operand_type (tc_defined_types SourceContext) (tg_t extr) =
+          CO_value (tg_t expected).
+      { unfold interpret_operand_type.
+        by rewrite (close_concrete_operand _ _ _ ValueClosed). }
+      cbn [interpret_operand_results List.map] in Htisub.
+      rewrite Operand in Htisub. fold_closed_subtyping.
+      eapply et_value_typing'; last exact Htisub.
+      by eapply Hglob; eauto.
   - (* evaluation context: nonzero-depth contexts contain a label, which
        cannot occur in this fragment. *)
     destruct lh as [vs tail|k vs n body lh tail].
@@ -89,7 +124,7 @@ Proof.
       move/andP: Hcode => [Hvs /andP [Hes Htail]].
       destruct tf as [tx ty].
       invert_e_typing.
-      specialize (IHHred _ _ Hes H1_comp0 Hfunc Hglob)
+      specialize (IHHred _ _ Hes H1_comp0 Hregistered Hnames Hfunc Hglob)
         as [-> [-> [-> [Hes' Htype']]]].
       repeat split => //.
       * by rewrite !all_cat Hvs Hes' Htail.
@@ -107,11 +142,13 @@ Lemma const_admin_trans_preservation x y :
   forall C tf,
   all const_admin es ->
   e_typing s C es tf ->
+  registered_function_references s ->
+  C.(tc_defined_types) = f.(f_inst).(inst_defined_types) ->
   (forall n addr, List.nth_error f.(f_inst).(inst_funcs) n = Some addr ->
      (addr < N.of_nat (length s.(s_funcs)))%N) ->
   (forall gidx v gt, sglob_val s f.(f_inst) gidx = Some v ->
      lookup_N C.(tc_globals) gidx = Some gt ->
-     value_typing s v gt.(tg_t)) ->
+      closed_value_typing s v gt.(tg_t)) ->
   hs' = hs /\ s' = s /\ f' = f /\
   all const_admin es' /\ e_typing s C es' tf.
 Proof.
@@ -119,12 +156,12 @@ Proof.
   induction Hred.
   - destruct x as [[[hs s] f] es], y as [[[hs' s'] f'] es'].
     by apply const_admin_preservation.
-  - destruct x as [[[hs s] f] es] => C tf Hcode Htype Hfunc Hglob.
+   - destruct x as [[[hs s] f] es] => C tf Hcode Htype Hregistered Hnames Hfunc Hglob.
     by repeat split.
   - destruct x as [[[hs s] f] es], y as [[[hs1 s1] f1] es1],
       z as [[[hs2 s2] f2] es2].
-    move => C tf Hcode Htype Hfunc Hglob.
-    specialize (IHHred1 C tf Hcode Htype Hfunc Hglob)
+    move => C tf Hcode Htype Hregistered Hnames Hfunc Hglob.
+    specialize (IHHred1 C tf Hcode Htype Hregistered Hnames Hfunc Hglob)
       as [-> [-> [-> [Hcode1 Htype1]]]].
     by apply IHHred2.
 Qed.
@@ -138,25 +175,49 @@ Proof.
   by destruct e.
 Qed.
 
-Theorem extended_init_value_typing C hs s f bes v t :
+Theorem extended_init_value_typing C closed hs s f bes v t :
   reduce_trans (hs, s, f, to_e_list bes) (hs, s, f, [::v_to_e v]) ->
   extended_const_exprs C bes ->
   be_typing C bes (Tf nil [::t]) ->
+  canonical_registry_valid s.(s_types) ->
+  registered_function_references s ->
+  close_t_context C = Some closed ->
+  C.(tc_defined_types) = f.(f_inst).(inst_defined_types) ->
   (forall n addr, List.nth_error f.(f_inst).(inst_funcs) n = Some addr ->
      (addr < N.of_nat (length s.(s_funcs)))%N) ->
   (forall gidx v gt, sglob_val s f.(f_inst) gidx = Some v ->
      lookup_N C.(tc_globals) gidx = Some gt ->
-     value_typing s v gt.(tg_t)) ->
-  value_typing s v t.
+      value_typing s f.(f_inst).(inst_defined_types) v gt.(tg_t)) ->
+  value_typing s f.(f_inst).(inst_defined_types) v t.
 Proof.
-  move => Hred Hconst Hbet Hfunc Hglob.
+  move => Hred Hconst Hbet Registry Registered Context Names Hfunc Hglob.
   apply extended_const_exprs_admin in Hconst.
-  apply (ety_a s) in Hbet.
-  specialize (const_admin_trans_preservation _ _ Hred C _ Hconst Hbet Hfunc Hglob)
+  have Entry := source_structural_entry s C closed _ _ Hbet Context.
+  have ClosedNames : tc_defined_types closed = inst_defined_types (f_inst f).
+  { by rewrite (close_context_names _ _ Context). }
+  have Globals : forall index value descriptor,
+      sglob_val s (f_inst f) index = Some value ->
+      lookup_N (tc_globals closed) index = Some descriptor ->
+      closed_value_typing s value (tg_t descriptor).
+  { move => index value descriptor Get Lookup.
+    destruct (close_context_global_lookup_inv Context Lookup)
+      as [raw [Closed Slot]].
+    have Value := Hglob _ _ _ Get Slot.
+    destruct (close_global_type_agreement _ _ _ Closed) as [_ ValueClosed].
+    unfold value_typing in Value. rewrite -Names ValueClosed in Value.
+    exact Value. }
+  specialize (const_admin_trans_preservation _ _ Hred closed _ Hconst Entry
+    Registered ClosedNames Hfunc Globals)
     as [_ [_ [_ [_ Htype]]]].
-  invert_e_typing.
-  eapply value_typing_trans; eauto.
-  by simplify_subtyping.
+  destruct (Value_typing_inversion Htype) as [actual [Subtype Value]].
+  apply closed_instr_empty_input_elim in Subtype.
+  cbn [interpret_instr_type interpret_operand_results List.map] in Subtype.
+  inversion Subtype; subst.
+  rewrite -Names -interpret_operand_acceptance.
+  eapply operand_subtyping_acceptance with (actual := CO_value actual).
+  - exact Registry.
+  - exact Value.
+  - eassumption.
 Qed.
 
 Theorem extended_global_type_checker_reflects c g :
@@ -202,32 +263,63 @@ Proof.
     by rewrite Hglobals /= -catA.
 Qed.
 
-Lemma global_init_values_typing C hs s f gs vs :
+Lemma extended_globals_typing_prefix c gs n g :
+  extended_globals_typing c gs ->
+  List.nth_error gs n = Some g ->
+  extended_global_typing
+    (const_context_add_globals c (map modglob_type (take n gs))) g.
+Proof.
+  move: c n. induction gs as [|first gs IH]; move => c [|n] //=.
+  - move => [Typed _] [<-].
+    rewrite /const_context_add_globals /= cats0.
+    by destruct c.
+  - move => [_ Typed] Lookup.
+    have Tail := IH _ _ Typed Lookup.
+    move: Tail. by rewrite /const_context_add_global /const_context_add_globals /= -catA.
+Qed.
+
+Lemma global_init_values_typing C closed closed_globals hs s f gs vs :
   extended_globals_typing C gs ->
   List.Forall2 (fun g v =>
     reduce_trans (hs, s, f, to_e_list g.(modglob_init))
-                 (hs, s, f, [::v_to_e v])) gs vs ->
+                  (hs, s, f, [::v_to_e v])) gs vs ->
+  canonical_registry_valid s.(s_types) ->
+  registered_function_references s ->
+  close_t_context C = Some closed ->
+  C.(tc_defined_types) = f.(f_inst).(inst_defined_types) ->
+  those (List.map (close_global_type C.(tc_defined_types))
+    (map modglob_type gs)) = Some closed_globals ->
   (forall n addr, List.nth_error f.(f_inst).(inst_funcs) n = Some addr ->
      (addr < N.of_nat (length s.(s_funcs)))%N) ->
   (forall gidx v gt, sglob_val s f.(f_inst) gidx = Some v ->
      lookup_N C.(tc_globals) gidx = Some gt ->
-     value_typing s v gt.(tg_t)) ->
+      value_typing s f.(f_inst).(inst_defined_types) v gt.(tg_t)) ->
   (forall j g v, List.nth_error gs j = Some g ->
      List.nth_error vs j = Some v ->
      sglob_val s f.(f_inst) (N.of_nat (length C.(tc_globals) + j)) = Some v) ->
-  List.Forall2 (fun g v => value_typing s v g.(modglob_type).(tg_t)) gs vs.
+  List.Forall2 (fun g v =>
+    value_typing s f.(f_inst).(inst_defined_types) v g.(modglob_type).(tg_t)) gs vs.
 Proof.
-  move => Hprefix Hreduce Hfunc Himport Hdefined.
+  move => Hprefix Hreduce Registry Registered Context Names ClosedGlobals Hfunc Himport Hdefined.
   specialize (List.Forall2_length Hreduce) as Hlen.
   apply Forall2_spec => //.
   move => n.
   induction n using lt_wf_ind.
   move => g v Hnthg Hnthv.
-  specialize (extended_globals_typing_nth _ _ _ _ Hprefix Hnthg)
-    as [Cn [Hglobals [Hconst Hbet]]].
+  have PrefixTyping := extended_globals_typing_prefix _ _ _ _ Hprefix Hnthg.
+  set Cn := const_context_add_globals C (map modglob_type (take n gs)).
+  change (extended_global_typing Cn g) in PrefixTyping.
+  destruct PrefixTyping as [Hconst Hbet].
+  have Hglobals : tc_globals Cn = tc_globals C ++ map modglob_type (take n gs).
+  { reflexivity. }
+  have PrefixClosed : those (List.map (close_global_type (tc_defined_types C))
+      (map modglob_type (take n gs))) = Some (take n closed_globals).
+  { rewrite map_take.
+    exact (those_map_take n ClosedGlobals). }
+  have PrefixContext := close_initializer_globals Context PrefixClosed.
   specialize (Forall2_lookup Hreduce Hnthg) as [v0 [Hnthv0 Hred]].
   rewrite Hnthv in Hnthv0; injection Hnthv0 as <-.
-  eapply extended_init_value_typing; eauto.
+  eapply extended_init_value_typing; try eassumption.
   move => idx w gt Hget Hlookup.
   rewrite Hglobals in Hlookup.
   unfold lookup_N in Hlookup.
@@ -291,23 +383,25 @@ Qed.
 
 Lemma global_instances_map gs vs :
   map (fun '(g, v) => gen_global_instance g v) (List.combine gs vs) =
-  map (fun '({| modglob_type := gt |}, v) => {| g_type := gt; g_val := v |})
+  map (fun '(gt, v) => {| g_type := gt; g_val := v |})
       (List.combine gs vs).
 Proof.
   apply eq_map.
-  by move => [[gt init] v].
+  by move => [gt v].
 Qed.
 
-Lemma global_init_context_typing C s f gs vs :
-  List.Forall2 (fun g v => value_typing s v g.(modglob_type).(tg_t)) gs vs ->
+Lemma global_init_context_typing (C : t_context) s f gs vs :
+  List.Forall2 (fun g v =>
+    value_typing s f.(f_inst).(inst_defined_types) v g.(modglob_type).(tg_t)) gs vs ->
   (forall idx v gt, sglob_val s f.(f_inst) idx = Some v ->
-     lookup_N C.(tc_globals) idx = Some gt -> value_typing s v gt.(tg_t)) ->
+      lookup_N C.(tc_globals) idx = Some gt ->
+      value_typing s f.(f_inst).(inst_defined_types) v gt.(tg_t)) ->
   (forall j g v, List.nth_error gs j = Some g ->
      List.nth_error vs j = Some v ->
      sglob_val s f.(f_inst) (N.of_nat (length C.(tc_globals) + j)) = Some v) ->
   forall idx v gt, sglob_val s f.(f_inst) idx = Some v ->
     lookup_N (C.(tc_globals) ++ map modglob_type gs) idx = Some gt ->
-    value_typing s v gt.(tg_t).
+    value_typing s f.(f_inst).(inst_defined_types) v gt.(tg_t).
 Proof.
   move => Hvalues Himport Hdefined idx v gt Hget Hlookup.
   unfold lookup_N in Hlookup.
@@ -367,9 +461,15 @@ Proof.
     rewrite rev_cons /v_to_e_list map_rcons -cats1 /=.
     apply rt_refl.
   - (* ref.null *)
+    destruct (lower_source_null s (f_inst f) h) as [ref|] eqn:Lower => //.
     move => [<-].
     rewrite rev_cons /v_to_e_list map_rcons -cats1 /=.
-    apply rt_refl.
+    apply rt_step.
+    change (reduce hs s f
+      (v_to_e_list (rev vs) ++ [::AI_basic (BI_ref_null h)] ++ nil)
+      hs s f (v_to_e_list (rev vs) ++ [::$V (VAL_ref ref)] ++ nil)).
+    apply const_reduce_context.
+    by apply r_ref_null.
   - (* ref.func *)
     destruct (lookup_N (inst_funcs (f_inst f)) f0) as [addr|] eqn:Hlookup => //.
     move => [<-].
@@ -450,7 +550,8 @@ Lemma interp_get_const_stack s f es :
 Proof.
   destruct es as [|e [|e' es]] => //.
   all: destruct e => //=.
-  - by destruct (lookup_N (inst_funcs (f_inst f)) f0).
+   - by destruct (lower_source_null s (f_inst f) h).
+   - by destruct (lookup_N (inst_funcs (f_inst f)) f0).
   - by destruct (sglob_val s (f_inst f) g).
 Qed.
 
@@ -466,27 +567,32 @@ Proof.
 Qed.
 
 Lemma interp_const_step_environment s f s' f' e vs ws :
+  s'.(s_types) = s.(s_types) ->
+  f'.(f_inst).(inst_defined_types) = f.(f_inst).(inst_defined_types) ->
   f'.(f_inst).(inst_funcs) = f.(f_inst).(inst_funcs) ->
   (forall i v, sglob_val s f.(f_inst) i = Some v ->
      sglob_val s' f'.(f_inst) i = Some v) ->
   interp_const_step s f e vs = Some ws ->
   interp_const_step s' f' e vs = Some ws.
 Proof.
-  move => Hfunc Hglob.
+  move => Htypes Hnames Hfunc Hglob.
   destruct e => //=.
+  - by rewrite /lower_source_null Hnames Htypes.
   - by rewrite Hfunc.
   - destruct (sglob_val s (f_inst f) g) as [v|] eqn:Hget => //.
     by rewrite (Hglob _ _ Hget).
 Qed.
 
 Lemma interp_const_stack_environment s f s' f' es vs ws :
+  s'.(s_types) = s.(s_types) ->
+  f'.(f_inst).(inst_defined_types) = f.(f_inst).(inst_defined_types) ->
   f'.(f_inst).(inst_funcs) = f.(f_inst).(inst_funcs) ->
   (forall i v, sglob_val s f.(f_inst) i = Some v ->
      sglob_val s' f'.(f_inst) i = Some v) ->
   interp_const_stack s f es vs = Some ws ->
   interp_const_stack s' f' es vs = Some ws.
 Proof.
-  move => Hfunc Hglob.
+  move => Htypes Hnames Hfunc Hglob.
   move: vs ws.
   induction es as [|e es IH]; move => vs ws //=.
   destruct (interp_const_step s f e vs) as [vs'|] eqn:Hstep => //.
@@ -494,22 +600,24 @@ Proof.
 Qed.
 
 Lemma interp_get_const_environment s f s' f' es v :
+  s'.(s_types) = s.(s_types) ->
+  f'.(f_inst).(inst_defined_types) = f.(f_inst).(inst_defined_types) ->
   f'.(f_inst).(inst_funcs) = f.(f_inst).(inst_funcs) ->
   (forall i v, sglob_val s f.(f_inst) i = Some v ->
      sglob_val s' f'.(f_inst) i = Some v) ->
   interp_get_const s f es = Some v ->
   interp_get_const s' f' es = Some v.
 Proof.
-  move => Hfunc Hglob.
+  move => Htypes Hnames Hfunc Hglob.
   rewrite !interp_get_const_stack.
   destruct (interp_const_stack s f es nil) as [ws|] eqn:Heval => //.
   erewrite interp_const_stack_environment; eauto.
 Qed.
 
-Lemma const_global_extension s f g v :
+Lemma const_global_extension s f source g v :
   forall i w, sglob_val s f.(f_inst) i = Some w ->
   sglob_val (add_glob s (gen_global_instance g v))
-    (const_frame_add_global f (N.of_nat (length s.(s_globals)))).(f_inst) i = Some w.
+    (const_frame_add_global f (N.of_nat (length s.(s_globals))) source).(f_inst) i = Some w.
 Proof.
   move => i w.
   unfold sglob_val, sglob, sglob_ind, lookup_N.
@@ -523,6 +631,24 @@ Proof.
   by apply List.nth_error_Some; rewrite Hgi.
 Qed.
 
+Lemma interp_global_chain_type_world s f gs s' f' vs :
+  interp_global_chain s f gs = Some (s', f', vs) ->
+  s'.(s_types) = s.(s_types) /\
+  f'.(f_inst).(inst_defined_types) = f.(f_inst).(inst_defined_types).
+Proof.
+  move: s f s' f' vs.
+  induction gs as [|g gs IH]; move => s f s' f' vs; cbn [interp_global_chain].
+  - move => Equal. inversion Equal; subst. by split.
+  - destruct (interp_get_const s f (modglob_init g)) as [v|] eqn:Heval => //.
+    destruct (close_global_type (inst_defined_types (f_inst f)) (modglob_type g))
+      as [closed|] eqn:Closed => //.
+    destruct (closed_value_typing s v (tg_t closed)) eqn:Accepted => //.
+    cbn [alloc_glob].
+    destruct (interp_global_chain _ _ gs) as [[[s2 f2] ws]|] eqn:Hchain => //.
+    move => Equal. inversion Equal; subst.
+    exact (IH _ _ _ _ _ Hchain).
+Qed.
+
 Theorem interp_global_chain_results s f gs s' f' vs :
   interp_global_chain s f gs = Some (s', f', vs) ->
   f'.(f_inst).(inst_funcs) = f.(f_inst).(inst_funcs) /\
@@ -534,10 +660,15 @@ Proof.
   induction gs as [|g gs IH]; move => s f s' f' vs; cbn [interp_global_chain].
   - move => [<- <- <-].
     repeat split => //; constructor.
-  - destruct (interp_get_const s f (modglob_init g)) as [v|] eqn:Heval => //.
+   - destruct (interp_get_const s f (modglob_init g)) as [v|] eqn:Heval => //.
+     destruct (close_global_type (inst_defined_types (f_inst f)) (modglob_type g))
+       as [closed|] eqn:Closed => //.
+     destruct (closed_value_typing s v (tg_t closed)) eqn:Accepted => //.
     cbn [alloc_glob].
     destruct (interp_global_chain _ _ gs) as [[[s2 f2] ws]|] eqn:Hchain => //.
-    move => [<- <- <-].
+     move => [<- <- <-].
+     destruct (interp_global_chain_type_world _ _ _ _ _ _ Hchain)
+       as [Htypes Hnames].
     specialize (IH _ _ _ _ _ Hchain) as [Hfunc [Hglob Hresults]].
     assert (forall i w, sglob_val s f.(f_inst) i = Some w ->
       sglob_val s2 f2.(f_inst) i = Some w) as Hglob'.
@@ -552,45 +683,63 @@ Qed.
 
 Lemma interp_global_chain_shape s f gs s' f' vs :
   interp_global_chain s f gs = Some (s', f', vs) ->
+  exists closed_globals,
+  those (List.map (fun g =>
+    close_global_type f.(f_inst).(inst_defined_types) g.(modglob_type)) gs) =
+    Some closed_globals /\
   s'.(s_globals) = s.(s_globals) ++
-    map (fun '(g, v) => gen_global_instance g v) (List.combine gs vs) /\
+    map (fun '(g, v) => gen_global_instance g v) (List.combine closed_globals vs) /\
   f'.(f_inst).(inst_globals) = f.(f_inst).(inst_globals) ++
     iota_N (length s.(s_globals)) (length gs).
 Proof.
   move: s f s' f' vs.
   induction gs as [|g gs IH]; move => s f s' f' vs; cbn [interp_global_chain].
   - move => [<- <- <-].
-    by rewrite /= !cats0.
+    exists nil. by rewrite /= !cats0.
   - destruct (interp_get_const s f (modglob_init g)) as [v|] eqn:Heval => //.
+    destruct (close_global_type (inst_defined_types (f_inst f)) (modglob_type g))
+      as [closed|] eqn:Closed => //.
+    destruct (closed_value_typing s v (tg_t closed)) eqn:Accepted => //.
     cbn [alloc_glob].
     destruct (interp_global_chain _ _ gs) as [[[s2 f2] ws]|] eqn:Hchain => //.
     move => [<- <- <-].
-    specialize (IH _ _ _ _ _ Hchain) as [Hglobals Hinst].
-    split.
-    + by rewrite Hglobals /= -catA.
-    + rewrite Hinst /= List.length_app /= Nat.add_1_r -catA.
-      reflexivity.
+    specialize (IH _ _ _ _ _ Hchain) as [closed_globals [Closing [Hglobals Hinst]]].
+    exists (closed :: closed_globals). split.
+    + cbn [List.map those]. rewrite Closed /=.
+      change (those (List.map (fun g =>
+        close_global_type (inst_defined_types (f_inst f)) (modglob_type g)) gs) =
+        Some closed_globals) in Closing.
+      rewrite -those_those0 in Closing.
+      by rewrite -those_those0 /= Closing.
+    + split.
+      * by rewrite Hglobals /= -catA.
+      * rewrite Hinst /= List.length_app /= Nat.add_1_r -catA.
+        reflexivity.
 Qed.
 
 Lemma interp_const_step_store_extension s s' f e vs ws :
+  s'.(s_types) = s.(s_types) ->
   (forall i v, sglob_val s f.(f_inst) i = Some v ->
      sglob_val s' f.(f_inst) i = Some v) ->
   interp_const_step s f e vs = Some ws ->
   interp_const_step s' f e vs = Some ws.
 Proof.
-  move => Hglob.
+  move => Htypes Hglob.
   destruct e => //=.
+  - by rewrite /lower_source_null Htypes.
+  -
   destruct (sglob_val s (f_inst f) g) as [v|] eqn:Hget => //.
   by rewrite (Hglob _ _ Hget).
 Qed.
 
 Lemma interp_const_stack_store_extension s s' f es vs ws :
+  s'.(s_types) = s.(s_types) ->
   (forall i v, sglob_val s f.(f_inst) i = Some v ->
      sglob_val s' f.(f_inst) i = Some v) ->
   interp_const_stack s f es vs = Some ws ->
   interp_const_stack s' f es vs = Some ws.
 Proof.
-  move => Hglob.
+  move => Htypes Hglob.
   move: vs ws.
   induction es as [|e es IH]; move => vs ws //=.
   destruct (interp_const_step s f e vs) as [vs'|] eqn:Hstep => //.
@@ -598,25 +747,29 @@ Proof.
 Qed.
 
 Lemma interp_get_const_store_extension s s' f es v :
+  s'.(s_types) = s.(s_types) ->
   (forall i v, sglob_val s f.(f_inst) i = Some v ->
      sglob_val s' f.(f_inst) i = Some v) ->
   interp_get_const s f es = Some v ->
   interp_get_const s' f es = Some v.
 Proof.
-  move => Hglob.
+  move => Htypes Hglob.
   rewrite !interp_get_const_stack.
   destruct (interp_const_stack s f es nil) as [ws|] eqn:Heval => //.
   erewrite interp_const_stack_store_extension; eauto.
 Qed.
 
 Lemma interp_get_const_sound_global_extension hs s s' f es v gs :
+  s'.(s_types) = s.(s_types) ->
   s'.(s_globals) = s.(s_globals) ++ gs ->
   interp_get_const s f es = Some v ->
   reduce_trans (hs, s', f, to_e_list es) (hs, s', f, [::v_to_e v]).
 Proof.
-  move => Hgs Heval.
+  move => Htypes Hgs Heval.
   apply interp_get_const_sound.
   eapply (interp_get_const_store_extension s s' f es v); last exact Heval.
+  - exact Htypes.
+  -
   move => i w.
   unfold sglob_val, sglob, sglob_ind.
   destruct (lookup_N (inst_globals (f_inst f)) i) as [addr|] => //.
@@ -636,8 +789,11 @@ Proof.
   - move => [<- <- <-].
     constructor.
   - destruct (interp_get_const s f (modglob_init g)) as [v|] eqn:Heval => //.
-    destruct (alloc_glob s (g, v)) as [s1 addr] eqn:Halloc.
-    destruct (interp_global_chain s1 (const_frame_add_global f addr) gs)
+    destruct (close_global_type (inst_defined_types (f_inst f)) (modglob_type g))
+      as [closed|] eqn:Closed => //.
+    destruct (closed_value_typing s v (tg_t closed)) eqn:Accepted => //.
+    destruct (alloc_glob s (closed, v)) as [s1 addr] eqn:Halloc.
+    destruct (interp_global_chain s1 (const_frame_add_global f addr (modglob_type g)) gs)
       as [[[s2 f2] ws]|] eqn:Hchain => //.
     move => [<- <- <-].
     eapply global_init_chain_cons; eauto.
@@ -652,8 +808,11 @@ Proof.
   induction gs as [|g gs IH]; move => s f s' f' vs; cbn [interp_global_chain].
   - move => H; by inversion H.
   - destruct (interp_get_const s f (modglob_init g)) as [v|] => //.
-    destruct (alloc_glob s (g, v)) as [s1 addr].
-    destruct (interp_global_chain s1 (const_frame_add_global f addr) gs)
+    destruct (close_global_type (inst_defined_types (f_inst f)) (modglob_type g))
+      as [closed|] => //.
+    destruct (closed_value_typing s v (tg_t closed)) => //.
+    destruct (alloc_glob s (closed, v)) as [s1 addr].
+    destruct (interp_global_chain s1 (const_frame_add_global f addr (modglob_type g)) gs)
       as [[[s2 f2] ws]|] eqn:Hchain => //.
     move => H; injection H as _ _ <- => /=.
     by rewrite (IH _ _ _ _ _ Hchain).

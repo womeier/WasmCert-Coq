@@ -184,6 +184,19 @@ Definition close_table_type names (source : table_type) : option closed_table_ty
 Definition close_global_type names (source : global_type) : option closed_global_type :=
   option_map (Build_global_type source.(tg_mut)) (close_value_type names 0 source.(tg_t)).
 
+Definition lower_closed_null registry (expected : closed_heap_type) : option value_ref :=
+  match expected with
+  | CH_abstract heap =>
+      if abstract_heap_validb heap then Some (VAL_ref_null heap) else None
+  | CH_defined (CT_rec _) => None
+  | CH_defined (CT_def id) =>
+      match defined_heap_kind registry id with
+      | Some HT_func => Some (VAL_ref_null HT_nofunc)
+      | Some HT_struct | Some HT_array => Some (VAL_ref_null HT_none)
+      | _ => None
+      end
+  end.
+
 (** Source signatures are closed using the whole instance's identity map.
     Checking the resulting expansion makes the legacy signature view and
     the canonical runtime view agree; no source index is a runtime identity. *)

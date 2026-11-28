@@ -2,6 +2,7 @@
    This module is an extension layer, not yet wired into basic_instruction.
    In particular it does not claim support in the extracted interpreter. *)
 From Wasm Require Import typing subtyping_properties.
+From Wasm Require Import gc_runtime_type_properties.
 From Stdlib Require Import List Bool NArith.
 Import ListNotations.
 
@@ -167,18 +168,19 @@ Definition ref_has_type (s : store_record) (types : list function_type)
    Erasure forgets nullability and indexed function identity, but cannot turn
    an ill-typed or dangling runtime reference into a well-typed old value. *)
 Lemma ref_has_type_erases s types v t :
+  store_typing s ->
   ref_has_type s types v t ->
-  value_typing s (VAL_ref v) (T_ref (Ref_type true (erase_heap (heap t)))) = true.
+  value_typing s nil (VAL_ref v) (T_ref (Ref_type true (erase_heap (heap t)))) = true.
 Proof.
-  intros [_ Hv]. destruct v as [h | a | a | n].
+  intros Store [_ Hv]. destruct v as [h | a | a | n].
   - destruct Hv as [_ He]. subst h.
-    unfold value_typing, typeof_value, typeof_ref. simpl.
-    apply value_subtyping_eq.
+    destruct (heap t); reflexivity.
   - destruct Hv as [ft [Ha Hheap]].
-    unfold value_typing, typeof_value, typeof_ref. rewrite Ha.
-    destruct (heap t); simpl in *; try contradiction; apply value_subtyping_eq.
-  - unfold value_typing, typeof_value, typeof_ref.
-    rewrite Hv. simpl. apply value_subtyping_eq.
+    unfold ext_func_typing in Ha.
+    destruct (lookup_N (s_funcs s) a) as [fi|] eqn:Function; [|discriminate].
+    destruct (heap t); simpl in *; try contradiction;
+      now apply (function_reference_abstract_typing _ nil _ _ Store Function).
+  - rewrite Hv. reflexivity.
   - contradiction.
 Qed.
 

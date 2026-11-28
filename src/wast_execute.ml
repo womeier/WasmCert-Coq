@@ -212,15 +212,21 @@ let wast_imports_linkable hs s m impts =
     | None -> None
     | Some values -> StringMap.find_opt item values
   ) (get_import_path m) in
-  List.length imports = List.length impts &&
-  List.for_all2 (fun ext expected ->
-    match ext with
-    | None -> false
-    | Some v ->
-      match Extract.external_type_checker Host.hfc Extract.memory_instance s v with
-      | None -> false
-      | Some actual -> Extract.import_subtyping actual expected
-  ) imports impts
+  match Extract.Utility.GC.Types.close_validated s.Extract.s_types m.Extract.mod_types with
+  | None -> false
+  | Some (registry, names) ->
+    List.length imports = List.length impts &&
+    List.length imports = List.length m.Extract.mod_imports &&
+    List.for_all2 (fun ext declaration ->
+      match ext,
+        Extract.Utility.GC.Types.close_import registry names declaration.Extract.imp_desc with
+      | Some v, Some expected ->
+        begin match Extract.external_type_checker Host.hfc Extract.memory_instance s v with
+        | None -> false
+        | Some actual -> Extract.Utility.GC.Types.match_import registry actual expected
+        end
+      | _ -> false
+    ) imports m.Extract.mod_imports
 
 let print_wast_command cmd = 
   let cmd_sexpr = Wasm.Arrange.script `Textual [cmd] in

@@ -72,6 +72,16 @@ Definition eqmutabilityP : Equality.axiom mutability_eqb :=
 
 HB.instance Definition mutability_eqMixin := hasDecEq.Build mutability eqmutabilityP.
 
+Definition global_type_gen_eq_dec {V : eqType} (a b : global_type_gen V) :
+  {a = b} + {a <> b}.
+Proof. decide equality; [apply eq_comparable | apply mutability_eq_dec]. Defined.
+Definition global_type_gen_eqb {V : eqType} (a b : global_type_gen V) : bool :=
+  global_type_gen_eq_dec a b.
+Definition global_type_gen_eqP {V : eqType} : Equality.axiom (@global_type_gen_eqb V) :=
+  eq_dec_Equality_axiom (@global_type_gen_eq_dec V).
+HB.instance Definition global_type_gen_eqMixin {V : eqType} :=
+  hasDecEq.Build (global_type_gen V) (@global_type_gen_eqP V).
+
 Definition global_type_eq_dec (a b : global_type) : {a = b} + {a <> b}.
 Proof. decide equality; [apply value_type_eq_dec | apply mutability_eq_dec]. Defined.
 Definition global_type_eqb v1 v2 : bool := global_type_eq_dec v1 v2.
@@ -484,6 +494,61 @@ Definition eqtable_typeP : Equality.axiom table_type_eqb :=
   eq_dec_Equality_axiom table_type_eq_dec.
 
 HB.instance Definition table_type_eqMixin := hasDecEq.Build table_type eqtable_typeP.
+
+Scheme Equality for defined_type.
+Scheme Equality for closed_type_use.
+Scheme Equality for closed_heap_type.
+Scheme Equality for closed_value_type.
+Scheme Equality for closed_reference_type.
+
+Definition defined_type_eqb a b : bool := defined_type_eq_dec a b.
+Definition eqdefined_typeP : Equality.axiom defined_type_eqb :=
+  eq_dec_Equality_axiom defined_type_eq_dec.
+HB.instance Definition defined_type_eqMixin :=
+  hasDecEq.Build defined_type eqdefined_typeP.
+
+Definition closed_function_type_eq_dec (a b : closed_function_type) :
+    {a = b} + {a <> b}.
+Proof. decide equality; apply List.list_eq_dec; apply closed_value_type_eq_dec. Defined.
+Definition closed_function_type_eqb a b : bool := closed_function_type_eq_dec a b.
+Definition eqclosed_function_typeP : Equality.axiom closed_function_type_eqb :=
+  eq_dec_Equality_axiom closed_function_type_eq_dec.
+HB.instance Definition closed_function_type_eqMixin :=
+  hasDecEq.Build closed_function_type eqclosed_function_typeP.
+
+Definition closed_reference_type_eqb a b : bool := closed_reference_type_eq_dec a b.
+Definition eqclosed_reference_typeP : Equality.axiom closed_reference_type_eqb :=
+  eq_dec_Equality_axiom closed_reference_type_eq_dec.
+HB.instance Definition closed_reference_type_eqMixin :=
+  hasDecEq.Build closed_reference_type eqclosed_reference_typeP.
+
+Definition closed_table_type_eq_dec (a b : closed_table_type) : {a = b} + {a <> b}.
+Proof. decide equality; [apply closed_reference_type_eq_dec | apply limits_eq_dec]. Defined.
+Definition closed_table_type_eqb a b : bool := closed_table_type_eq_dec a b.
+Definition eqclosed_table_typeP : Equality.axiom closed_table_type_eqb :=
+  eq_dec_Equality_axiom closed_table_type_eq_dec.
+HB.instance Definition closed_table_type_eqMixin :=
+  hasDecEq.Build closed_table_type eqclosed_table_typeP.
+
+Definition closed_global_type_eq_dec (a b : closed_global_type) : {a = b} + {a <> b}.
+Proof. decide equality; [apply closed_value_type_eq_dec | apply mutability_eq_dec]. Defined.
+Definition closed_global_type_eqb a b : bool := closed_global_type_eq_dec a b.
+Definition eqclosed_global_typeP : Equality.axiom closed_global_type_eqb :=
+  eq_dec_Equality_axiom closed_global_type_eq_dec.
+HB.instance Definition closed_global_type_eqMixin :=
+  hasDecEq.Build closed_global_type eqclosed_global_typeP.
+
+Definition closed_extern_type_eq_dec (a b : closed_extern_type) : {a = b} + {a <> b}.
+Proof.
+  decide equality; try apply defined_type_eq_dec;
+    try apply closed_table_type_eq_dec; try apply closed_global_type_eq_dec.
+  unfold memory_type. apply limits_eq_dec.
+Defined.
+Definition closed_extern_type_eqb a b : bool := closed_extern_type_eq_dec a b.
+Definition eqclosed_extern_typeP : Equality.axiom closed_extern_type_eqb :=
+  eq_dec_Equality_axiom closed_extern_type_eq_dec.
+HB.instance Definition closed_extern_type_eqMixin :=
+  hasDecEq.Build closed_extern_type eqclosed_extern_typeP.
 
 Definition memory_type_eq_dec : forall v1 v2 : memory_type, {v1 = v2} + {v1 <> v2}.
 Proof. decidable_equality. Defined.

@@ -31,7 +31,8 @@ Theorem alloc_module_closed_types s m imports globals elements s' inst :
     Some (s'.(s_types), inst.(inst_defined_types)).
 Proof.
   unfold alloc_module. simpl.
-  intros [registry [ids [Closed [Identity [Names Rest]]]]].
+  intros [registry [ids [source [tables [global_types [element_types
+    [Closed [Identity [Names [Source [Context [Tables [Globals [Elements Rest]]]]]]]]]]]]]].
   destruct (alloc_funcs _ _ _) as [s1 fs].
   destruct (alloc_tabs _ _) as [s2 ts].
   destruct (alloc_mems _ _) as [s3 ms].
@@ -48,8 +49,8 @@ Theorem instantiate_canonical_types s m imports s' f expressions :
   (exists suffix, s'.(s_types) = s.(s_types) ++ suffix).
 Proof.
   unfold instantiate.
-  intros [impts [actual [expts [hs [inst [globals [elements
-    [Typed [Imports [Matches [Allocated [Globals [Elements [Frame Expr]]]]]]]]]]]]]].
+  intros [impts [actual [expts [hs [inst [globals [elements [expected
+    [Typed [Imports [ClosedImports [Matches [Allocated [Globals [Elements [Frame Expr]]]]]]]]]]]]]]]].
   subst f.
   apply alloc_module_closed_types in Allocated.
   apply close_and_validate_type_groups_sound in Allocated.

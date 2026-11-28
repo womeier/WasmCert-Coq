@@ -1,7 +1,6 @@
 (** Function expansion along declared subtype paths, not just equal IDs. *)
 From Wasm Require Import datatypes gc_types gc_type_context gc_type_context_properties
-  gc_declaration_typing gc_declaration_typing_properties typing
-  gc_closed_runtime_properties.
+  gc_declaration_typing gc_declaration_typing_properties typing.
 From Stdlib Require Import List Bool NArith Lia.
 Import ListNotations.
 
@@ -169,6 +168,138 @@ Proof.
   - apply chm_defined with (n := 0). constructor.
 Qed.
 
+Lemma declared_path_validity groups n actual expected :
+  canonical_registry_super_wf groups ->
+  declared_type_path groups n actual expected ->
+  (defined_type_validb groups actual = true <->
+   defined_type_validb groups expected = true).
+Proof.
+  intros WF Path. induction Path as [id|n a parent b Step Path IH]; [tauto|].
+  destruct (declared_type_step_source_valid _ _ _ Step) as [raw Source].
+  destruct (WF _ _ Step) as [[parent_raw Parent] _].
+  assert (AV : defined_type_validb groups a = true)
+    by (unfold defined_type_validb; now rewrite Source).
+  assert (PV : defined_type_validb groups parent = true)
+    by (unfold defined_type_validb; now rewrite Parent).
+  pose proof (proj1 IH PV) as BV. tauto.
+Qed.
+
+Lemma defined_kind_validity groups id kind :
+  defined_heap_kind groups id = Some kind ->
+  defined_type_validb groups id = true.
+Proof.
+  unfold defined_heap_kind, expand_defined_type, defined_type_validb.
+  destruct (lookup_defined_type groups id); [reflexivity|discriminate].
+Qed.
+
+Lemma abstract_heap_matching_validity actual expected :
+  abstract_heap_matchesb actual expected = true ->
+  abstract_heap_validb actual = true /\ abstract_heap_validb expected = true.
+Proof. destruct actual, expected; simpl; intros; try discriminate; auto. Qed.
+
+Lemma bottom_matching_validity actual kind :
+  bottom_matches_definedb actual kind = true ->
+  abstract_heap_validb actual = true.
+Proof. destruct actual, kind; simpl; intros; congruence. Qed.
+
+Lemma closed_value_matchesb_validity groups actual expected :
+  canonical_registry_super_wf groups ->
+  closed_value_matchesb groups actual expected = true ->
+  (closed_value_validb groups actual = true <-> closed_value_validb groups expected = true).
+Proof.
+  intro WF.
+  destruct actual as [an|av|na ah], expected as [bn|bv|nb bh];
+    simpl; intro Match; try tauto; try discriminate.
+  apply andb_true_iff in Match as [_ Match].
+  destruct ah as [ha|[ra|da]], bh as [hb|[rb|db]]; simpl in *; try discriminate.
+  - now destruct (abstract_heap_matching_validity _ _ Match).
+  - destruct (defined_heap_kind groups db) as [kind|] eqn:Kind; [|discriminate].
+    pose proof (defined_kind_validity _ _ _ Kind).
+    pose proof (bottom_matching_validity _ _ Match). tauto.
+  - destruct (defined_heap_kind groups da) as [kind|] eqn:Kind; [|discriminate].
+    pose proof (defined_kind_validity _ _ _ Kind).
+    destruct (abstract_heap_matching_validity _ _ Match). tauto.
+  - apply defined_type_matches_sound in Match. destruct Match as [n Path].
+    exact (declared_path_validity _ _ _ _ WF Path).
+Qed.
+
+Lemma closed_list_matches_validity groups actual expected :
+  canonical_registry_super_wf groups ->
+  declaration_list_matchesb (closed_value_matchesb groups) actual expected = true ->
+  (Forall (closed_value_valid groups) actual \/ Forall (closed_value_valid groups) expected) ->
+  Forall2 (fun a b => closed_value_validb groups a = true /\
+    closed_value_validb groups b = true /\ closed_value_matchesb groups a b = true)
+    actual expected.
+Proof.
+  intros WF. revert expected.
+  induction actual as [|a actual IH]; destruct expected as [|b expected];
+    simpl; try discriminate.
+  - intros; constructor.
+  - rewrite andb_true_iff. intros [Head Tail] Valid.
+    assert (AV : closed_value_validb groups a = true).
+    { destruct Valid as [Left|Right].
+      - inversion Left; subst. now apply closed_value_validb_correct.
+      - inversion Right; subst.
+        apply (proj2 (closed_value_matchesb_validity _ _ _ WF Head)).
+        now apply closed_value_validb_correct. }
+    constructor.
+    + split; [exact AV|]. split; [|exact Head].
+      exact (proj1 (closed_value_matchesb_validity _ _ _ WF Head) AV).
+    + apply IH; [exact Tail|].
+      destruct Valid as [Left|Right]; [left|right]; inversion Left || inversion Right; auto.
+Qed.
+
+Lemma source_results_matchb_from_closed groups actual_names expected_names
+    actual_source expected_source actual expected :
+  those0 (List.map (close_value_type actual_names 0) actual_source) = Some actual ->
+  those0 (List.map (close_value_type expected_names 0) expected_source) = Some expected ->
+  Forall2 (fun a b => closed_value_validb groups a = true /\
+    closed_value_validb groups b = true /\ closed_value_matchesb groups a b = true)
+    actual expected ->
+  source_results_matchb groups actual_names expected_names actual_source expected_source = true.
+Proof.
+  revert expected_source actual expected.
+  induction actual_source as [|a actual_source IH]; intros expected_source actual expected A E Related.
+  - simpl in A. inversion A; subst actual. inversion Related; subst expected.
+    destruct expected_source as [|b expected_source]; [reflexivity|].
+    cbn [List.map those0] in E.
+    destruct (close_value_type expected_names 0 b); [|discriminate].
+    destruct (those0 (List.map (close_value_type expected_names 0) expected_source));
+      discriminate.
+  - destruct expected_source as [|b expected_source].
+    + simpl in E. inversion E; subst expected. inversion Related; subst actual.
+      cbn [List.map those0] in A.
+      destruct (close_value_type actual_names 0 a); [|discriminate].
+      destruct (those0 (List.map (close_value_type actual_names 0) actual_source));
+        discriminate.
+    + cbn [List.map those0] in A, E.
+      destruct (close_value_type actual_names 0 a) as [ca|] eqn:CA; [|discriminate].
+      destruct (those0 (List.map (close_value_type actual_names 0) actual_source))
+        as [cas|] eqn:CAS; [|discriminate].
+      destruct (close_value_type expected_names 0 b) as [cb|] eqn:CB; [|discriminate].
+      destruct (those0 (List.map (close_value_type expected_names 0) expected_source))
+        as [cbs|] eqn:CBS; [|discriminate].
+      inversion A; inversion E; subst actual expected.
+      inversion Related as [|x y xs ys [AV [EV Match]] Rest]; subst.
+      cbn [source_results_matchb declaration_list_matchesb].
+      unfold source_value_matchesb at 1. rewrite CA, CB.
+      rewrite AV, EV, Match. simpl.
+      exact (IH _ _ _ eq_refl CBS Rest).
+Qed.
+
+Lemma expanded_function_valid groups id args results :
+  canonical_registry_valid groups ->
+  expand_function_type groups id = Some (Closed_ft args results) ->
+  Forall (closed_value_valid groups) args /\ Forall (closed_value_valid groups) results.
+Proof.
+  intros Valid Expanded. unfold expand_function_type in Expanded.
+  destruct (expand_defined_type groups id) as [declaration|] eqn:Declaration;
+    [|discriminate].
+  destruct (registry_valid_expanded_declaration _ _ _ Valid Declaration) as [Composite _].
+  destruct (subtype_composite declaration) as [[aa ar]|fields|field]; try discriminate.
+  inversion Expanded; subst aa ar. inversion Composite; subst. auto.
+Qed.
+
 Lemma Forall2_transitive {A} (R : A -> A -> Prop) :
   (forall a b c, R a b -> R b c -> R a c) ->
   forall xs ys zs, Forall2 R xs ys -> Forall2 R ys zs -> Forall2 R xs zs.
@@ -239,6 +370,26 @@ Qed.
 Section Runtime.
 Context `{hfc : host_function_class} `{memory : BlockUpdateMemory}.
 
+Lemma closed_value_typing_subsumption s value actual expected :
+  canonical_registry_valid s.(s_types) ->
+  closed_value_typing s value actual = true ->
+  closed_value_validb s.(s_types) expected = true ->
+  closed_value_matchesb s.(s_types) actual expected = true ->
+  closed_value_typing s value expected = true.
+Proof.
+  intros Valid Typed Expected Matches.
+  unfold closed_value_typing in *.
+  destruct (typeof_closed_value s value) as [principal|]; [|discriminate].
+  rewrite !andb_true_iff in *.
+  destruct Typed as [[Principal Actual] Typed].
+  split; [now split |].
+  pose proof (proj1 (proj2 Valid)) as WF.
+  apply (proj2 (closed_value_matchesb_correct _ _ _ WF)).
+  eapply closed_value_matches_trans with (b := actual); [exact Valid | |].
+  - exact (proj1 (closed_value_matchesb_correct _ _ _ WF) Typed).
+  - exact (proj1 (closed_value_matchesb_correct _ _ _ WF) Matches).
+Qed.
+
 Theorem closed_function_operand_inversion s address expected :
   closed_value_typing s (VAL_ref (VAL_ref_func address))
     (CV_ref true (CH_defined (CT_def expected))) = true ->
@@ -290,3 +441,42 @@ Example reverse_path_rejected :
   defined_type_matches registry (Def_type 0 0) (Def_type 2 0) = false.
 Proof. vm_compute. reflexivity. Qed.
 End StrictFunctionPathRegression.
+
+(** A source-indexed administrative stack cannot in general express the
+    intermediate parameter type after a tail call removes a defining frame.
+    The closed operand/parameter interval is inhabited, but its canonical ID
+    need not occur in the remaining caller's source name map. *)
+Module TailSourceContextRegression.
+Definition parameter_id := Def_type 0 0.
+Definition caller_id := Def_type 1 0.
+Definition operand := CV_ref false (CH_defined (CT_def parameter_id)).
+Definition parameter := CV_ref true (CH_defined (CT_def parameter_id)).
+Definition registry : canonical_registry :=
+  [[Sub_type true [] (Comp_func (Closed_ft [] []))];
+   [Sub_type true [] (Comp_func (Closed_ft [] [CV_num T_i32]))];
+   [Sub_type true [] (Comp_func (Closed_ft [parameter] [CV_num T_i32]))]].
+Definition remaining_names := [caller_id].
+Definition source_middle (source : value_type) : bool :=
+  match close_value_type remaining_names 0 source with
+  | Some middle =>
+      closed_value_matchesb registry operand middle &&
+      closed_value_matchesb registry middle parameter
+  | None => false
+  end.
+
+Example registry_valid : canonical_registry_valid registry.
+Proof. apply canonical_registry_validb_sound. vm_compute. reflexivity. Qed.
+
+Example closed_middle_exists :
+  closed_value_matchesb registry operand operand = true /\
+  closed_value_matchesb registry operand parameter = true.
+Proof. split; reflexivity. Qed.
+
+Theorem no_source_middle source : source_middle source = false.
+Proof.
+  destruct source as [number|vector|[nullable heap]|]; try reflexivity.
+  destruct nullable, heap; try reflexivity;
+    destruct t as [|positive]; try reflexivity;
+    destruct positive; reflexivity.
+Qed.
+End TailSourceContextRegression.

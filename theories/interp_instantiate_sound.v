@@ -25,7 +25,8 @@ Proof.
     as [[registry ids]|] eqn:Hclosed => //.
   destruct (source_type_identitiesb registry ids (List.concat (mod_types m)) ids)
     eqn:Hidentity => //.
-  split; first by exists registry, ids; split.
+  destruct (module_runtime_types_closedb registry ids m) eqn:Hruntime => //.
+  split; first by exists registry, ids; repeat split.
   unfold module_components_type_checker in Hmodcheck.
   destruct m.
   destruct (gather_m_f_types (List.concat mod_types) mod_funcs) as [fts | ] eqn:Hmftypes => //;
@@ -109,7 +110,7 @@ Proof.
     assert (t = modelem_type) as Hteq.
     { unfold gather_m_e_type in Hmap.
       destruct modelem_mode; simpl in *; try by inversion Hmap.
-      by remove_bools_options.
+      remove_bools_options. by apply/eqP.
     }
     subst t.
     repeat split => //.
@@ -184,35 +185,53 @@ Lemma interp_alloc_sound: forall s m v_imps g_inits r_inits registry typeids s' 
   source_type_identitiesb registry typeids (List.concat m.(mod_types)) typeids = true ->
   length g_inits = length m.(mod_globals) ->
   length r_inits = length m.(mod_elems) ->
-  interp_alloc_module s m v_imps g_inits r_inits registry typeids = (s', inst) ->
+  interp_alloc_module s m v_imps g_inits r_inits registry typeids = Some (s', inst) ->
   alloc_module s m v_imps g_inits r_inits (s', inst).
 Proof.
   move => s m v_imps g_inits r_inits registry typeids s' inst Hclosed Hidentity Hgvs_len Hrvs_len Halloc.
   unfold interp_alloc_module in Halloc.
-  unfold alloc_module; simpl in *.
-  exists registry, typeids.
+  destruct (module_source_context m) as [source|] eqn:Source => //.
+  destruct (those (map (close_table_initial registry typeids)
+    (map modtab_type (mod_tables m)))) as [tables|] eqn:Tables => //.
+  destruct (those (map (close_global_type typeids)
+    (map modglob_type (mod_globals m)))) as [globals|] eqn:Globals => //.
+  destruct (those (map (close_reference_type typeids)
+    (map modelem_type (mod_elems m)))) as [elements|] eqn:Elements => //.
+  destruct ((length g_inits == length globals) &&
+    (length r_inits == length elements)) eqn:Lengths => //.
+  move/andP: Lengths => [/eqP GlobalLength /eqP ElementLength].
+  unfold alloc_module; simpl.
+  exists registry, typeids, source, tables, globals, elements.
   destruct (alloc_funcs _ _ _) as [s1 ifs] eqn:Hallocfuncs.
   destruct (alloc_tabs _ _) as [s2 its] eqn:Halloctabs.
   destruct (alloc_mems _ _) as [s3 ims] eqn:Hallocmems.
-  destruct (alloc_globs _ _) as [s4 igs] eqn:Hallocglobs.
-  destruct (alloc_elems _ _) as [s5 ies] eqn:Hallocelems.
+  destruct (alloc_globs _ _ _) as [s4 igs] eqn:Hallocglobs.
+  destruct (alloc_elems _ _ _) as [s5 ies] eqn:Hallocelems.
   destruct (alloc_datas _ _) as [s6 ids] eqn:Hallocdatas.
 
-  injection Halloc as <-<-.
+  injection Halloc as <- <-.
   rewrite Hallocfuncs Halloctabs Hallocmems Hallocglobs Hallocelems Hallocdatas => /=.
   apply alloc_func_iota_N in Hallocfuncs.
   apply alloc_table_iota_N in Halloctabs.
   apply alloc_mem_iota_N in Hallocmems.
-  apply alloc_global_iota_N in Hallocglobs; last assumption.
-  apply alloc_elem_iota_N in Hallocelems; last assumption.
+  apply alloc_global_iota_N in Hallocglobs; last exact GlobalLength.
+  apply alloc_elem_iota_N in Hallocelems; last exact ElementLength.
   apply alloc_data_iota_N in Hallocdatas.
 
+  have TableLength := those_length Tables.
+  have ClosedGlobalLength := those_length Globals.
+  have ClosedElementLength := those_length Elements.
+  rewrite !List.length_map in TableLength ClosedGlobalLength ClosedElementLength.
   extract_premise.
 
   destruct s, s1, s2, s3, s4, s5, s6; simpl in *.
   subst.
   repeat rewrite List.length_map.
-  by repeat rewrite eq_refl => /=.
+  unfold module_runtime_instance.
+  repeat rewrite TableLength.
+  repeat rewrite ClosedGlobalLength.
+  repeat rewrite ClosedElementLength.
+  by repeat split.
 Qed.
 
 (* Each initializer sees imports and the types of preceding defined globals. *)
@@ -261,13 +280,19 @@ Proof.
   destruct (source_type_identitiesb registry typeids (List.concat (mod_types m)) typeids)
     eqn:Hidentity => //.
   destruct (those _) as [t_imps | ] eqn:Hextcheck => //.
-  destruct (all2 import_subtyping _ _) eqn:Hextsubtyping => //.
+  destruct (those (map (close_import_desc registry typeids)
+    (map imp_desc (mod_imports m)))) as [expected|] eqn:Hexpected => //.
+  destruct (module_source_context m) as [source|] eqn:Hsource => //.
+  destruct (all2 (closed_import_subtyping registry) _ _) eqn:Hextsubtyping => //.
+  destruct (alloc_funcs s (mod_funcs m)
+    (module_runtime_instance s m v_imps typeids source)) as [preview ifs0] eqn:Hpreview.
   destruct (interp_global_chain _ _ (mod_globals m)) as [[[s_init f_init_final] g_inits] |] eqn:Hglobinit => //.
   destruct (get_elem_inits _ _ (mod_elems m)) as [r_inits |] eqn:Heleminit => //.
-  destruct (interp_alloc_module s m v_imps g_inits r_inits registry typeids) as [s' inst'] eqn:Halloc => //.
+  destruct (interp_alloc_module s m v_imps g_inits r_inits registry typeids)
+    as [[s' inst']|] eqn:Halloc => //.
   injection Hinterp as <- <- Heq.
 
-  exists t_imps_mod, t_imps, t_exps, hs, inst', g_inits, r_inits.
+  exists t_imps_mod, t_imps, t_exps, hs, inst', g_inits, r_inits, expected.
 
   (* Proving these first so they can be used in the reasoning for initialisers later *)
   assert (module_typing m t_imps_mod t_exps) as Hmodtype; first by eapply module_type_checker_sound; eauto.
@@ -302,29 +327,47 @@ Proof.
 
   (* store *)
   unfold interp_alloc_module in Halloc.
-  destruct (alloc_funcs _ _ _) as [s1 ifs] eqn:Hallocfuncs.
+  rewrite Hsource in Halloc.
+  destruct (those (map (close_table_initial registry typeids)
+    (map modtab_type (mod_tables m)))) as [tables|] eqn:Htables => //.
+  destruct (those (map (close_global_type typeids)
+    (map modglob_type (mod_globals m)))) as [globals|] eqn:Hglobals => //.
+  destruct (those (map (close_reference_type typeids)
+    (map modelem_type (mod_elems m)))) as [elements|] eqn:Helements => //.
+  destruct ((length g_inits == length globals) &&
+    (length r_inits == length elements)) eqn:Hlengths => //.
+  move/andP: Hlengths => [/eqP GlobalLength /eqP ElementLength].
+  rewrite Hpreview in Halloc.
+  have Hallocfuncs := Hpreview.
   destruct (alloc_tabs _ _) as [s2 its] eqn:Halloctabs.
   destruct (alloc_mems _ _) as [s3 ims] eqn:Hallocmems.
-  destruct (alloc_globs _ _) as [s4 igs] eqn:Hallocglobs.
-  destruct (alloc_elems _ _) as [s5 ies] eqn:Hallocelems.
+  destruct (alloc_globs _ _ _) as [s4 igs] eqn:Hallocglobs.
+  destruct (alloc_elems _ _ _) as [s5 ies] eqn:Hallocelems.
   destruct (alloc_datas _ _) as [s6 ids] eqn:Hallocdatas.
 
   injection Halloc as <- Heqinst.
   specialize (alloc_func_iota_N Hallocfuncs) as Hfuncaddrs.
   specialize (alloc_table_iota_N Halloctabs) as Htableaddrs.
   specialize (alloc_mem_iota_N Hallocmems) as Hmemaddrs.
-  specialize (alloc_global_iota_N Hallocglobs Hgvs_len) as Hglobaladdrs.
-  specialize (alloc_elem_iota_N Hallocelems Hrvs_len) as Helemaddrs.
+  specialize (alloc_global_iota_N Hallocglobs GlobalLength) as Hglobaladdrs.
+  specialize (alloc_elem_iota_N Hallocelems ElementLength) as Helemaddrs.
   specialize (alloc_data_iota_N Hallocdatas) as Hdataaddrs.
 
   extract_premise.
   specialize (interp_global_chain_results _ _ _ _ _ _ Hglobinit)
     as [Hinitfuncs [Hinitglobals Hinitresults]].
   specialize (interp_global_chain_shape _ _ _ _ _ _ Hglobinit)
-    as [Hinitstore Hinitaddrs].
-  rewrite global_instances_map in Hinitstore.
+    as [initial_globals [Hinitclosing [Hinitstore Hinitaddrs]]].
+  destruct (interp_global_chain_type_world _ _ _ _ _ _ Hglobinit)
+    as [Hinittypes Hinitnames].
+  cbn [module_init_frame f_inst inst_defined_types] in Hinitclosing.
+  change (those (List.map (close_global_type typeids)
+    (List.map modglob_type (mod_globals m))) = Some globals) in Hglobals.
+  rewrite List.map_map in Hglobals.
+  rewrite Hglobals in Hinitclosing.
+  injection Hinitclosing as <-.
 
-  destruct s, s1, s2, s3, s4, s5, s6; simpl in *.
+  destruct s, preview, s2, s3, s4, s5, s6; simpl in *.
   repeat split => //.
   - (* subtyping *)
     by eapply Forall2_all2_impl; eauto.
@@ -336,8 +379,10 @@ Proof.
     eapply Forall2_lookup in Hinitresults as [gi [Hnth Hmap]]; last by eauto.
     simplify_multieq.
     apply interp_get_const_sound.
-    eapply (interp_get_const_environment s_init f_init_final); last exact Hmap.
-    + by rewrite Hinitfuncs.
+     eapply (interp_get_const_environment s_init f_init_final); last exact Hmap.
+     + by symmetry.
+     + reflexivity.
+     + by rewrite Hinitfuncs.
     + move => i v.
       unfold sglob_val, sglob, sglob_ind.
       by rewrite Hinitstore Hinitaddrs.
@@ -357,7 +402,9 @@ Proof.
       injection Hmap as <-.
       simplify_multieq.
       apply (interp_get_const_sound _ _ _ _ (VAL_ref v)).
-      eapply (interp_get_const_environment s_init f_init_final); last exact Heval.
+       eapply (interp_get_const_environment s_init f_init_final); last exact Heval.
+       * by symmetry.
+       * reflexivity.
       * by rewrite Hinitfuncs.
       * move => j w.
         unfold sglob_val, sglob, sglob_ind.

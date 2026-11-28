@@ -92,7 +92,8 @@ Definition module_func_type_checker (c : t_context) (m : module_func) : bool :=
       tc_locals := List.app c.(tc_locals) (List.app tn t_locs);
       tc_labels := tm :: c.(tc_labels);
       tc_return := Some tm;
-      tc_refs := c.(tc_refs)
+      tc_refs := c.(tc_refs);
+      tc_defined_types := c.(tc_defined_types)
     |} in
     type_checker.b_e_type_checker c' b_es (Tf [::] tm) && (default_vals t_locs != None)
   end.
@@ -194,10 +195,11 @@ Definition module_components_type_checker (m : module) : option ((list extern_ty
       tc_locals := nil;
       tc_labels := nil;
       tc_return := None;
-      tc_refs := xs
+      tc_refs := xs;
+      tc_defined_types := nil
             |} in
     let c' := {|
-      tc_types := nil;
+      tc_types := tfs;
       tc_funcs := c.(tc_funcs);
       tc_globals := igs;
       tc_tables := c.(tc_tables);
@@ -207,7 +209,8 @@ Definition module_components_type_checker (m : module) : option ((list extern_ty
       tc_locals := nil;
       tc_labels := nil;
       tc_return := None;
-      tc_refs := c.(tc_refs)
+      tc_refs := c.(tc_refs);
+      tc_defined_types := c.(tc_defined_types)
     |} in
     if seq.all (module_func_type_checker c) fs &&
        seq.all (module_table_type_checker c) ts &&
@@ -232,13 +235,14 @@ Definition module_components_type_checker (m : module) : option ((list extern_ty
 Definition module_type_checker (m : module) : option ((list extern_type) * (list extern_type)) * string :=
   match close_and_validate_type_groups nil (module_type_groups m) with
   | Some (registry, ids) =>
-      if source_type_identitiesb registry ids (List.concat m.(mod_types)) ids
+       if source_type_identitiesb registry ids (List.concat m.(mod_types)) ids &&
+           module_runtime_types_closedb registry ids m
       then module_components_type_checker m
       else (None, "inconsistent closed module type signatures")
   | None => (None, "invalid module type declarations")
   end.
 
-Definition external_type_checker (s : store_record) (v : extern_value): option extern_type :=
+Definition external_type_checker (s : store_record) (v : extern_value): option closed_extern_type :=
   ext_typing s v.
 
 (* Stack head is the most recently produced value.  Unlike the full interpreter,
@@ -248,7 +252,8 @@ Definition interp_const_step (s : store_record) (f : frame)
       match e with
       | BI_const_num v => Some (VAL_num v :: vs)
       | BI_const_vec v => Some (VAL_vec v :: vs)
-      | BI_ref_null t => Some (VAL_ref (VAL_ref_null t) :: vs)
+      | BI_ref_null t =>
+          option_map (fun ref => VAL_ref ref :: vs) (lower_source_null s f.(f_inst) t)
       | BI_ref_func i =>
           match lookup_N f.(f_inst).(inst_funcs) i with
           | Some addr => Some (VAL_ref (VAL_ref_func addr) :: vs)
@@ -298,7 +303,7 @@ Definition interp_get_const (s : store_record) (f : frame) (b_es : list basic_in
   match b_es with
   | [::BI_const_num v] => Some (VAL_num v)
   | [::BI_const_vec v] => Some (VAL_vec v)
-  | [::BI_ref_null t] => Some (VAL_ref (VAL_ref_null t))
+  | [::BI_ref_null t] => option_map VAL_ref (lower_source_null s f.(f_inst) t)
   | [::BI_ref_func i] =>
       match lookup_N f.(f_inst).(inst_funcs) i with
       | Some addr => Some (VAL_ref (VAL_ref_func addr))
@@ -335,10 +340,16 @@ Fixpoint interp_global_chain (s : store_record) (f : frame) (gs : list module_gl
       match interp_get_const s f g.(modglob_init) with
       | None => None
       | Some v =>
-          let '(s1, addr) := alloc_glob s (g, v) in
-          match interp_global_chain s1 (const_frame_add_global f addr) gs' with
+          match close_global_type f.(f_inst).(inst_defined_types) g.(modglob_type) with
+          | Some closed =>
+              if closed_value_typing s v closed.(tg_t) then
+                let '(s1, addr) := alloc_glob s (closed, v) in
+                match interp_global_chain s1 (const_frame_add_global f addr g.(modglob_type)) gs' with
+                | None => None
+                | Some (s2, f2, vs) => Some (s2, f2, v :: vs)
+                end
+              else None
           | None => None
-          | Some (s2, f2, vs) => Some (s2, f2, v :: vs)
           end
       end
   end.
@@ -346,8 +357,8 @@ Fixpoint interp_global_chain (s : store_record) (f : frame) (gs : list module_gl
 Definition get_elem_inits (s: store_record) (f: frame) (els: list module_element) : option (list (list value_ref)):=
   those (map (fun el => those (map (fun e => interp_get_vref s f e) el.(modelem_init))) els).
 
-Definition interp_alloc_module (s : store_record) (m : module) (imps : list extern_value) (gvs : list value) (rvs: list (list value_ref))
-    (registry : canonical_registry) (typeids : list defined_type) : (store_record * moduleinst) :=
+Definition module_runtime_instance (s : store_record) (m : module) (imps : list extern_value)
+    (typeids : list defined_type) (source : t_context) : moduleinst :=
   let i_fs := iota_N (length s.(s_funcs)) (length m.(mod_funcs)) in
   let i_ts := iota_N (length s.(s_tables)) (length m.(mod_tables)) in
   let i_ms := iota_N (length s.(s_mems)) (length m.(mod_mems)) in
@@ -355,6 +366,7 @@ Definition interp_alloc_module (s : store_record) (m : module) (imps : list exte
   let i_es := iota_N (length s.(s_elems)) (length m.(mod_elems)) in
   let i_ds := iota_N (length s.(s_datas)) (length m.(mod_datas)) in
   let inst := {|
+    inst_context := source;
     inst_defined_types := typeids;
     inst_types := List.concat m.(mod_types);
     inst_funcs := (ext_funcs imps ++ i_fs);
@@ -363,21 +375,44 @@ Definition interp_alloc_module (s : store_record) (m : module) (imps : list exte
     inst_globals := (ext_globals imps ++ i_gs);
     inst_elems := (i_es);
     inst_datas := (i_ds);
-    inst_exports := (map (get_exportinst (Build_moduleinst nil (ext_funcs imps ++ i_fs) (ext_tables imps ++ i_ts) (ext_mems imps ++ i_ms) (ext_globals imps ++ i_gs) nil nil nil nil)) m.(mod_exports))
+    inst_exports := (map (get_exportinst
+      (Build_moduleinst (List.concat m.(mod_types)) (ext_funcs imps ++ i_fs)
+        (ext_tables imps ++ i_ts) (ext_mems imps ++ i_ms) (ext_globals imps ++ i_gs)
+        i_es i_ds nil typeids source)) m.(mod_exports))
   |} in
-  let '(s1, _) := alloc_funcs s m.(mod_funcs) inst in
-  let '(s2, _) := alloc_tabs s1 (map modtab_type m.(mod_tables)) in
-  let '(s3, _) := alloc_mems s2 (map modmem_type m.(mod_mems)) in
-  let '(s4, i_gs) := alloc_globs s3 m.(mod_globals) gvs in
-  let '(s5, i_es) := alloc_elems s4 m.(mod_elems) rvs in
-  let '(s', i_ds) := alloc_datas s5 m.(mod_datas) in
-  (upd_s_types s' registry, inst).
+  inst.
 
-Definition module_init_frame (s : store_record) (m : module) (v_imps : list extern_value) : frame :=
+Definition interp_alloc_module (s : store_record) (m : module) (imps : list extern_value)
+    (gvs : list value) (rvs: list (list value_ref))
+    (registry : canonical_registry) (typeids : list defined_type) :
+    option (store_record * moduleinst) :=
+  match module_source_context m,
+        those (map (close_table_initial registry typeids) (map modtab_type m.(mod_tables))),
+        those (map (close_global_type typeids) (map modglob_type m.(mod_globals))),
+        those (map (close_reference_type typeids) (map modelem_type m.(mod_elems))) with
+  | Some source, Some tables, Some globals, Some elements =>
+      if (length gvs == length globals) && (length rvs == length elements) then
+        let inst := module_runtime_instance s m imps typeids source in
+        let '(s1, _) := alloc_funcs s m.(mod_funcs) inst in
+        let '(s2, _) := alloc_tabs s1 tables in
+        let '(s3, _) := alloc_mems s2 (map modmem_type m.(mod_mems)) in
+        let '(s4, _) := alloc_globs s3 globals gvs in
+        let '(s5, _) := alloc_elems s4 elements rvs in
+        let '(s', _) := alloc_datas s5 m.(mod_datas) in
+        Some (upd_s_types s' registry, inst)
+      else None
+  | _, _, _, _ => None
+  end.
+
+Definition module_init_frame (s : store_record) (m : module) (v_imps : list extern_value)
+    (typeids : list defined_type) (source : t_context) : frame :=
   Build_frame nil
-    (Build_moduleinst nil
+    (Build_moduleinst (List.concat m.(mod_types))
       (ext_funcs v_imps ++ iota_N (length s.(s_funcs)) (length m.(mod_funcs)))
-      nil nil (ext_globals v_imps) nil nil nil nil).
+      nil nil (ext_globals v_imps) nil nil nil typeids
+      (Build_t_context (List.concat m.(mod_types)) source.(tc_funcs) nil nil
+        (take (length (ext_globals v_imps)) source.(tc_globals))
+        nil nil nil nil None source.(tc_refs) typeids)).
 
 (* Use a monad for error reporting at some point? *)
 Definition interp_instantiate (hs: host_state) (s : store_record) (m : module) (v_imps : list extern_value) : option (host_state * store_record * frame * list basic_instruction) * string :=
@@ -388,23 +423,31 @@ Definition interp_instantiate (hs: host_state) (s : store_record) (m : module) (
       | None => (None, "Error in closing module types against store registry")
       | Some (registry, typeids) =>
       if source_type_identitiesb registry typeids (List.concat m.(mod_types)) typeids then
-      match those (map (external_type_checker s) v_imps) with
-      | Some t_imps =>
-          if all2 import_subtyping t_imps t_imps_mod then
-            let f_init := module_init_frame s m v_imps in
-            match interp_global_chain s f_init m.(mod_globals) with
+       match those (map (external_type_checker s) v_imps),
+             those (map (close_import_desc registry typeids) (map imp_desc m.(mod_imports))),
+             module_source_context m with
+       | Some t_imps, Some expected_imports, Some source =>
+           if all2 (closed_import_subtyping registry) t_imps expected_imports then
+             let inst := module_runtime_instance s m v_imps typeids source in
+             let '(s_funcs, _) := alloc_funcs s m.(mod_funcs) inst in
+             let s_preview := upd_s_types s_funcs registry in
+             let f_init := module_init_frame s m v_imps typeids source in
+             match interp_global_chain s_preview f_init m.(mod_globals) with
             | None => (None, "Error in evaluating global initialisers")
             | Some (s_init, f_init_final, g_inits) =>
                 match get_elem_inits s_init f_init_final m.(mod_elems) with
                 | Some r_inits =>
-                     let '(s', inst_final) := interp_alloc_module s m v_imps g_inits r_inits registry typeids in
-                    let f_final := Build_frame nil inst_final in
-                    (Some (hs, s', f_final, get_init_expr_elems m.(mod_elems) ++ get_init_expr_datas m.(mod_datas) ++ get_init_expr_start m.(mod_start)), "")
+                     match interp_alloc_module s m v_imps g_inits r_inits registry typeids with
+                     | Some (s', inst_final) =>
+                         let f_final := Build_frame nil inst_final in
+                         (Some (hs, s', f_final, get_init_expr_elems m.(mod_elems) ++ get_init_expr_datas m.(mod_datas) ++ get_init_expr_start m.(mod_start)), "")
+                     | None => (None, "Error in closing runtime storage descriptors")
+                     end
                 | None => (None, "Error in evaluating elem initialisers")
                 end
             end
           else (None, "Import type checking failure")
-      | None => (None, "Bad external values for imports")
+       | _, _, _ => (None, "Bad external values or unresolved import/storage types")
       end
       else (None, "Error in resolving closed module signatures")
       end

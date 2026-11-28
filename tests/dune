@@ -32,6 +32,20 @@
 
 (rule
  (alias runtest)
+ (deps gc_closed_storage_binary.py)
+ (action
+  (run python3 %{dep:gc_closed_storage_binary.py}
+    %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps gc_import_boundary_binary.py)
+ (action
+  (run python3 %{dep:gc_import_boundary_binary.py}
+    %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
  (deps gc_declarations_binary.py)
  (action
   (run python3 %{dep:gc_declarations_binary.py}

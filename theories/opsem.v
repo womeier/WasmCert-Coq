@@ -208,6 +208,10 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
     forall hs s f addr x,
       lookup_N f.(f_inst).(inst_funcs) x = Some addr ->
       reduce hs s f [::AI_basic (BI_ref_func x)] hs s f [::AI_ref addr]
+  | r_ref_null : forall hs s f heap ref,
+      typing.lower_source_null s f.(f_inst) heap = Some ref ->
+      reduce hs s f [::AI_basic (BI_ref_null heap)] hs s f
+        [::v_to_e (VAL_ref ref)]
   | r_block :
     forall hs s f vs es n m tb t1s t2s,
       expand f.(f_inst) tb = Some (Tf t1s t2s) ->
@@ -233,13 +237,13 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
       forall s f x (y: typeidx) a cl i hs,
         stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_func a) ->
         lookup_N s.(s_funcs) a = Some cl ->
-        lookup_function_type f.(f_inst).(inst_types) y = Some (cl_type cl) ->
+         function_reference_match s f.(f_inst) a y = true ->
         reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_call_indirect x y)] hs s f [::AI_invoke a]
   | r_call_indirect_failure_mismatch :
       forall s f x (y: typeidx) a cl i hs,
         stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_func a) ->
         lookup_N s.(s_funcs) a = Some cl ->
-        lookup_function_type f.(f_inst).(inst_types) y <> Some (cl_type cl) ->
+         function_reference_match s f.(f_inst) a y = false ->
         reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_call_indirect x y)] hs s f [::AI_trap]
   | r_call_indirect_failure_bound :
       forall s f x (y: typeidx) i hs,
@@ -275,7 +279,7 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
         length ts = k ->
         length ts1 = n ->
         length ts2 = m ->
-        default_vals ts = Some defaults ->
+         runtime_default_vals s.(s_types) inst.(inst_defined_types) ts = Some defaults ->
         reduce hs s f (ves ++ [::AI_invoke addr]) hs s f [::AI_frame m (Build_frame (vs ++ defaults) inst) [::AI_label m [::] (to_e_list es)]]
   | r_invoke_host_success :
       forall a cl h t1s t2s ves vcs m n s s' r f hs hs',

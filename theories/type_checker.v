@@ -183,7 +183,10 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       match be with
       | BI_const_num v => type_update ts [::] [::T_num (typeof_num v)]
       | BI_const_vec v => type_update ts [::] [::T_vec (typeof_vec v)]
-      | BI_ref_null t => type_update ts [::]  [::T_ref (Ref_type true t)]
+      | BI_ref_null t =>
+          if source_heap_scopedb C.(tc_types) t then
+            type_update ts [::] [::T_ref (Ref_type true t)]
+          else None
       | BI_ref_is_null => type_update_ref_is_null ts
       | BI_ref_i31 =>
           type_update ts [::T_num T_i32] [::T_ref (Ref_type false HT_i31)]
@@ -569,6 +572,7 @@ Definition context_reverse (C: t_context): t_context :=
     tc_labels := map rev C.(tc_labels);
     tc_return := option_map rev C.(tc_return);
     tc_refs := C.(tc_refs);
+    tc_defined_types := C.(tc_defined_types);
   |}.
 
 Definition b_e_type_checker (C : t_context) (es : list basic_instruction) (tf : function_type) : bool :=

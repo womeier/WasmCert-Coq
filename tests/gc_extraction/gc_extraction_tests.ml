@@ -388,6 +388,108 @@ let () =
   let function_reference = VAL_ref (VAL_ref_func BigZ.zero) in
   let indexed nullable index =
     T_ref { ref_nullable = nullable; ref_heap = HT_type (BigZ.of_int index) } in
+  let producer = { blank with
+    mod_types = function_groups [Tf ([], [T_num T_i32])];
+    mod_globals = [{ modglob_type = { tg_mut = MUT_const; tg_t = indexed true 0 };
+      modglob_init = [BI_ref_null (HT_type BigZ.zero)] }] } in
+  let producer_store, producer_instance = instantiate Runtime.empty_store_record producer in
+  let consumer index = { blank with
+    mod_types = function_groups [Tf ([], [T_num T_i64]); Tf ([], [T_num T_i32])];
+    mod_imports = [{ imp_module = []; imp_name = [];
+      imp_desc = MID_global { tg_mut = MUT_const; tg_t = indexed true index } }];
+    mod_globals = [{ modglob_type = { tg_mut = MUT_const; tg_t = indexed true index };
+      modglob_init = [BI_global_get BigZ.zero] }];
+    mod_tables = [{ tt_limits = { lim_min = BigZ.one; lim_max = None };
+      tt_elem_type = { ref_nullable = true; ref_heap = HT_type (BigZ.of_int index) } }];
+    mod_elems = [{ modelem_type =
+      { ref_nullable = true; ref_heap = HT_type (BigZ.of_int index) };
+      modelem_init = [[BI_global_get BigZ.zero]];
+      modelem_mode = ME_active (BigZ.zero, [BI_const_num (VAL_int32 (i32 BigZ.zero))]) }]
+  } in
+  let imported_global = EV_global (List.hd producer_instance.inst_globals) in
+  begin match Runtime.interp_instantiate_wrapper (Obj.magic ()) producer_store
+      (consumer 1) [imported_global] with
+  | None, message -> failwith ("cross-index closed storage link failed: " ^ message)
+  | Some (store, (frame, initializers)), _ ->
+      check "production cross-index import preserves closed global descriptor"
+        ((List.nth store.s_globals 0).g_type = (List.nth store.s_globals 1).g_type);
+      check "production forwarded indexed null is lowered before storage"
+        ((List.nth store.s_globals 1).g_val = VAL_ref (VAL_ref_null HT_nofunc));
+      check "production element stores the consumer's canonical closed descriptor"
+        ((List.hd store.s_elems).eleminst_type =
+          (List.hd store.s_tables).tableinst_type.tt_elem_type);
+      let rec run fuel cfg depth =
+        if fuel = 0 then failwith "closed table initialization did not terminate";
+        match Runtime.run_one_step (Obj.magic ()) cfg depth with
+        | RSC_normal (_, next, next_depth) -> run (fuel - 1) next next_depth
+        | RSC_value (final_store, _, []) -> final_store
+        | _ -> failwith "closed table initialization failed"
+      in
+      let final_store = run 200
+        (Runtime.interp_cfg_of_wasm
+          (store, (frame, initializers)))
+        BigZ.zero in
+      check "production cross-index element initialization executes"
+        ((List.hd final_store.s_tables).tableinst_elem = [VAL_ref_null HT_nofunc])
+  end;
+  check "production same source index with different closed identity is unlinkable"
+    (match Runtime.interp_instantiate_wrapper (Obj.magic ()) producer_store
+        (consumer 0) [imported_global] with
+     | None, message -> message = "Import type checking failure"
+     | Some _, _ -> false);
+  let tail_origin, origin_instance = instantiate Runtime.empty_store_record
+    { blank with mod_types = function_groups [Tf ([], [])]; mod_funcs = [func 0] } in
+  let origin_address = List.hd origin_instance.inst_funcs in
+  let origin_id = List.hd origin_instance.inst_defined_types in
+  let closed_payload = CV_ref (true, CH_defined (CT_def origin_id)) in
+  let payload = VAL_ref (VAL_ref_func origin_address) in
+  check "tail fixture external non-null payload satisfies its closed descriptor"
+    (Runtime.check_closed_value tail_origin payload closed_payload);
+  let tail_store = { tail_origin with s_globals =
+    [{ g_type = { tg_mut = MUT_const; tg_t = closed_payload }; g_val = payload }] } in
+  let tail_inner = { blank with
+    mod_types = function_groups [Tf ([], []); Tf ([], [T_num T_i32]);
+      Tf ([indexed true 0], [T_num T_i32])];
+    mod_imports = [{ imp_module = []; imp_name = [];
+      imp_desc = MID_global { tg_mut = MUT_const; tg_t = indexed true 0 } }];
+    mod_funcs = [
+      { (func 2) with modfunc_body = [BI_const_num (VAL_int32 (i32 (BigZ.of_int 7)))] };
+      { (func 1) with modfunc_body = [BI_global_get BigZ.zero; BI_return_call BigZ.zero] }]
+  } in
+  let tail_store, tail_instance =
+    match Runtime.interp_instantiate_wrapper (Obj.magic ()) tail_store tail_inner
+      [EV_global BigZ.zero] with
+    | Some (s, (f, [])), _ -> s, f.f_inst
+    | _, message -> failwith ("indexed tail fixture inner module: " ^ message)
+  in
+  let outer = { blank with
+    mod_types = function_groups [Tf ([], [T_num T_i32])];
+    mod_imports = [{ imp_module = []; imp_name = []; imp_desc = MID_func BigZ.zero }];
+    mod_funcs = [{ (func 0) with modfunc_body = [BI_call BigZ.zero] }] } in
+  let tail_store, outer_instance =
+    match Runtime.interp_instantiate_wrapper (Obj.magic ()) tail_store outer
+      [EV_func (List.nth tail_instance.inst_funcs 1)] with
+    | Some (s, (f, [])), _ -> s, f.f_inst
+    | _, message -> failwith ("indexed tail fixture outer module: " ^ message)
+  in
+  check "tail fixture caller has no source name for the payload's canonical ID"
+    (not (List.mem origin_id outer_instance.inst_defined_types));
+  let invocation = match Runtime.invoke_extern tail_store
+      (EV_func (List.nth outer_instance.inst_funcs 1)) [] with
+    | Some instructions -> instructions
+    | None -> failwith "indexed tail fixture invocation rejected"
+  in
+  let rec run_tail fuel cfg depth =
+    if fuel = 0 then failwith "indexed tail fixture did not terminate";
+    match Runtime.run_one_step (Obj.magic ()) cfg depth with
+    | RSC_normal (_, next, next_depth) -> run_tail (fuel - 1) next next_depth
+    | RSC_value (_, _, [VAL_num (VAL_int32 result)]) ->
+        BigZ.equal (Wasm_int.Int32.unsigned result) (BigZ.of_int 7)
+    | _ -> failwith "indexed tail fixture execution failed"
+  in
+  check "indexed tail invocation executes after removing the defining source frame"
+    (run_tail 1000 (Runtime.interp_cfg_of_wasm
+      (tail_store, (Runtime.empty_frame, invocation))) BigZ.zero);
   check "closed runtime classifier retains native canonical identity"
     (Runtime.classify_value s2 function_reference =
       Some (CV_ref (false, CH_defined (CT_def (id 0 0)))));

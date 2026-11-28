@@ -48,7 +48,7 @@ Module Type Parametric_host.
 
   Axiom host_application_respect : forall hs s ts1 ts2 h vs hs' s' r,
       host_apply_pure hs s (Tf ts1 ts2) h vs = (hs', Some (s', r)) ->
-      result_types_agree s' ts2 r.
+       result_types_agree s' nil ts2 r.
 
 End Parametric_host.
 
@@ -258,8 +258,8 @@ Definition invoke_extern (s: store_record) (ext: extern_value) (args: list value
   match ext with
   | EV_func fi =>
       match lookup_N s.(s_funcs) fi with
-      | Some (FC_func_native (Tf ts1 ts2) _ _) =>
-          if (those (map (typeof_value s) args) == Some ts1) then
+       | Some (FC_func_native (Tf ts1 ts2) inst _) =>
+           if values_typing s inst.(inst_defined_types) args ts1 then
             Some (v_to_e_list args ++ [::AI_invoke fi])%list
           else None
       | _ => None

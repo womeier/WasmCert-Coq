@@ -1,6 +1,8 @@
 (* Lemmas and Tactics for dealing with subtypings *)
 
 From Wasm Require Export operations subtyping properties.
+From Wasm Require Import gc_function_subtyping_properties
+  gc_declaration_typing gc_declaration_typing_properties gc_type_context_properties.
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 
 (* see common.v *)
@@ -784,57 +786,92 @@ Section Host.
 
 Context {hfc: host_function_class} `{memory: BlockUpdateMemory}.
   
-Lemma value_typing_ref_impl: forall s v t,
-  value_typing s (VAL_ref v) t ->
+Lemma value_typing_ref_impl: forall s names v t,
+  value_typing s names (VAL_ref v) t ->
   exists tref, t = T_ref tref.
 Proof.
-  move => s v t Hvt.
-  unfold value_typing in Hvt; remove_bools_options.
-  simpl in *; remove_bools_options.
-  apply ref_subtyping in Hvt; subst.
-  by eexists.
+  move => s names v t Hvt.
+  destruct t as [n|w|r|]; try by exists r.
+  all: destruct v as [heap|address|address|payload]; try destruct heap;
+    unfold value_typing, closed_value_typing,
+      typeof_closed_value, typeof_closed_ref in Hvt;
+    simpl in Hvt; remove_bools_options; done.
 Qed.
 
-Lemma value_num_principal_typing: forall s v,
-    value_typing s (VAL_num v) (T_num (typeof_num v)).
+Lemma value_num_principal_typing: forall s names v,
+    value_typing s names (VAL_num v) (T_num (typeof_num v)).
 Proof.
-  move => s v.
-  unfold value_typing => /=.
-  by resolve_subtyping.
+  move => s names v.
+  by destruct v.
 Qed.
 
-Lemma value_vec_principal_typing: forall s v,
-    value_typing s (VAL_vec v) (T_vec (typeof_vec v)).
+Lemma value_num_expected s names number expected :
+  value_typing s names (VAL_num number) expected ->
+  expected = T_num (typeof_num number).
 Proof.
-  move => s v.
-  unfold value_typing => /=.
-  by resolve_subtyping.
+  destruct expected as [n|w|ref|]; unfold value_typing, closed_value_typing;
+    simpl.
+  - destruct n, number; simpl; intro H; try discriminate; reflexivity.
+  - destruct number; simpl; discriminate.
+  - destruct (gc_type_context.close_heap_type names BinNums.N0 (ref_heap ref));
+      simpl; intro H; rewrite ?andbF in H; discriminate.
+  - discriminate.
 Qed.
 
-Lemma value_ref_principal_typing: forall s v t,
-    typeof_ref s v = Some t ->
-    value_typing s (VAL_ref v) (T_ref t).
+Lemma value_vec_expected s names vector expected :
+  value_typing s names (VAL_vec vector) expected ->
+  expected = T_vec (typeof_vec vector).
 Proof.
-  move => s v t.
-  unfold typeof_ref, value_typing; destruct v => /=; move => H; remove_bools_options => /=; by resolve_subtyping.
+  destruct expected as [n|w|ref|]; unfold value_typing, closed_value_typing;
+    simpl.
+  - destruct vector; simpl; discriminate.
+  - destruct w, vector; intro H; reflexivity.
+  - destruct (gc_type_context.close_heap_type names BinNums.N0 (ref_heap ref));
+      simpl; intro H; rewrite ?andbF in H; discriminate.
+  - discriminate.
 Qed.
 
-Lemma value_typing_trans: forall s v t t',
-    value_typing s v t ->
+Lemma value_vec_principal_typing: forall s names v,
+    value_typing s names (VAL_vec v) (T_vec (typeof_vec v)).
+Proof.
+  move => s names v.
+  by destruct v.
+Qed.
+
+Lemma value_typing_trans: forall s names v t t',
+    value_typing s names v t ->
     t <t: t' ->
-    value_typing s v t'.
+    value_typing s names v t'.
 Proof.
-  unfold value_typing.
-  move => s v t t' Hvaltype Hsub; remove_bools_options.
-  by resolve_subtyping.
+  move => s names v t t' Hvaltype Hsub.
+  unfold value_subtyping in Hsub.
+  move/orP in Hsub. destruct Hsub as [Same|Bottom].
+  - by move/eqP in Same; subst.
+  - move/eqP in Bottom; subst t.
+    by unfold value_typing in Hvaltype.
 Qed.
 
-Lemma values_typing_trans: forall s vs ts1 ts2,
-    values_typing s vs ts1 ->
-    ts1 <ts: ts2 ->
-    values_typing s vs ts2.
+Lemma value_ref_principal_typing s names ref source principal :
+  canonical_registry_super_wf s.(s_types) ->
+  gc_type_context.close_value_type names BinNums.N0 (T_ref source) = Some principal ->
+  typeof_closed_value s (VAL_ref ref) = Some principal ->
+  closed_value_validb s.(s_types) principal = true ->
+  value_typing s names (VAL_ref ref) (T_ref source).
 Proof.
-  intros s vs ts1 ts2 Hvt Hsub.
+  move => WF Closed Principal Valid.
+  unfold value_typing, closed_value_typing.
+  rewrite Closed Principal Valid /=.
+  apply (proj2 (closed_value_matchesb_correct _ _ _ WF)).
+  apply closed_value_matches_refl_valid.
+  by apply (proj1 (closed_value_validb_correct _ _)).
+Qed.
+
+Lemma values_typing_trans: forall s names vs ts1 ts2,
+    values_typing s names vs ts1 ->
+    ts1 <ts: ts2 ->
+    values_typing s names vs ts2.
+Proof.
+   intros s names vs ts1 ts2 Hvt Hsub.
   unfold values_typing in *.
   apply all2_spec; first by apply values_subtyping_size in Hsub; apply all2_size in Hvt; lias.
   move => n v vt Hnth1 Hnth2.
@@ -844,14 +881,49 @@ Proof.
   by eapply value_typing_trans; eauto.
 Qed.
 
+Lemma values_typing_transport s actual_names expected_names vs actual_types expected_types :
+  canonical_registry_valid (s_types s) ->
+  source_results_matchb (s_types s) actual_names expected_names actual_types expected_types ->
+  values_typing s actual_names vs actual_types ->
+  values_typing s expected_names vs expected_types.
+Proof.
+  move => Valid.
+  move: vs expected_types.
+  induction actual_types as [|actual actual_types IH];
+    move => vs expected_types Match Typed;
+    destruct vs as [|value vs], expected_types as [|expected expected_types];
+    simpl in *; try done.
+  unfold source_results_matchb in Match; simpl in Match.
+  move/andP in Match. destruct Match as [Head Tail].
+  move/andP in Typed. destruct Typed as [Value Values].
+  apply/andP; split; last exact (IH _ _ Tail Values).
+  unfold source_value_matchesb in Head.
+  unfold value_typing in Value |- *.
+  destruct (gc_type_context.close_value_type actual_names BinNums.N0 actual)
+    as [a|] eqn:A; last discriminate.
+  destruct (gc_type_context.close_value_type expected_names BinNums.N0 expected)
+    as [b|] eqn:B; last discriminate.
+  remove_bools_options.
+  by eapply closed_value_typing_subsumption; eauto.
+Qed.
+
+Lemma source_results_matchb_length registry actual_names expected_names actual expected :
+  source_results_matchb registry actual_names expected_names actual expected ->
+  length actual = length expected.
+Proof.
+  unfold source_results_matchb. move: expected.
+  induction actual; destruct expected; simpl; try discriminate; first reflexivity.
+  move/andP => [_ Tail]. f_equal. by apply IHactual.
+Qed.
+
 (* Lemma for eliminating subtypes *)
-Lemma operand_subtyping: forall s ops ops0 vts ts1 ts2 ts',
-  values_typing s (rev (ops ++ ops0)) vts ->
+Lemma operand_subtyping: forall s names ops ops0 vts ts1 ts2 ts',
+  values_typing s names (rev (ops ++ ops0)) vts ->
   (Tf ts1 ts2 <ti: Tf vts ts') ->
   size ops = size ts1 ->
-  values_typing s ops (rev ts1).
+  values_typing s names ops (rev ts1).
 Proof.
-  move => s ops ops0 vts ts1 ts2 ts' Hvt Hsub Hsize.
+  move => s names ops ops0 vts ts1 ts2 ts' Hvt Hsub Hsize.
   apply values_typing_rev in Hvt.
   apply instr_subtyping_consumed_rev_prefix in Hsub as [ts_prefix [Heqrev Hsub]].
   rewrite Heqrev in Hvt.
@@ -861,12 +933,12 @@ Proof.
   by rewrite size_rev in Hsub; lias.
 Qed.
 
-Lemma operand_subtyping_suffix1: forall s v1 ops0 vts ts0 t1 ts2 ts',
-  values_typing s (rev (v1 :: ops0)) vts ->
+Lemma operand_subtyping_suffix1: forall s names v1 ops0 vts ts0 t1 ts2 ts',
+  values_typing s names (rev (v1 :: ops0)) vts ->
   (Tf (ts0 ++ [::t1]) ts2 <ti: Tf vts ts') ->
-  values_typing s [::v1] [::t1].
+  values_typing s names [::v1] [::t1].
 Proof.
-  intros ???????? Hvt Hsub.
+  intros ????????? Hvt Hsub.
   apply values_typing_rev in Hvt.
   apply instr_subtyping_consumed_rev_prefix in Hsub as [ts_prefix [Heqrev Hsub]].
   rewrite Heqrev in Hvt.
@@ -881,16 +953,15 @@ End Host.
 
 Ltac resolve_value_principal_typing :=
   repeat match goal with
-  | |- is_true (value_typing ?s (VAL_num ?v) ?t) =>
-      try by apply value_num_principal_typing
-  | |- is_true (value_typing ?s (VAL_vec ?v) ?t) =>
-      try by apply value_vec_principal_typing
-  | H: typeof_ref ?s ?v = Some ?tref
-    |- is_true (value_typing ?s (VAL_ref ?v) ?t) =>
-      try by apply (value_ref_principal_typing H)
-  | H: is_true (value_typing ?s ?v ?t),
+  | |- is_true (value_typing ?s ?names (VAL_num ?v) ?t) =>
+      solve [apply value_num_principal_typing]
+  | |- is_true (value_typing ?s ?names (VAL_vec ?v) ?t) =>
+      solve [apply value_vec_principal_typing]
+  | |- is_true (value_typing ?s ?names (VAL_ref ?v) ?t) =>
+      solve [eapply value_ref_principal_typing; eauto]
+  | H: is_true (value_typing ?s ?names ?v ?t),
       Hsub: is_true (?t <t: ?t') |-
-      context [value_typing ?s ?v ?t'] =>
+       context [value_typing ?s ?names ?v ?t'] =>
       erewrite (value_typing_trans H Hsub); eauto => //=
   end.
 

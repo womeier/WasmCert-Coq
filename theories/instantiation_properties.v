@@ -5,6 +5,9 @@ From Stdlib Require Import Program.Equality NArith.
 Require Export instantiation_spec.
 Require Export type_preservation properties.
 From Wasm Require Import extended_const.
+From Wasm Require Import closed_initializer_properties closed_operand_properties
+  gc_closed_runtime_properties gc_type_context_properties gc_declaration_typing
+  gc_declaration_typing_properties.
 
 (* see common.v *)
 Set SsrOldRewriteGoalsOrder.
@@ -240,7 +243,7 @@ Lemma alloc_table_iota_N modtables ws ws' l:
   alloc_tabs ws modtables = (ws', l) ->
   l = iota_N (length (s_tables ws)) (length modtables) /\
   ws.(s_funcs) = ws'.(s_funcs) /\
-  ws'.(s_tables) = ws.(s_tables) ++ map (fun mf => gen_table_instance mf (VAL_ref_null (ref_heap mf.(tt_elem_type)))) modtables /\
+  ws'.(s_tables) = ws.(s_tables) ++ map (fun '(mf, ref) => gen_table_instance mf ref) modtables /\
   ws.(s_mems) = ws'.(s_mems) /\
   ws.(s_globals) = ws'.(s_globals) /\
   ws.(s_elems) = ws'.(s_elems) /\
@@ -257,7 +260,7 @@ Proof.
   - move => s s0 x xs' ys' s' y Hallocx [Hys [? [Hcomp [? [?[??]]]]]].
     repeat rewrite -> iota_N_iota_N in *.
     unfold alloc_tab, alloc_tab_ref, add_table in Hallocx.
-    destruct x, tt_limits.
+    destruct x as [[[minimum maximum] reference] ref].
     injection Hallocx as ->; subst => /=.
     rewrite List.length_app map_cat iota_N_extend Hcomp => /=.
     repeat split => //=.
@@ -320,7 +323,7 @@ Lemma alloc_global_iota_N modglobals g_inits ws ws' l:
   ws.(s_funcs) = ws'.(s_funcs) /\
   ws.(s_tables) = ws'.(s_tables) /\
   ws.(s_mems) = ws'.(s_mems) /\
-  ws'.(s_globals) = ws.(s_globals) ++ map (fun '({| modglob_type := gt; modglob_init := ge |}, v) => {| g_type := gt; g_val := v |} ) (List.combine modglobals g_inits) /\
+  ws'.(s_globals) = ws.(s_globals) ++ map (fun '(gt, v) => {| g_type := gt; g_val := v |} ) (List.combine modglobals g_inits) /\
   ws.(s_elems) = ws'.(s_elems) /\
   ws.(s_datas) = ws'.(s_datas).
 Proof.
@@ -360,7 +363,7 @@ Lemma alloc_elem_iota_N modelems r_inits ws ws' l:
   ws.(s_tables) = ws'.(s_tables) /\
   ws.(s_mems) = ws'.(s_mems) /\
   ws.(s_globals) = ws'.(s_globals) /\
-  ws'.(s_elems) = ws.(s_elems) ++ map (fun '(elem, refs) => {| eleminst_type := elem.(modelem_type); eleminst_elem := refs |} ) (List.combine modelems r_inits) /\
+  ws'.(s_elems) = ws.(s_elems) ++ map (fun '(elem, refs) => {| eleminst_type := elem; eleminst_elem := refs |} ) (List.combine modelems r_inits) /\
   ws.(s_datas) = ws'.(s_datas).
 Proof.
   unfold alloc_elems.
@@ -547,13 +550,13 @@ Qed.
 
 Lemma vt_imps_comp_len s (v_imps: list extern_value) t_imps:
   List.Forall2 (external_typing s) v_imps t_imps ->
-  (length (ext_funcs v_imps) = length (ext_t_funcs t_imps) /\
-    length (ext_tables v_imps) = length (ext_t_tables t_imps) /\
-    length (ext_mems v_imps) = length (ext_t_mems t_imps) /\
-    length (ext_globals v_imps) = length (ext_t_globals t_imps)).
+  (length (ext_funcs v_imps) = length (closed_ext_t_funcs t_imps) /\
+    length (ext_tables v_imps) = length (closed_ext_t_tables t_imps) /\
+    length (ext_mems v_imps) = length (closed_ext_t_mems t_imps) /\
+    length (ext_globals v_imps) = length (closed_ext_t_globals t_imps)).
 Proof.
   move: t_imps.
-  induction v_imps; move => t_imps Hexttype; destruct t_imps; try by apply List.Forall2_length in Hexttype.
+  induction v_imps; move => t_imps Hexttype; destruct t_imps as [|e t_imps]; try by apply List.Forall2_length in Hexttype.
   inversion Hexttype; subst; clear Hexttype.
   apply IHv_imps in H4.
   destruct H4 as [Hft [Htt [Hmt Hgt]]].
@@ -590,18 +593,18 @@ Qed.
 
 Lemma vt_imps_funcs_lookup s v_imps t_imps gt (k: nat):
   List.Forall2 (external_typing s) v_imps t_imps ->
-  List.nth_error (ext_t_funcs t_imps) k = Some gt ->
+  List.nth_error (closed_ext_t_funcs t_imps) k = Some gt ->
   exists n gn,
     List.nth_error (ext_funcs v_imps) k = Some gn /\
     List.nth_error v_imps n = Some (EV_func gn) /\
-    List.nth_error t_imps n = Some (ET_func gt).
+    List.nth_error t_imps n = Some (CET_func gt).
 Proof.
   move: t_imps k gt.
-  induction v_imps; destruct t_imps; move => k gt Hall2; (try by inversion Hall2); (try by destruct k).
+  induction v_imps; destruct t_imps as [|e t_imps]; move => k gt Hall2; (try by inversion Hall2); (try by destruct k).
   move => Ht.
   inversion Hall2; subst; clear Hall2.
   unfold external_typing, ext_typing in H2.
-  destruct a, e => //; (try by simpl in H2); remove_bools_options; simpl ext_t_funcs in Ht.
+   destruct a, e => //; (try by simpl in H2); remove_bools_options; simpl closed_ext_t_funcs in Ht.
   1 : {
     destruct k; first by exists 0, f => /=; simpl in Ht; inversion Ht; subst.
     simpl in *.
@@ -613,18 +616,18 @@ Qed.
 
 Lemma vt_imps_tables_lookup s v_imps t_imps gt (k: nat):
   List.Forall2 (external_typing s) v_imps t_imps ->
-  List.nth_error (ext_t_tables t_imps) k = Some gt ->
+  List.nth_error (closed_ext_t_tables t_imps) k = Some gt ->
   exists n gn,
     List.nth_error (ext_tables v_imps) k = Some gn /\
     List.nth_error v_imps n = Some (EV_table gn) /\
-    List.nth_error t_imps n = Some (ET_table gt).
+    List.nth_error t_imps n = Some (CET_table gt).
 Proof.
   move: t_imps k gt.
-  induction v_imps; destruct t_imps; move => k gt Hall2; (try by inversion Hall2); (try by destruct k).
+  induction v_imps; destruct t_imps as [|e t_imps]; move => k gt Hall2; (try by inversion Hall2); (try by destruct k).
   move => Ht.
   inversion Hall2; subst; clear Hall2.
   unfold external_typing, ext_typing in H2.
-  destruct a, e => //; (try by simpl in H2); remove_bools_options; simpl ext_t_tables in Ht.
+   destruct a, e => //; (try by simpl in H2); remove_bools_options; simpl closed_ext_t_tables in Ht.
   2 : {
     destruct k; first by exists 0, t => /=; simpl in Ht; inversion Ht; subst.
     simpl in *.
@@ -636,18 +639,18 @@ Qed.
 
 Lemma vt_imps_mems_lookup s v_imps t_imps gt (k: nat):
   List.Forall2 (external_typing s) v_imps t_imps ->
-  List.nth_error (ext_t_mems t_imps) k = Some gt ->
+  List.nth_error (closed_ext_t_mems t_imps) k = Some gt ->
   exists n gn,
     List.nth_error (ext_mems v_imps) k = Some gn /\
     List.nth_error v_imps n = Some (EV_mem gn) /\
-    List.nth_error t_imps n = Some (ET_mem gt).
+    List.nth_error t_imps n = Some (CET_mem gt).
 Proof.
   move: t_imps k gt.
-  induction v_imps; destruct t_imps; move => k gt Hall2; (try by inversion Hall2); (try by destruct k).
+  induction v_imps; destruct t_imps as [|e t_imps]; move => k gt Hall2; (try by inversion Hall2); (try by destruct k).
   move => Ht.
   inversion Hall2; subst; clear Hall2.
   unfold external_typing, ext_typing in H2.
-  destruct a, e => //; (try by simpl in H2); remove_bools_options; simpl ext_t_mems in Ht.
+   destruct a, e => //; (try by simpl in H2); remove_bools_options; simpl closed_ext_t_mems in Ht.
   3 : {
     destruct k; first by exists 0, m => /=; simpl in Ht; inversion Ht; subst.
     simpl in *.
@@ -659,18 +662,18 @@ Qed.
 
 Lemma vt_imps_globals_lookup s v_imps t_imps gt (k: nat):
   List.Forall2 (external_typing s) v_imps t_imps ->
-  List.nth_error (ext_t_globals t_imps) k = Some gt ->
+  List.nth_error (closed_ext_t_globals t_imps) k = Some gt ->
   exists n gn,
     List.nth_error (ext_globals v_imps) k = Some gn /\
     List.nth_error v_imps n = Some (EV_global gn) /\
-    List.nth_error t_imps n = Some (ET_global gt).
+    List.nth_error t_imps n = Some (CET_global gt).
 Proof.
   move: t_imps k gt.
-  induction v_imps; destruct t_imps; move => k gt Hall2; (try by inversion Hall2); (try by destruct k).
+  induction v_imps; destruct t_imps as [|e t_imps]; move => k gt Hall2; (try by inversion Hall2); (try by destruct k).
   move => Ht.
   inversion Hall2; subst; clear Hall2.
   unfold external_typing, ext_typing in H2.
-  destruct a, e => //; (try by simpl in H2); remove_bools_options; simpl ext_t_globals in Ht.
+   destruct a, e => //; (try by simpl in H2); remove_bools_options; simpl closed_ext_t_globals in Ht.
   4 : {
     destruct k; first by exists 0, g => /=; simpl in Ht; inversion Ht; subst.
     simpl in *.
@@ -708,9 +711,9 @@ Qed.
 
 Lemma vt_imps_globals_typing s v_imps t_imps gt (k: nat):
   List.Forall2 (external_typing s) v_imps t_imps ->
-  List.nth_error (ext_t_globals t_imps) k = Some gt ->
+  List.nth_error (closed_ext_t_globals t_imps) k = Some gt ->
   exists gn, List.nth_error (ext_globals v_imps) k = Some gn /\
-          external_typing s (EV_global gn) (ET_global gt).
+          external_typing s (EV_global gn) (CET_global gt).
 Proof.
   move => HForall2 Htl.
   eapply vt_imps_globals_lookup in Htl as [n [gn [Hvl [Hnth Ht]]]] => //; eauto.
@@ -720,39 +723,63 @@ Proof.
   by simplify_multieq.
 Qed.
 
-Lemma init_value_typing: forall C hs s f bes v t,
+Lemma init_value_typing: forall C closed hs s f bes v t,
   reduce_trans (hs, s, f, (to_e_list bes)) (hs, s, f, [::$V v]) ->
   const_exprs C bes ->
   be_typing C bes (Tf nil [::t]) ->
+  canonical_registry_valid s.(s_types) ->
+  registered_function_references s ->
+  close_t_context C = Some closed ->
+  C.(tc_defined_types) = f.(f_inst).(inst_defined_types) ->
   (forall n addr, List.nth_error f.(f_inst).(inst_funcs) n = Some addr ->
              (addr < N.of_nat (length s.(s_funcs)))%N) ->
   (forall gidx v t, sglob_val s f.(f_inst) gidx = Some v ->
                lookup_N C.(tc_globals) gidx = Some t ->
-               value_typing s v t.(tg_t)) ->
-  value_typing s v t.
+                value_typing s f.(f_inst).(inst_defined_types) v t.(tg_t)) ->
+  value_typing s f.(f_inst).(inst_defined_types) v t.
 Proof.
-  move => C hs s f bes v t Hreduce Hconst Hbet Hsfunc Hsglobtype.
+  move => C closed hs s f bes v t Hreduce Hconst Hbet Registry Registered
+    Closed Names Hsfunc Hsglobtype.
   by eapply extended_init_value_typing; eauto.
+Qed.
+
+Lemma closed_import_globals_lookup registry actual expected index gt :
+  List.Forall2 (closed_import_subtyping registry) actual expected ->
+  List.nth_error (closed_ext_t_globals expected) index = Some gt ->
+  exists gt',
+    List.nth_error (closed_ext_t_globals actual) index = Some gt' /\
+    closed_value_matchesb registry gt'.(tg_t) gt.(tg_t).
+Proof.
+  move: actual index.
+  induction expected as [|e expected IH]; move => [|a actual] index Hall Lookup;
+    inversion Hall; subst; clear Hall; try by destruct index.
+  unfold closed_import_subtyping in H2.
+  destruct a, e => //; simpl in H2; remove_bools_options;
+    cbn [closed_ext_t_globals pmap] in Lookup |- *.
+  all: try by eapply IH; eauto.
+  destruct index as [|index].
+  - injection Lookup as <-. eexists; split; [reflexivity|eassumption].
+  - by eapply IH; eauto.
 Qed.
 
 Lemma imported_global_value_typing s s' f v_imps t_imps t_imps_mod added_globals added_addrs :
   store_typing s ->
   store_extension s s' ->
   List.Forall2 (external_typing s) v_imps t_imps ->
-  List.Forall2 import_subtyping t_imps t_imps_mod ->
+  canonical_registry_valid s'.(s_types) ->
+  List.Forall2 (closed_import_subtyping s'.(s_types)) t_imps t_imps_mod ->
   s'.(s_globals) = s.(s_globals) ++ added_globals ->
   f.(f_inst).(inst_globals) = ext_globals v_imps ++ added_addrs ->
   forall idx v gt, sglob_val s' f.(f_inst) idx = Some v ->
-    lookup_N (ext_t_globals t_imps_mod) idx = Some gt ->
-    value_typing s' v gt.(tg_t).
+    lookup_N (closed_ext_t_globals t_imps_mod) idx = Some gt ->
+    closed_value_typing s' v gt.(tg_t).
 Proof.
-  move => HST Hext Himps Hsub Hgs Hinst idx v gt Hget Hlookup.
-  eapply import_subtyping_globs_impl' in Hsub as [gt' [Hnthsub Hsub]]; eauto.
-  move/eqP: Hsub => Hsub; subst gt'.
+  move => HST Hext Himps Registry Hsub Hgs Hinst idx v gt Hget Hlookup.
+  destruct (closed_import_globals_lookup Hsub Hlookup) as [gt' [Hnthsub Match]].
   eapply vt_imps_globals_typing in Hnthsub as [addr [Haddr Htext]]; eauto.
   unfold external_typing, ext_typing, ext_global_typing in Htext.
   destruct (lookup_N (s_globals s) addr) as [gi|] eqn:Hgi => //.
-  injection Htext as <-.
+  injection Htext as Descriptor.
   unfold sglob_val, sglob, sglob_ind in Hget.
   rewrite Hinst /lookup_N in Hget.
   rewrite List.nth_error_app1 in Hget; last by apply nth_error_Some_length in Haddr.
@@ -761,13 +788,20 @@ Proof.
   rewrite List.nth_error_app1 in Hget; last by apply nth_error_Some_length in Hgi.
   rewrite Hgi /= in Hget.
   injection Hget as <-.
-  destruct s; simpl in *.
-  destruct HST as [_ [_ [_ [_ [Hglobals _]]]]].
+  destruct HST as [_ Hcomponents].
+  have Hglobals : List.Forall
+      (fun x => exists t, globalinst_typing s x = Some t) (s_globals s).
+  { destruct s; exact (proj1 (proj2 (proj2 (proj2 Hcomponents)))). }
   eapply Forall_lookup in Hglobals as [gtype Htyped]; eauto.
   unfold globalinst_typing in Htyped.
-  destruct gi => /=.
+  destruct gi as [descriptor value]. simpl in *.
   remove_bools_options; subst.
-  by eapply value_typing_extension; eauto.
+  change (closed_operand_typing s' value (CO_value (tg_t gt))).
+  eapply operand_subtyping_acceptance with (actual := CO_value (tg_t gtype)).
+  - exact Registry.
+  - change (closed_value_typing s' value (tg_t gtype)).
+    by eapply closed_value_typing_store_extension; eauto.
+  - by apply csv_match.
 Qed.
 
 End Host.

@@ -49,9 +49,10 @@ Class host := {
       store_typing st ->
       store_typing st' (** [host_application] preserves store typing. **) ;
     host_application_respect : forall s t1s t2s st h vs s' st' r,
-      values_typing st vs t1s ->
+      values_typing st nil vs t1s ->
       host_application s st (Tf t1s t2s) h vs s' (Some (st', r)) ->
-      result_types_agree st' t2s r (** [host_application] respects types. **)
+      result_types_agree st' nil t2s r (** [host_application] respects types.
+        Host signatures have no module-local source name space. **)
   }.
 
 End Predicate.

@@ -4,7 +4,7 @@
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From compcert Require Floats.
 From Wasm Require Export common memory datatypes_properties list_extra simd_execute.
-From Wasm Require Import gc_type_context.
+From Wasm Require Import gc_type_context gc_declaration_typing.
 From Stdlib Require Import ZArith.
 
 (* see common.v *)
@@ -78,7 +78,20 @@ Definition lookup_func_defined_type (s : store_record) (address : funcaddr) :
   | None => None
   end.
 
-Definition empty_t_context := Build_t_context nil nil nil nil nil nil nil nil nil None nil.
+Definition function_reference_match (s : store_record) (inst : moduleinst)
+    (address : funcaddr) (index : typeidx) : bool :=
+  match lookup_func_defined_type s address, resolve_inst_type inst index with
+  | Some actual, Some expected =>
+      match gc_type_context.expand_function_type s.(s_types) actual,
+            gc_type_context.expand_function_type s.(s_types) expected with
+      | Some _, Some _ => gc_type_context.defined_type_matches s.(s_types) actual expected
+      | _, _ => false
+      end
+  | _, _ => false
+  end.
+
+Definition empty_t_context : t_context :=
+  Build_t_context nil nil nil nil nil nil nil nil nil None nil nil.
 
 (** read `len` bytes from `m` starting at `start_idx` *)
 Definition read_bytes (m : meminst) (start_idx : N) (len : nat) : option bytes :=
@@ -283,6 +296,19 @@ Definition default_val (t: value_type) : option value :=
 Definition default_vals (ts : seq value_type) : option (seq value) :=
   those (map default_val ts).
 
+(** Source defaults above decide defaultability only. Execution closes the
+    annotation in its defining instance and lowers indexed reference nulls. *)
+Definition runtime_default_val registry names (source : value_type) : option value :=
+  match gc_type_context.close_value_type names 0 source with
+  | Some (CV_num t) => Some (VAL_num (bitzero t))
+  | Some (CV_vec _) => Some (VAL_vec (VAL_vec128 SIMD.v128_default))
+  | Some (CV_ref true heap) => option_map VAL_ref (lower_closed_null registry heap)
+  | _ => None
+  end.
+
+Definition runtime_default_vals registry names (types : list value_type) : option (list value) :=
+  those (map (runtime_default_val registry names) types).
+
 
 Definition func_agree (t1 t2: function_type) : bool :=
   t1 == t2.
@@ -297,6 +323,7 @@ Definition global_agree (t1 t2: global_type) : bool :=
   t1 == t2.
           
 Definition context_agree (C C': t_context) : bool :=
+  (C.(tc_defined_types) == C'.(tc_defined_types)) &&
   (C.(tc_types) == C'.(tc_types)) &&
   (all2 func_agree C.(tc_funcs) C'.(tc_funcs)) &&
   (all2 table_agree C.(tc_tables) C'.(tc_tables)) &&
@@ -1246,13 +1273,17 @@ Definition limits_extension (l1 l2: limits) : bool :=
   (N.leb l1.(lim_min) l2.(lim_min)) &&
     (l1.(lim_max) == l2.(lim_max)).
 
-Definition table_type_extension (t1 t2: table_type) : bool :=
-  (t1.(tt_elem_type) == t2.(tt_elem_type)) &&
+Definition table_type_extension_gen {R : Set} (eqr : R -> R -> bool)
+    (t1 t2: table_type_gen R) : bool :=
+  (eqr t1.(tt_elem_type) t2.(tt_elem_type)) &&
   (limits_extension t1.(tt_limits) t2.(tt_limits)).
+
+Definition table_type_extension := @table_type_extension_gen reference_type (fun a b => a == b).
+Definition closed_table_type_extension := @table_type_extension_gen closed_reference_type (fun a b => a == b).
 
 (* Spec has an error here -- same for mem extension *)
 Definition table_extension (t1 t2 : tableinst) : bool :=
-  (table_type_extension t1.(tableinst_type) t2.(tableinst_type)) &&
+  (closed_table_type_extension t1.(tableinst_type) t2.(tableinst_type)) &&
   (tab_size t1 <= tab_size t2).
 
 Definition mem_extension (m1 m2 : meminst) : bool :=
@@ -1281,7 +1312,8 @@ Definition component_extension {T: Type} (ext_rel: T -> T -> bool) (l1 l2: list 
    However, with the introduction of the full table/memory types in Wasm 2.0,
    the table/memory grow instructions modify the corresponding types.
 *)
-Definition context_extension C C' : bool :=
+Definition context_extension (C C' : t_context) : bool :=
+  (C.(tc_defined_types) == C'.(tc_defined_types)) &&
   (C.(tc_types) == C'.(tc_types)) &&
   (C.(tc_funcs) == C'.(tc_funcs)) &&
   (all2 table_type_extension C.(tc_tables) C'.(tc_tables)) &&
@@ -1336,7 +1368,7 @@ Definition es_is_basic (es: list administrative_instruction): bool :=
 
 Definition vref_to_e (vref: value_ref) : administrative_instruction :=
   match vref with
-  | VAL_ref_null t => AI_basic (BI_ref_null t)
+  | VAL_ref_null t => AI_ref_null t
   | VAL_ref_func addr => AI_ref addr
   | VAL_ref_extern eaddr => AI_ref_extern eaddr
   | VAL_ref_i31 n => AI_ref_i31 n
@@ -1356,7 +1388,7 @@ Definition v_to_e_list (ves : seq value) : seq administrative_instruction :=
 
 Definition e_to_vref (e: administrative_instruction) : value_ref :=
   match e with
-  | AI_basic (BI_ref_null t) => VAL_ref_null t
+  | AI_ref_null t => VAL_ref_null t
   | AI_ref addr => VAL_ref_func addr
   | AI_ref_extern eaddr => VAL_ref_extern eaddr
   | AI_ref_i31 n => VAL_ref_i31 n
@@ -1365,7 +1397,7 @@ Definition e_to_vref (e: administrative_instruction) : value_ref :=
 
 Definition e_to_vref_opt (e: administrative_instruction) : option value_ref :=
   match e with
-  | AI_basic (BI_ref_null t) => Some (VAL_ref_null t)
+  | AI_ref_null t => Some (VAL_ref_null t)
   | AI_ref addr => Some (VAL_ref_func addr)
   | AI_ref_extern eaddr => Some (VAL_ref_extern eaddr)
   | AI_ref_i31 n => Some (VAL_ref_i31 n)

@@ -210,7 +210,7 @@ Theorem module_type_checker_complete m impts expts :
 Proof.
   destruct m.
   rewrite /module_typing.
-  move => [[registry [ids [Hclosed Hidentity]]] Hcomponents].
+  move => [[registry [ids [Hclosed [Hidentity Hruntime]]]] Hcomponents].
   unfold module_components_typing in Hcomponents.
   move: Hcomponents.
   move => [fts [tts [mts [gts [rts [dts
@@ -257,7 +257,7 @@ Proof.
   cbn [tc_tables const_context_add_globals] in Hrts.
   cbn [tc_mems const_context_add_globals] in Hdts.
   unfold module_type_checker.
-  rewrite Hclosed Hidentity.
+  rewrite Hclosed Hidentity Hruntime /=.
   unfold module_components_type_checker.
   rewrite Hfts Himpts Hrts Hdts.
   change ((if all (module_func_type_checker Cfull) mod_funcs &&

@@ -6,6 +6,7 @@ From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From HB Require Import structures.
 From Stdlib Require Import Program NArith ZArith Wf_nat.
 From Wasm Require Export common operations datatypes_properties properties opsem typing_inversion tactic.
+From Wasm Require Import closed_typing_properties.
 From Stdlib Require Import FunInd Recdef.
 
 (* see common.v *)
@@ -529,6 +530,7 @@ Proof.
     | n ces es
      | n f es
      | i31
+     | null_heap
      ]; simpl in *; try by (injection Hdecomp as <- <- <-; unfold valid_ccs).
   - destruct acc as [ | [fc lcs] ccs'] => //.
     eapply IH in Hdecomp; eauto; apply split_vals_inv in Hsplit as ->.
@@ -561,6 +563,7 @@ Proof.
     | n ces es
      | n f es
      | i31
+     | null_heap
      ]; simpl in *; try by injection Hdecomp as <- <- <-.
   - injection Hdecomp as <- <- <- => /=.
     apply split_vals_nconst in Hsplit.
@@ -574,6 +577,8 @@ Proof.
     by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
    - eapply IH in Hdecomp; eauto; apply split_vals_inv in Hsplit as ->.
      by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
+   - injection Hdecomp as <- <- <- => /=.
+      by apply split_vals_nconst in Hsplit.
    - injection Hdecomp as <- <- <- => /=.
      by apply split_vals_nconst in Hsplit.
 Qed.
@@ -712,6 +717,7 @@ Proof.
       | n ces es
        | n f es
        | i31
+       | null_heap
        ]; simpl in *; try by injection Hdecomp as <- <- <- => /=; apply split_vals_inv in Hsplit as ->.
     (* Label *)
     + destruct acc as [ | [fc lcs] ccs']; first by inversion Hdecomp => /=.
@@ -841,23 +847,24 @@ Section Typing.
 Lemma fc_typing: forall (fc: frame_ctx) es s C0 tf,
     e_typing s C0 (fc ⦃ es ⦄) tf ->
     exists C ret,
-      frame_typing s fc.(FC_frame) C /\
+      closed_frame_typing s fc.(FC_frame) C /\
         fc.(FC_arity) = (length ret) /\
-        e_typing s (upd_return C (Some ret)) es (Tf nil ret).
+        e_typing s (upd_return C (Some ret)) es (Closed_ft nil ret).
 Proof.
   move => fc es s C [ts1 ts2] /= Htype.
   rewrite - cat1s in Htype.
   unfold vs_to_es in Htype.
   invert_e_typing.
-  by do 2 eexists; repeat split; eauto.
+  exists C0, extr0; repeat split; eauto.
+  by rewrite (List.Forall2_length Hconjl2).
 Qed.
 
 Lemma lc_typing: forall (lc: label_ctx) es s C0 tf,
     e_typing s C0 (lc ⦃ es ⦄) tf ->
     exists ts1 ts2,
-      e_typing s C0 (lc.(LC_cont)) (Tf ts1 ts2) /\
+      e_typing s C0 (lc.(LC_cont)) (Closed_ft ts1 ts2) /\
       length ts1 = lc.(LC_arity) /\
-      e_typing s (upd_label C0 ([::ts1] ++ C0.(tc_labels))) es (Tf nil ts2).
+      e_typing s (upd_label C0 ([::ts1] ++ C0.(tc_labels))) es (Closed_ft nil ts2).
 Proof.
   move => lc es s C [ts1 ts2] /= Htype.
   unfold label_ctx_fill in Htype.
@@ -865,13 +872,13 @@ Proof.
   by do 2 eexists; split; eauto.
 Qed.
 
-Definition lab_lc_agree (lab: list value_type) (lc: label_ctx) : bool :=
+Definition lab_lc_agree (lab: closed_operand_result_type) (lc: label_ctx) : bool :=
   length lab == lc.(LC_arity).
 
 Lemma lcs_typing_exists: forall (lcs: list label_ctx) es s C0 tf,
     e_typing s C0 (lcs ⦃ es ⦄) tf ->
     exists labs ts1 ts2,
-      e_typing s (upd_label C0 (labs ++ C0.(tc_labels))) es (Tf ts1 ts2) /\
+      e_typing s (upd_label C0 (labs ++ C0.(tc_labels))) es (Closed_ft ts1 ts2) /\
       all2 lab_lc_agree labs lcs /\
       (lcs <> nil -> ts1 = nil).
 Proof.
@@ -889,9 +896,9 @@ Proof.
 Qed.
 
 Lemma lcs_typing_exists_nil: forall (lcs: list label_ctx) es s C0 ts,
-    e_typing s C0 (lcs ⦃ es ⦄) (Tf nil ts) ->
+    e_typing s C0 (lcs ⦃ es ⦄) (Closed_ft nil ts) ->
     exists labs ts2,
-      e_typing s (upd_label C0 (labs ++ C0.(tc_labels))) es (Tf nil ts2) /\
+      e_typing s (upd_label C0 (labs ++ C0.(tc_labels))) es (Closed_ft nil ts2) /\
       all2 lab_lc_agree labs lcs.
 Proof.
   move => lcs es s C0 ts Hetype.
@@ -908,10 +915,10 @@ Qed.
 Lemma cc_typing_exists: forall (cc: closure_ctx) es s C0 tf,
     e_typing s C0 cc ⦃ es ⦄ tf ->
     exists C ret labs ts2,
-      frame_typing s (cc.1).(FC_frame) C /\
+      closed_frame_typing s (cc.1).(FC_frame) C /\
         (cc.1).(FC_arity) = (length ret) /\
         (all2 lab_lc_agree labs cc.2) /\
-        e_typing s (upd_label (upd_return C (Some ret)) labs) es (Tf nil ts2).
+        e_typing s (upd_label (upd_return C (Some ret)) labs) es (Closed_ft nil ts2).
 Proof.
   move => [fc lcs] es s C0 tf Htype.
   apply fc_typing in Htype as [C [ret [? [? Htype]]]].
@@ -920,16 +927,16 @@ Proof.
   do 3 eexists; exists ts2; repeat split; eauto.
   uapply Htype.
   f_equal.
-  by erewrite frame_typing_label_empty, cats0; eauto.
+   by erewrite closed_frame_typing_label_empty, cats0; eauto.
 Qed.
 
 Lemma ccs_typing_exists: forall cc ccs es s C0 tf,
     e_typing s C0 (cc :: ccs) ⦃ es ⦄ tf ->
     exists C ret labs ts2,
-      frame_typing s (cc.1).(FC_frame) C /\
+      closed_frame_typing s (cc.1).(FC_frame) C /\
         (cc.1).(FC_arity) = length ret /\
         (all2 lab_lc_agree labs cc.2) /\
-        e_typing s (upd_label (upd_return C (Some ret)) labs) es (Tf nil ts2).
+        e_typing s (upd_label (upd_return C (Some ret)) labs) es (Closed_ft nil ts2).
 Proof.
   move => cc ccs.
   move: cc.
@@ -951,31 +958,31 @@ Proof.
     by destruct C0.
   - apply IHccs' in Htype as [? [? [? [? Htype]]]].
     apply cc_typing_exists in Htype as [C [ret [lab [ts2 [Hftype [Hlen Htype]]]]]].
-    exists C, (Some ret), lab, (Tf nil ts2).
+    exists C, (Some ret), lab, (Closed_ft nil ts2).
     by apply Htype.
 Qed.
 
 Lemma sc_typing_args: forall (sc: seq_ctx) es s C ts0,
-    e_typing s C (sc ⦃ es ⦄) (Tf nil ts0) ->
+    e_typing s C (sc ⦃ es ⦄) (Closed_ft nil ts0) ->
     exists vts ts2,
-      values_typing s (rev sc.1) vts /\
-      e_typing s C es (Tf vts ts2).
+      closed_values_typing s (rev sc.1) vts /\
+      e_typing s C es (Closed_ft (lift_closed_result_type vts) ts2).
 Proof.
   move => [vs0 es0] es s C ts0 /=Htype.
   unfold vs_to_es in Htype.
   invert_e_typing.
   exists ts_values, ts3_comp0; split => //.
-  eapply ety_subtyping; eauto.
-  resolve_subtyping.
-  simplify_subtyping.
-  exists nil, nil, ts_values, ts3_comp0; by resolve_subtyping.
+  apply closed_instr_empty_input_elim in H1_values.
+  eapply ety_subtyping; first exact H1_comp0.
+  exists nil, nil, (lift_closed_result_type ts_values), ts3_comp0.
+  repeat split => //; apply closed_stack_results_refl.
 Qed.
 
 Lemma e_typing_ops: forall (ccs: list closure_ctx) (sc: seq_ctx) es s C0 ts0,
-    e_typing s C0 (ccs ⦃ sc ⦃ es ⦄ ⦄) (Tf nil ts0) ->
+    e_typing s C0 (ccs ⦃ sc ⦃ es ⦄ ⦄) (Closed_ft nil ts0) ->
     exists C' vts ts,
-      values_typing s (rev sc.1) vts /\
-      e_typing s C' es (Tf vts ts).
+      closed_values_typing s (rev sc.1) vts /\
+      e_typing s C' es (Closed_ft (lift_closed_result_type vts) ts).
 Proof.
   move => ccs [vs0 es0] es s C0 ts0.
   destruct ccs as [ | cc' ccs']; move => Htype.
@@ -987,16 +994,17 @@ Qed.
 Lemma e_typing_ops_local: forall cc (ccs: list closure_ctx) (sc: seq_ctx) es s C0 tf,
     e_typing s C0 ((cc :: ccs) ⦃ sc ⦃ es ⦄ ⦄) tf ->
     exists C C' ret labs vts ts,
-      values_typing s (rev sc.1) vts /\
-      frame_typing s (cc.1).(FC_frame) C /\
+      closed_values_typing s (rev sc.1) vts /\
+      closed_frame_typing s (cc.1).(FC_frame) C /\
         (cc.1).(FC_arity) = length ret /\
         C' = (upd_label (upd_return C (Some ret)) labs) /\
-        e_typing s C' es (Tf vts ts).
+        e_typing s C' es (Closed_ft (lift_closed_result_type vts) ts).
 Proof.
   move => cc ccs [vs0 es0] es s C0 tf Htype.
   - apply ccs_typing_exists in Htype as [? [? [? [? [? [? [? Htype]]]]]]].
     eapply sc_typing_args in Htype as [? [? [Hvstype Htype]]]; eauto.
-    by do 7 eexists; eauto.
+    exists x, (upd_label (upd_return x (Some x0)) x1), x0, x1, x3, x4.
+    by repeat split; eauto.
 Qed.
 
 Definition ctx_to_cfg (cfg: cfg_tuple_ctx) : option config_tuple :=
@@ -1009,7 +1017,7 @@ Definition ctx_to_cfg (cfg: cfg_tuple_ctx) : option config_tuple :=
       end
   end.
 
-Definition ctx_cfg_typing (cfg: cfg_tuple_ctx) (ts: result_type) : Prop :=
+Definition ctx_cfg_typing (cfg: cfg_tuple_ctx) (ts: closed_operand_result_type) : Prop :=
   match ctx_to_cfg cfg with
   | Some (s, th) =>
       config_typing s th ts
@@ -1020,29 +1028,27 @@ Lemma config_typing_inv: forall s (f: frame) es ts,
     config_typing s (f, es) ts ->
     exists C,
       store_typing s /\
-      frame_typing s f C /\
-      e_typing s C es (Tf [::] ts).
+      closed_frame_typing s f C /\
+      e_typing s C es (Closed_ft [::] ts).
 Proof.
   move => s f es ts Htype; subst.
   destruct Htype as [Hstoretype Hthtype].
-  inversion Hthtype as [s' f' es' ors rs C' Hstype Hftype ? Hetype]; subst; clear Hthtype.
-  replace (upd_return C' None) with C' in Hetype; first by exists C'.
-  unfold frame_typing in Hftype.
-  remove_bools_options.
-  destruct Hftype as [ts' [-> Hvaltype]] => /=.
-  by unfold inst_typing in Hoption; destruct f, f_inst, t; unfold upd_return, upd_local, upd_local_label_return in *; simpl in *; remove_bools_options.
+  apply et_thread_typing in Hthtype as [C [Frame Typed]].
+  exists C. repeat split => //.
+  have Return := closed_frame_typing_return_None Frame.
+  rewrite -Return in Typed. by destruct C.
 Qed.
 
 (* Context typing inversion lemma. The first version preserves the original
    type label context, where as the second version focuses on the innermost label. *)
 Lemma ctx_cfg_inv_lcs: forall s cc ccs sc oe ts,
     ctx_cfg_typing (s, (cc :: ccs), sc, oe) ts ->
-    exists C (ret: option result_type) ts2,
+    exists C (ret: option closed_operand_result_type) ts2,
       store_typing s /\
-      frame_typing s cc.1.(FC_frame) C /\
+      closed_frame_typing s cc.1.(FC_frame) C /\
       (ccs != nil -> (ret = Some ts2 /\ (option_map (@length _) ret = Some cc.1.(FC_arity)))) /\
       (ccs = nil -> ret = None) /\
-      e_typing s (upd_return C ret) (cc.2 ⦃ sc ⦃ olist oe ⦄ ⦄) (Tf nil ts2).
+      e_typing s (upd_return C ret) (cc.2 ⦃ sc ⦃ olist oe ⦄ ⦄) (Closed_ft nil ts2).
 Proof.
   move => s cc ccs sc oe ts Htype.
   unfold ctx_cfg_typing in Htype.
@@ -1056,7 +1062,8 @@ Proof.
     injection Hcc as -> => /=.
     exists C, None, ts => /=.
     repeat split => //.
-    by erewrite <- frame_typing_return_None; eauto; destruct C.
+    have Return := closed_frame_typing_return_None Hftype.
+    rewrite -Return. by destruct C.
   + clear IHccs'.
     rewrite rev_rcons in Hetype.
     apply lcs_typing_exists in Hetype as [labs0 [ts1 [ts2 [Hetype [Hagree0 Hconsume0]]]]].
@@ -1068,20 +1075,20 @@ Proof.
     apply ccs_typing_focus in Hetype as [C' [ret [labs [[ts1' ts2'] Hetype]]]].
     destruct cc as [fc lcs']; simpl in *.
     invert_e_typing.
-    exists C0, (Some extr), extr.
+    exists C0, (Some extr0), extr0.
     repeat split => //=; last by move => Hreveq => //=; apply (f_equal size) in Hreveq; rewrite size_rev in Hreveq.
-    by rewrite Hconjr0.
+    by rewrite (List.Forall2_length Hconjl2) Hconjr0.
 Qed.
 
 Lemma ctx_cfg_inv: forall s cc ccs sc oe ts,
     ctx_cfg_typing (s, (cc :: ccs), sc, oe) ts ->
-    exists C (ret: option result_type) labs ts2,
+    exists C (ret: option closed_operand_result_type) labs ts2,
       store_typing s /\
-      frame_typing s cc.1.(FC_frame) C /\
+      closed_frame_typing s cc.1.(FC_frame) C /\
       all2 lab_lc_agree labs cc.2 /\ 
       (ccs != nil -> (option_map (@length _) ret = Some cc.1.(FC_arity))) /\
       (ccs = nil -> ret = None) /\
-      e_typing s (upd_label (upd_return C ret) labs) (sc ⦃ olist oe ⦄) (Tf nil ts2).
+      e_typing s (upd_label (upd_return C ret) labs) (sc ⦃ olist oe ⦄) (Closed_ft nil ts2).
 Proof.
   move => s cc ccs sc oe ts Htype.
   apply ctx_cfg_inv_lcs in Htype as [C [ret [ts' [Hstype [Hftype [Hretcons [Hretnil Hetype]]]]]]].
@@ -1091,7 +1098,7 @@ Proof.
   - move => H; by apply Hretcons in H as [??].
   - uapply Hetype => /=.
     f_equal.
-    by erewrite frame_typing_label_empty, cats0; eauto.
+    by erewrite closed_frame_typing_label_empty, cats0; eauto.
 Qed.
 
 End Typing.

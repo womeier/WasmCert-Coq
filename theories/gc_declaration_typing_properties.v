@@ -6,6 +6,13 @@ From Wasm Require Import datatypes gc_types gc_type_context
 From Stdlib Require Import List Bool Lia NArith.
 Import ListNotations.
 
+Lemma declaration_list_matchesb_length {A} (f : A -> A -> bool) xs ys :
+  declaration_list_matchesb f xs ys = true -> length xs = length ys.
+Proof.
+  revert ys. induction xs; destruct ys; simpl; try discriminate; auto.
+  rewrite andb_true_iff. intros [_ Tail]. f_equal. now apply IHxs.
+Qed.
+
 Lemma declaration_list_matchesb_correct {A} (f : A -> A -> bool)
     (R : A -> A -> Prop)
     (Correct : forall a b, f a b = true <-> R a b) xs ys :

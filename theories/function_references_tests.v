@@ -1,5 +1,5 @@
 From Wasm Require Import datatypes operations typing function_references.
-From Stdlib Require Import List NArith.
+From Stdlib Require Import List NArith Bool.
 Import ListNotations FunctionReferences.
 
 Example indexed_to_nullable_func :
@@ -118,10 +118,16 @@ Proof. reflexivity. Qed.
 Section Runtime.
 Context `{hfc : host_function_class} `{memory : BlockUpdateMemory}.
 
-Lemma core_null_is_never_non_null s h1 h2 :
-  value_typing s (VAL_ref (VAL_ref_null h1))
+Lemma core_null_is_never_non_null s names h1 h2 :
+  value_typing s names (VAL_ref (VAL_ref_null h1))
     (T_ref (Ref_type false h2)) = false.
-Proof. reflexivity. Qed.
+Proof.
+  unfold value_typing.
+  cbn [gc_type_context.close_value_type ref_nullable ref_heap].
+  destruct (gc_type_context.close_heap_type names 0 h2); simpl; [|reflexivity].
+  unfold closed_value_typing, typeof_closed_value, typeof_closed_ref.
+  destruct h1; simpl; rewrite ?Bool.andb_false_r; reflexivity.
+Qed.
 
 Lemma core_null_principal_heap s h :
   typeof_ref s (VAL_ref_null h) = Some (Ref_type true h).
