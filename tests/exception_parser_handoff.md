@@ -1,5 +1,10 @@
 # Selective whole-module parser integration — partial
 
+Latest concrete composition failures and repairs are in
+`exception_module_counterexamples.md`. In particular, an independently valid
+indexed-global binary currently falsifies the full source-value leaf premise
+at the actual global decoder; this is not merely an unfinished-scope list.
+
 Pinned sources: `ea96c785ba6004c3994622b75b2d1312336c218f` and
 `bc7c1906d4dc86c783aa808c1bb33107013badc4`.
 Neither aggregate branch was merged. No addressing, multi-memory AST,

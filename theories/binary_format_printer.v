@@ -115,7 +115,7 @@ Definition binary_of_f64 (x : f64) : list byte :=
 
 Definition binary_of_block_type (tb : block_type) : list byte :=
   match tb with
-  | BT_id x => binary_of_idx x
+  | BT_id x => leb128.encode_signed (Z.of_N x)
   | BT_valtype None => x40 :: nil
   | BT_valtype (Some t) => binary_of_value_type t
   end.
@@ -774,5 +774,8 @@ Definition binary_of_module (m : module) : list byte :=
   only_if_non_nil binary_of_exportssec m.(mod_exports) ++
   only_if_non_none binary_of_startsec m.(mod_start) ++
   only_if_non_nil binary_of_elemsec m.(mod_elems) ++
+  (if List.existsb (fun f => bes_datacount_required f.(modfunc_body)) m.(mod_funcs)
+   then x0c :: with_length (binary_of_u32_nat (List.length m.(mod_datas)))
+   else nil) ++
   only_if_non_nil binary_of_codesec m.(mod_funcs) ++
   only_if_non_nil binary_of_datasec m.(mod_datas).

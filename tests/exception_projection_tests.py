@@ -269,6 +269,44 @@ def source_local_cases():
     return files, commands
 
 
+def whole_module_block_count_cases():
+    header = b"\0asm\x01\0\0\0"
+    files, commands = {}, []
+    main = b"\x60\0\x01\x7f"
+
+    def block_module(index, encoded, count=None):
+        count = index + 1 if count is None else count
+        code = b"\0\x02" + encoded + b"\x0b\x41\x07\x0b"
+        return (header + sec(1, vec([b"\x60\0\0"] * count + [main]))
+                + sec(3, b"\x01" + u32(count)) + sec(7, b"\x01\x04main\0\0")
+                + sec(10, vec([u32(len(code)) + code])))
+
+    for index, encoded in [(0, b"\0"), (63, b"\x3f"), (64, b"\xc0\0"),
+                           (127, b"\xff\0"), (128, b"\x80\x01")]:
+        filename = f"block-s33-{index}.wasm"
+        files[filename] = block_module(index, encoded)
+        commands.extend([load(filename), assertion("assert_return", [literal(7)])])
+    for label, encoded in [("legacy-unsigned-65", b"\x41"),
+                           ("s33-overflow", b"\x80\x80\x80\x80\x10")]:
+        filename = f"block-{label}.wasm"
+        files[filename] = block_module(65, encoded)
+        commands.append({"type": "assert_malformed", "filename": filename})
+    filename = "block-s33-max-out-of-context.wasm"
+    files[filename] = block_module(0, b"\xff\xff\xff\xff\x0f", count=1)
+    commands.append({"type": "assert_invalid", "filename": filename})
+
+    code = b"\0\x02\x40\x1f\x40\x01\x02\0\xfc\x09\0\x0b\x0b\x41\x07\x0b"
+    prefix = (header + sec(1, vec([main])) + sec(3, b"\x01\0")
+              + sec(7, b"\x01\x04main\0\0"))
+    suffix = sec(10, vec([u32(len(code)) + code])) + sec(11, b"\x01\x01\0")
+    files["handler-data-count.wasm"] = prefix + sec(12, b"\x01") + suffix
+    files["handler-missing-data-count.wasm"] = prefix + suffix
+    commands.extend([load("handler-data-count.wasm"),
+                     assertion("assert_return", [literal(7)]),
+                     {"type": "assert_malformed", "filename": "handler-missing-data-count.wasm"}])
+    return files, commands
+
+
 def main(exe):
     text = ';; ignored (\n(; " ;; (; nested ;) ;) (module binary "\\00(;\\22")\n(register "x")'
     assert [text[a:b] for a, b in forms(text)] == [
@@ -347,6 +385,9 @@ def main(exe):
     local_files, local_commands = source_local_cases()
     files.update(local_files)
     positive.extend(local_commands)
+    assembly_files, assembly_commands = whole_module_block_count_cases()
+    files.update(assembly_files)
+    positive.extend(assembly_commands)
     check_driver(exe, files, positive, len(positive))
     negative = [
         load("throw.wasm"), assertion("assert_trap"),

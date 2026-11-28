@@ -701,6 +701,25 @@ In some places, validation restricts expressions to be constant, which limits th
 *)
 Definition expr := list basic_instruction.
 
+(** Shared syntax traversal used by both the actual parser's consistency
+    guard and the actual module printer. Handlers do not hide bulk-memory
+    instructions from the data-count requirement. *)
+Fixpoint be_datacount_required (be : basic_instruction) :=
+  let required bes :=
+    List.fold_left orb (List.map be_datacount_required bes) false in
+  match be with
+  | BI_memory_init _ | BI_data_drop _ => true
+  | BI_block _ bes | BI_loop _ bes | BI_try_table _ _ bes => required bes
+  | BI_if _ bes1 bes2 => if required bes1 then true else required bes2
+  | _ => false
+  end.
+
+Fixpoint bes_datacount_required (bes : expr) :=
+  match bes with
+  | nil => false
+  | cons be rest => if be_datacount_required be then true else bes_datacount_required rest
+  end.
+
 End Instructions.
 
 (** std-doc:

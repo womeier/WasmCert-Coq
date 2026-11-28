@@ -208,7 +208,7 @@ Definition parse_value_type {n} : byte_parser value_type n :=
 Definition parse_block_type {n} : byte_parser block_type n :=
   (exact_byte x40 $> BT_valtype None) <|>
   (fun t => BT_valtype (Some t)) <$> parse_value_type <|>
-  BT_id <$> parse_typeidx.
+  BT_id <$> parse_heap_typeidx.
 
 
 Definition parse_unreachable {n} : byte_parser basic_instruction n :=
@@ -1355,29 +1355,6 @@ Definition datacount_agree (len: N) (ocount: option N) : bool :=
 
 (* If any of the function code contains memory.init or data.drop, then the data count section is required for the module to be valid. This is in order for a single-pass validation to process the module (despite not being the case here). *)
 
-Fixpoint be_datacount_required (be: basic_instruction) :=
-  let bes_datacount_required bes :=
-    List.fold_left orb (List.map be_datacount_required bes) false in
-  match be with
-  | BI_memory_init _
-  | BI_data_drop _ => true
-  | BI_block _ bes => bes_datacount_required bes
-  | BI_try_table _ _ bes => bes_datacount_required bes
-  | BI_loop _ bes => bes_datacount_required bes
-  | BI_if _ bes1 bes2 =>
-      if bes_datacount_required bes1 then true
-      else bes_datacount_required bes2
-  | _ => false
-  end.
-
-Fixpoint bes_datacount_required (bes: expr) :=
-  match bes with
-  | nil => false
-  | cons be bes' =>
-      if be_datacount_required be then true
-      else bes_datacount_required bes'
-  end.
-  
 Definition code_datacount_required (code: module_func_without_type) :=
   match code with
   | (_, bes) =>
