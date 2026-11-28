@@ -3,6 +3,7 @@
 From Stdlib Require Import ZArith String List.
 From mathcomp Require Import ssreflect ssrbool ssrnat eqtype seq.
 From Wasm Require Export opsem interpreter_ctx instantiation_spec.
+From Wasm Require Import gc_declaration_typing.
 
 (* see common.v *)
 Set SsrOldRewriteGoalsOrder.
@@ -14,15 +15,15 @@ Section Instantiation_func.
 
 Context `{ho: host}.
   
-Definition gather_m_f_type (tfs : list function_type) (m_f : module_func) : option function_type :=
-  lookup_N tfs m_f.(modfunc_type).
+Definition gather_m_f_type (tfs : type_context) (m_f : module_func) : option function_type :=
+  lookup_function_type tfs m_f.(modfunc_type).
 
-Definition gather_m_f_types (tfs : list function_type) (m_fs : list module_func) : option (list function_type) :=
+Definition gather_m_f_types (tfs : type_context) (m_fs : list module_func) : option (list function_type) :=
   those (map (gather_m_f_type tfs) m_fs).
 
-Definition module_import_desc_typer (tfs: list function_type) (imp_desc : module_import_desc) : option extern_type :=
+Definition module_import_desc_typer (tfs: type_context) (imp_desc : module_import_desc) : option extern_type :=
   match imp_desc with
-  | MID_func i => option_map ET_func (lookup_N tfs i)
+  | MID_func i => option_map ET_func (lookup_function_type tfs i)
   | MID_table t_t =>
     if tabletype_valid t_t then Some (ET_table t_t) else None
   | MID_mem mt =>
@@ -31,7 +32,7 @@ Definition module_import_desc_typer (tfs: list function_type) (imp_desc : module
   end.
 
 (* breaking circularity, therefore only taking the function types *)
-Definition module_imports_typer (tfs: list function_type) (imps : list module_import) : option (list extern_type) :=
+Definition module_imports_typer (tfs: type_context) (imps : list module_import) : option (list extern_type) :=
   those (map (fun imp => module_import_desc_typer tfs imp.(imp_desc)) imps).
 
 (* prepass *)
@@ -77,7 +78,7 @@ Definition gather_m_g_types (mgs : list module_global) : list global_type :=
 
 Definition module_func_type_checker (c : t_context) (m : module_func) : bool :=
   let '{| modfunc_type := i; modfunc_locals := t_locs; modfunc_body := b_es |} := m in
-  match lookup_N c.(tc_types) i with
+  match lookup_function_type c.(tc_types) i with
   | None => false
   | Some (Tf tn tm) =>
     let c' := {|
@@ -93,10 +94,15 @@ Definition module_func_type_checker (c : t_context) (m : module_func) : bool :=
       tc_return := Some tm;
       tc_refs := c.(tc_refs)
     |} in
-    type_checker.b_e_type_checker c' b_es (Tf [::] tm) && (default_vals t_locs != None)
+    type_checker.b_e_type_checker c' b_es (Tf [::] tm) &&
+      (check_local_init_sequence b_es (initial_local_state tn t_locs) != None)
   end.
 
-Definition module_table_type_checker (C: t_context) mt := tabletype_valid mt.(modtab_type).
+Definition module_table_type_checker (C: t_context) mt :=
+  tabletype_valid mt.(modtab_type) &&
+  const_exprs C (module_table_init mt) &&
+  type_checker.b_e_type_checker C (module_table_init mt)
+    (Tf nil [::T_ref (tt_elem_type (modtab_type mt))]).
 
 Definition module_mem_type_checker (C: t_context) mm := memtype_valid mm.(modmem_type).
 
@@ -144,9 +150,9 @@ Definition module_data_type_checker (c : t_context) (d : module_data) : bool :=
 Definition module_start_type_checker (c : t_context) (ms : module_start) : bool :=
   module_start_typing c ms.
 
-Definition module_type_checker (m : module) : option ((list extern_type) * (list extern_type)) * string :=
+Definition module_components_type_checker (m : module) : option ((list extern_type) * (list extern_type)) * string :=
   let '{|
-    mod_types := tfs;
+    mod_types := groups;
     mod_funcs := fs;
     mod_tables := ts;
     mod_mems := ms;
@@ -157,6 +163,7 @@ Definition module_type_checker (m : module) : option ((list extern_type) * (list
     mod_imports := imps;
     mod_exports := exps;
   |} := m in
+  let tfs := List.concat groups in
   match (gather_m_f_types tfs fs, module_imports_typer tfs imps) with
   | (Some fts, Some impts) =>
     let ifts := ext_t_funcs impts in
@@ -195,10 +202,10 @@ Definition module_type_checker (m : module) : option ((list extern_type) * (list
       tc_return := None;
       tc_refs := c.(tc_refs)
     |} in
-    if seq.all (module_func_type_checker c) fs &&
-       seq.all (module_table_type_checker c) ts &&
+    if seq.all source_subtype_valid tfs &&
+       seq.all (module_func_type_checker c) fs &&
+       seq.all (module_table_type_checker c') ts &&
        seq.all (module_mem_type_checker c) ms &&
-       wasm_2_memory_count_check ms ims &&  
        seq.all (module_global_type_checker c') gs &&
        seq.all (module_elem_type_checker c') els &&
        seq.all (module_data_type_checker c') ds &&
@@ -215,8 +222,26 @@ Definition module_type_checker (m : module) : option ((list extern_type) * (list
   | (Some _, None) | (None, Some _) | (None, None) => (None, "invalid module function or import references")
   end.
 
+Definition module_type_checker (m : module) : option ((list extern_type) * (list extern_type)) * string :=
+  match close_and_validate_type_groups nil (module_type_groups m) with
+  | Some (registry, ids) =>
+      if source_type_identitiesb registry ids (List.concat m.(mod_types)) ids
+      then module_components_type_checker m
+      else (None, "inconsistent closed module type signatures")
+  | None => (None, "invalid module type declarations")
+  end.
+
 Definition external_type_checker (s : store_record) (v : extern_value): option extern_type :=
-  ext_typing s v.
+  match v with
+  | EV_func a =>
+      match lookup_N s.(s_funcs) a with
+      | Some (FC_func_host ft _) =>
+          if gc_type_context.canonical_function_identityb s.(s_types) ft
+          then Some (ET_func ft) else None
+      | _ => ext_typing s v
+      end
+  | _ => ext_typing s v
+  end.
 
 (* Auxiliary definition for evaluating constant expressios, instead of using the full interpreter. *)
 Definition interp_get_const (s : store_record) (f : frame) (b_es : list basic_instruction) : option value :=
@@ -249,10 +274,15 @@ Definition interp_get_i32 (s : store_record) (f: frame) (b_es : list basic_instr
 Definition get_global_inits (s: store_record) (f: frame) (gs: list module_global) : option (list value):=
   those (map (fun g => interp_get_const s f g.(modglob_init)) gs).
 
+Definition get_table_inits (s : store_record) (f : frame)
+    (ts : list module_table) : option (list value_ref) :=
+  those (map (fun t => interp_get_vref s f (module_table_init t)) ts).
+
 Definition get_elem_inits (s: store_record) (f: frame) (els: list module_element) : option (list (list value_ref)):=
   those (map (fun el => those (map (fun e => interp_get_vref s f e) el.(modelem_init))) els).
 
-Definition interp_alloc_module (s : store_record) (m : module) (imps : list extern_value) (gvs : list value) (rvs: list (list value_ref)) : (store_record * moduleinst) :=
+Definition interp_alloc_module (s : store_record) (m : module) (imps : list extern_value) (gvs : list value) (rvs: list (list value_ref)) (tvs : list value_ref)
+    (registry : canonical_registry) (typeids : list defined_type) : (store_record * moduleinst) :=
   let i_fs := iota_N (length s.(s_funcs)) (length m.(mod_funcs)) in
   let i_ts := iota_N (length s.(s_tables)) (length m.(mod_tables)) in
   let i_ms := iota_N (length s.(s_mems)) (length m.(mod_mems)) in
@@ -260,33 +290,39 @@ Definition interp_alloc_module (s : store_record) (m : module) (imps : list exte
   let i_es := iota_N (length s.(s_elems)) (length m.(mod_elems)) in
   let i_ds := iota_N (length s.(s_datas)) (length m.(mod_datas)) in
   let inst := {|
-    inst_types := m.(mod_types);
+    inst_defined_types := typeids;
+    inst_types := List.concat m.(mod_types);
     inst_funcs := (ext_funcs imps ++ i_fs);
     inst_tables := (ext_tables imps ++ i_ts);
     inst_mems := (ext_mems imps ++ i_ms);
     inst_globals := (ext_globals imps ++ i_gs);
     inst_elems := (i_es);
     inst_datas := (i_ds);
-    inst_exports := (map (get_exportinst (Build_moduleinst nil (ext_funcs imps ++ i_fs) (ext_tables imps ++ i_ts) (ext_mems imps ++ i_ms) (ext_globals imps ++ i_gs) nil nil nil)) m.(mod_exports))
+    inst_exports := (map (get_exportinst (Build_moduleinst nil (ext_funcs imps ++ i_fs) (ext_tables imps ++ i_ts) (ext_mems imps ++ i_ms) (ext_globals imps ++ i_gs) nil nil nil nil)) m.(mod_exports))
   |} in
   let '(s1, _) := alloc_funcs s m.(mod_funcs) inst in
-  let '(s2, _) := alloc_tabs s1 (map modtab_type m.(mod_tables)) in
+  let '(s2, _) := alloc_tabs_with_init s1 (List.combine (map modtab_type m.(mod_tables)) tvs) in
   let '(s3, _) := alloc_mems s2 (map modmem_type m.(mod_mems)) in
   let '(s4, i_gs) := alloc_globs s3 m.(mod_globals) gvs in
   let '(s5, i_es) := alloc_elems s4 m.(mod_elems) rvs in
   let '(s', i_ds) := alloc_datas s5 m.(mod_datas) in
-  (s', inst).
+  (upd_s_types s' registry, inst).
 
 (* Use a monad for error reporting at some point? *)
 Definition interp_instantiate (hs: host_state) (s : store_record) (m : module) (v_imps : list extern_value) : option (host_state * store_record * frame * list basic_instruction) * string :=
   match module_type_checker m with
   | (None, str) => (None, ("Module type checking failure:" ++ str)%string)
   | (Some (t_imps_mod, t_exps), _) =>
+      match close_and_validate_type_groups s.(s_types) (module_type_groups m) with
+      | None => (None, "Error in closing module types against store registry")
+      | Some (registry, typeids) =>
+      if source_type_identitiesb registry typeids (List.concat m.(mod_types)) typeids then
       match those (map (external_type_checker s) v_imps) with
       | Some t_imps =>
           if all2 import_subtyping t_imps t_imps_mod then
             let inst_init :=
               {|
+                inst_defined_types := nil;
                 inst_types := nil;
                 inst_funcs := (ext_funcs v_imps) ++ (map N.of_nat (iota (length (s_funcs s)) (length (mod_funcs m))));
                 inst_tables := nil;
@@ -297,19 +333,25 @@ Definition interp_instantiate (hs: host_state) (s : store_record) (m : module) (
                 inst_exports := nil;
               |} in
             let f_init := Build_frame nil inst_init in
+            match get_table_inits s f_init m.(mod_tables) with
+            | None => (None, "Error in evaluating table initialisers")
+            | Some t_inits =>
             match get_global_inits s f_init m.(mod_globals) with
             | None => (None, "Error in evaluating global initialisers")
             | Some g_inits =>
                 match get_elem_inits s f_init m.(mod_elems) with
                 | Some r_inits =>
-                    let '(s', inst_final) := interp_alloc_module s m v_imps g_inits r_inits in
+                     let '(s', inst_final) := interp_alloc_module s m v_imps g_inits r_inits t_inits registry typeids in
                     let f_final := Build_frame nil inst_final in
                     (Some (hs, s', f_final, get_init_expr_elems m.(mod_elems) ++ get_init_expr_datas m.(mod_datas) ++ get_init_expr_start m.(mod_start)), "")
                 | None => (None, "Error in evaluating elem initialisers")
                 end
             end
+            end
           else (None, "Import type checking failure")
       | None => (None, "Bad external values for imports")
+      end
+      else (None, "Error in resolving closed module signatures")
       end
   end.
 

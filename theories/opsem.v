@@ -97,7 +97,17 @@ Inductive reduce_simple : seq administrative_instruction -> seq administrative_i
   | rs_ref_is_null_false:
     forall ref,
     (forall t, ref <> VAL_ref_null t) ->
-    reduce_simple [:: $V (VAL_ref ref); AI_basic BI_ref_is_null] [::$VN (VAL_int32 Wasm_int.Int32.zero)]
+     reduce_simple [:: $V (VAL_ref ref); AI_basic BI_ref_is_null] [::$VN (VAL_int32 Wasm_int.Int32.zero)]
+  | rs_ref_i31 : forall n,
+    reduce_simple [:: $VN (VAL_int32 n); AI_basic BI_ref_i31]
+      [:: $V (VAL_ref (VAL_ref_i31 (i31bits_of_i32 n)))]
+  | rs_i31_get : forall signed n,
+    reduce_simple [:: $V (VAL_ref (VAL_ref_i31 n)); AI_basic (BI_i31_get signed)]
+      [:: $VN (VAL_int32 (i32_of_i31bits
+        (match signed with SX_S => true | SX_U => false end) n))]
+  | rs_i31_get_null : forall signed h,
+    reduce_simple [:: $V (VAL_ref (VAL_ref_null h)); AI_basic (BI_i31_get signed)]
+      [:: AI_trap]
                   
   (** control-flow operations **)
   | rs_unreachable :
@@ -175,6 +185,24 @@ Inductive reduce_simple : seq administrative_instruction -> seq administrative_i
         es <> [::AI_trap] ->
         lfill lh [::AI_trap] = es ->
         reduce_simple es [::AI_trap]
+  | rs_ref_as_non_null_null : forall t,
+    reduce_simple [:: $V (VAL_ref (VAL_ref_null t)); AI_basic BI_ref_as_non_null] [::AI_trap]
+  | rs_ref_as_non_null : forall ref,
+    (forall t, ref <> VAL_ref_null t) ->
+    reduce_simple [:: $V (VAL_ref ref); AI_basic BI_ref_as_non_null] [::$V (VAL_ref ref)]
+  | rs_br_on_non_null_null : forall x h,
+    reduce_simple [::$V (VAL_ref (VAL_ref_null h)); AI_basic (BI_br_on_non_null x)] [::]
+  | rs_br_on_non_null : forall x ref,
+    (forall h, ref <> VAL_ref_null h) ->
+    reduce_simple [::$V (VAL_ref ref); AI_basic (BI_br_on_non_null x)]
+      [::$V (VAL_ref ref); AI_basic (BI_br x)]
+  | rs_br_on_null_null : forall x h,
+    reduce_simple [::$V (VAL_ref (VAL_ref_null h)); AI_basic (BI_br_on_null x)]
+      [::AI_basic (BI_br x)]
+  | rs_br_on_null : forall x ref,
+    (forall h, ref <> VAL_ref_null h) ->
+    reduce_simple [::$V (VAL_ref ref); AI_basic (BI_br_on_null x)]
+      [::$V (VAL_ref ref)]
 .
 
 Inductive reduce : host_state -> store_record -> frame -> list administrative_instruction ->
@@ -212,13 +240,13 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
       forall s f x (y: typeidx) a cl i hs,
         stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_func a) ->
         lookup_N s.(s_funcs) a = Some cl ->
-        lookup_N f.(f_inst).(inst_types) y = Some (cl_type cl) ->
+        lookup_function_type f.(f_inst).(inst_types) y = Some (cl_type cl) ->
         reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_call_indirect x y)] hs s f [::AI_invoke a]
   | r_call_indirect_failure_mismatch :
       forall s f x (y: typeidx) a cl i hs,
         stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_func a) ->
         lookup_N s.(s_funcs) a = Some cl ->
-        lookup_N f.(f_inst).(inst_types) y <> Some (cl_type cl) ->
+        lookup_function_type f.(f_inst).(inst_types) y <> Some (cl_type cl) ->
         reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_call_indirect x y)] hs s f [::AI_trap]
   | r_call_indirect_failure_bound :
       forall s f x (y: typeidx) i hs,
@@ -228,13 +256,13 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
       forall s f x (y: typeidx) i hs t,
         stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_null t) ->
         reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_call_indirect x y)] hs s f [::AI_trap]
-(* https://webassembly.github.io/tail-call/core/exec/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-return-call-x *)
+(* https://webassembly.github.io/spec/core/exec/instructions.html#exec-return-call *)
   | r_return_call :
       forall s f i a hs,
         reduce hs s f [::AI_basic (BI_call i)] hs s f [::AI_invoke a] ->
         reduce hs s f [::AI_basic (BI_return_call i)] hs s f [::AI_return_invoke a]
 
-  (* https://webassembly.github.io/tail-call/core/exec/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-return-call-indirect-x-y *)
+  (* https://webassembly.github.io/spec/core/exec/instructions.html#exec-return-call-indirect *)
   | r_return_call_indirect_success :
       forall s f x y a v hs,
         reduce hs s f [::v_to_e v; AI_basic (BI_call_indirect x y)] hs s f [::AI_invoke a] ->
@@ -245,7 +273,7 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
         reduce hs s f [::v_to_e v; AI_basic (BI_return_call_indirect x y)] hs s f [::AI_trap]
 
   | r_invoke_native :
-      forall addr cl ts1 ts2 code x ts es ves vs n m k defaults s f inst hs,
+      forall addr cl ts1 ts2 code x ts es ves vs n m k s f inst hs,
         lookup_N s.(s_funcs) addr = Some cl ->
         cl = FC_func_native (Tf ts1 ts2) inst code ->
         code = Build_module_func x ts es ->
@@ -254,8 +282,9 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
         length ts = k ->
         length ts1 = n ->
         length ts2 = m ->
-        default_vals ts = Some defaults ->
-        reduce hs s f (ves ++ [::AI_invoke addr]) hs s f [::AI_frame m (Build_frame (vs ++ defaults) inst) [::AI_label m [::] (to_e_list es)]]
+        reduce hs s f (ves ++ [::AI_invoke addr]) hs s f
+          [::AI_frame m (Build_frame (map Some vs ++ map default_val ts) inst)
+            [::AI_label m [::] (to_e_list es)]]
   | r_invoke_host_success :
       forall a cl h t1s t2s ves vcs m n s s' r f hs hs',
         lookup_N s.(s_funcs) a = Some cl ->
@@ -276,7 +305,9 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
         length t2s = m ->
         host_application hs s (Tf t1s t2s) h vcs hs' None ->
         reduce hs s f (ves ++ [::AI_invoke a]) hs' s f [::AI_trap]
-  (* https://webassembly.github.io/tail-call/core/exec/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-return-call-indirect-x-y *)
+  (* Administrative frame replacement for a tail call. The callee arguments
+     survive, while the caller frame, labels, and unused operands are discarded.
+     https://webassembly.github.io/spec/core/exec/instructions.html#exec-return-call *)
   | r_return_invoke :
       forall a cl t1s t2s n m vs es i (lh: lholed i) f f0 hs s,
         lookup_N s.(s_funcs) a = Some cl ->
@@ -291,13 +322,13 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
   (** get, set, load, and store operations **)
   | r_local_get :
       forall f v j s hs,
-        lookup_N f.(f_locs) j = Some v ->
+        lookup_N f.(f_locs) j = Some (Some v) ->
         reduce hs s f [::AI_basic (BI_local_get j)] hs s f [::v_to_e v]
   | r_local_set :
       forall f f' i v s vd hs,
         f'.(f_inst) = f.(f_inst) ->
         N.to_nat i < length f.(f_locs) ->
-        f'.(f_locs) = set_nth vd f.(f_locs) (N.to_nat i) v ->
+        f'.(f_locs) = set_nth (Some vd) f.(f_locs) (N.to_nat i) (Some v) ->
         reduce hs s f [::v_to_e v; AI_basic (BI_local_set i)] hs s f' [::]
   | r_global_get :
       forall s f i v hs,
@@ -474,60 +505,60 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
 (** memory **)
 | r_load_success :
   forall s f t bs k marg m hs,
-    smem s f.(f_inst) = Some m ->
+    smem s f.(f_inst) marg.(memarg_memory) = Some m ->
     load m (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) (tnum_length t) = Some bs ->
     reduce hs s f [::$VN (VAL_int32 k); AI_basic (BI_load t None marg)] hs s f [::$VN (wasm_deserialise bs t)]
 | r_load_failure :
   forall s f t k marg m hs,
-    smem s f.(f_inst) = Some m ->
+    smem s f.(f_inst) marg.(memarg_memory) = Some m ->
     load m (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) (tnum_length t) = None ->
     reduce hs s f [::$VN (VAL_int32 k); AI_basic (BI_load t None marg)] hs s f [::AI_trap]
 | r_load_packed_success :
   forall s f t tp k marg m bs sx hs,
-    smem s f.(f_inst) = Some m ->
+    smem s f.(f_inst) marg.(memarg_memory) = Some m ->
     load_packed sx m (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) (tp_length tp) (tnum_length t) = Some bs ->
     reduce hs s f [::$VN (VAL_int32 k); AI_basic (BI_load t (Some (tp, sx)) marg)] hs s f [::$VN (wasm_deserialise bs t)]
 | r_load_packed_failure :
   forall s f t tp k marg m sx hs,
-    smem s f.(f_inst) = Some m ->
+    smem s f.(f_inst) marg.(memarg_memory) = Some m ->
     load_packed sx m (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) (tp_length tp) (tnum_length t) = None ->
     reduce hs s f [::$VN (VAL_int32 k); AI_basic (BI_load t (Some (tp, sx)) marg)] hs s f [::AI_trap]
 | r_load_vec_success :
   forall s f m lvarg marg k v hs,
-    smem s f.(f_inst) = Some m ->
+    smem s f.(f_inst) marg.(memarg_memory) = Some m ->
     load_vec m (Wasm_int.N_of_uint i32m k) lvarg marg = Some v ->
     reduce hs s f [::$VN (VAL_int32 k); AI_basic (BI_load_vec lvarg marg)] hs s f [::$VV v]
 | r_load_vec_failure :
   forall s f m lvarg marg k hs,
-    smem s f.(f_inst) = Some m ->
+    smem s f.(f_inst) marg.(memarg_memory) = Some m ->
     load_vec m (Wasm_int.N_of_uint i32m k) lvarg marg = None ->
     reduce hs s f [::$VN (VAL_int32 k); AI_basic (BI_load_vec lvarg marg)] hs s f [::AI_trap]
 | r_load_vec_lane_success :
   forall s f m width marg x k v v' hs,
-    smem s f.(f_inst) = Some m ->
+    smem s f.(f_inst) marg.(memarg_memory) = Some m ->
     load_vec_lane m (Wasm_int.N_of_uint i32m k) v width marg x = Some v' ->
     reduce hs s f [::$VN (VAL_int32 k); $VV v; AI_basic (BI_load_vec_lane width marg x)] hs s f [::$VV v']
 | r_load_vec_lane_failure :
   forall s f m width marg x k v hs,
-    smem s f.(f_inst) = Some m ->
+    smem s f.(f_inst) marg.(memarg_memory) = Some m ->
     load_vec_lane m (Wasm_int.N_of_uint i32m k) v width marg x = None ->
     reduce hs s f [::$VN (VAL_int32 k); $VV v; AI_basic (BI_load_vec_lane width marg x)] hs s f [::AI_trap]
 | r_store_success :
   forall t v s f k marg s' hs,
-    smem_store s f.(f_inst) (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) v t = Some s' ->
+    smem_store s f.(f_inst) marg.(memarg_memory) (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) v t = Some s' ->
     reduce hs s f [::$VN (VAL_int32 k); $VN v; AI_basic (BI_store t None marg)] hs s' f [::]
 | r_store_failure :
   forall t v s f k marg hs,
-    smem_store s f.(f_inst) (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) v t = None ->
+    smem_store s f.(f_inst) marg.(memarg_memory) (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) v t = None ->
     reduce hs s f [::$VN (VAL_int32 k); $VN v; AI_basic (BI_store t None marg)] hs s f [::AI_trap]
 | r_store_packed_success :
   forall t v s s' f k marg tp hs,
-    smem_store_packed s f.(f_inst) (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) v tp = Some s' ->
+    smem_store_packed s f.(f_inst) marg.(memarg_memory) (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) v tp = Some s' ->
     typeof_num v = t ->
     reduce hs s f [::$VN (VAL_int32 k); $VN v; AI_basic (BI_store t (Some tp) marg)] hs s' f [::]
 | r_store_packed_failure :
   forall t v s f k marg tp hs,
-    smem_store_packed s f.(f_inst) (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) v tp = None ->
+    smem_store_packed s f.(f_inst) marg.(memarg_memory) (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) v tp = None ->
     typeof_num v = t ->
     reduce hs s f [::$VN (VAL_int32 k); $VN v; AI_basic (BI_store t (Some tp) marg)] hs s f [::AI_trap]
 | r_store_vec_success :
@@ -547,130 +578,134 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
     smem_store_vec_lane s f.(f_inst) (Wasm_int.N_of_uint i32m k) v width marg x = None ->
     reduce hs s f [::$VN (VAL_int32 k); $VV v; AI_basic (BI_store_vec_lane width marg x)] hs s f [::AI_trap]
 | r_memory_size :
-  forall f m n s hs,
-    smem s f.(f_inst) = Some m ->
+  forall x f m n s hs,
+    smem s f.(f_inst) x = Some m ->
     mem_size m = n ->
-    reduce hs s f [::AI_basic (BI_memory_size)] hs s f [::$VN (VAL_int32 (Wasm_int.int_of_Z i32m (Z.of_N n)))]
+    reduce hs s f [::AI_basic (BI_memory_size x)] hs s f [::$VN (VAL_int32 (Wasm_int.int_of_Z i32m (Z.of_N n)))]
 | r_memory_grow_success :
-  forall s f s' sz c hs,
-    smem_grow s f.(f_inst) (Wasm_int.N_of_uint i32m c) = Some (s', sz) ->
-    reduce hs s f [::$VN (VAL_int32 c); AI_basic BI_memory_grow] hs s' f [::$VN (VAL_int32 (Wasm_int.int_of_Z i32m (Z.of_N sz)))]
+  forall x s f s' sz c hs,
+    smem_grow s f.(f_inst) x (Wasm_int.N_of_uint i32m c) = Some (s', sz) ->
+    reduce hs s f [::$VN (VAL_int32 c); AI_basic (BI_memory_grow x)] hs s' f [::$VN (VAL_int32 (Wasm_int.int_of_Z i32m (Z.of_N sz)))]
 | r_memory_grow_failure :
-  forall s f c hs,
-    smem_grow s f.(f_inst) (Wasm_int.N_of_uint i32m c) = None ->
-    reduce hs s f [::$VN (VAL_int32 c); AI_basic BI_memory_grow] hs s f [::$VN (VAL_int32 int32_minus_one)]
+  forall x s f c hs,
+    smem_grow s f.(f_inst) x (Wasm_int.N_of_uint i32m c) = None ->
+    reduce hs s f [::$VN (VAL_int32 c); AI_basic (BI_memory_grow x)] hs s f [::$VN (VAL_int32 int32_minus_one)]
 | r_memory_fill_bound:
-  forall s f mem d n v hs,
+  forall x s f mem d n v hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let d_z := Wasm_int.Z_of_uint i32m d in
-    smem s f.(f_inst) = Some mem ->
+    smem s f.(f_inst) x = Some mem ->
     (Z.add n_z d_z > Z.of_N (mem_length mem))%Z ->
-    reduce hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); $VN (VAL_int32 n); AI_basic (BI_memory_fill)]
+    reduce hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); $VN (VAL_int32 n); AI_basic (BI_memory_fill x)]
            hs s f [::AI_trap]
 | r_memory_fill_return:
-  forall s f mem d n v hs,
+  forall x s f mem d n v hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let d_z := Wasm_int.Z_of_uint i32m d in
-    smem s f.(f_inst) = Some mem ->
+    smem s f.(f_inst) x = Some mem ->
     (Z.add n_z d_z <= Z.of_N (mem_length mem))%Z ->
     (n_z = 0)%Z ->
-    reduce hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); $VN (VAL_int32 n); AI_basic (BI_memory_fill)]
+    reduce hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); $VN (VAL_int32 n); AI_basic (BI_memory_fill x)]
            hs s f [::]
 | r_memory_fill_step:
-  forall s f mem d n d' n' v hs,
+  forall x s f mem d n d' n' v hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let d_z := Wasm_int.Z_of_uint i32m d in
-    smem s f.(f_inst) = Some mem ->
+    smem s f.(f_inst) x = Some mem ->
     (Z.add n_z d_z <= Z.of_N (mem_length mem))%Z ->
     (n_z <> 0)%Z ->
     n' = Wasm_int.int_of_Z i32m (Z.sub n_z 1) ->
     d' = Wasm_int.int_of_Z i32m (Z.add d_z 1) ->
-    reduce hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); $VN (VAL_int32 n); AI_basic (BI_memory_fill)]
-      hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0));
-                $VN (VAL_int32 d'); $VN (VAL_int32 v); $VN (VAL_int32 n'); AI_basic (BI_memory_fill)]
+    reduce hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); $VN (VAL_int32 n); AI_basic (BI_memory_fill x)]
+      hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 x));
+                $VN (VAL_int32 d'); $VN (VAL_int32 v); $VN (VAL_int32 n'); AI_basic (BI_memory_fill x)]
 | r_memory_copy_bound :
-  forall src dst n mem s f hs,
+  forall x y src dst n mem_dst mem s f hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let src_z := Wasm_int.Z_of_uint i32m src in
     let dst_z := Wasm_int.Z_of_uint i32m dst in
-    smem s f.(f_inst) = Some mem ->
+    smem s f.(f_inst) x = Some mem_dst ->
+    smem s f.(f_inst) y = Some mem ->
     ((Z.add src_z n_z > Z.of_N (mem_length mem))%Z \/
-     (Z.add dst_z n_z > Z.of_N (mem_length mem))%Z) ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy)]
+     (Z.add dst_z n_z > Z.of_N (mem_length mem_dst))%Z) ->
+    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy x y)]
       hs s f [::AI_trap]
 | r_memory_copy_return :
-  forall src dst n mem s f hs,
+  forall x y src dst n mem_dst mem s f hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let src_z := Wasm_int.Z_of_uint i32m src in
     let dst_z := Wasm_int.Z_of_uint i32m dst in
-    smem s f.(f_inst) = Some mem ->
+    smem s f.(f_inst) x = Some mem_dst ->
+    smem s f.(f_inst) y = Some mem ->
     (Z.add src_z n_z <= Z.of_N (mem_length mem))%Z ->
-    (Z.add dst_z n_z <= Z.of_N (mem_length mem))%Z ->
+    (Z.add dst_z n_z <= Z.of_N (mem_length mem_dst))%Z ->
     (n_z = 0)%Z ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy)]
+    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy x y)]
       hs s f [::]
 | r_memory_copy_forward :
-  forall src dst n mem src' dst' n' s f hs,
+  forall x y src dst n mem_dst mem src' dst' n' s f hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let src_z := Wasm_int.Z_of_uint i32m src in
     let dst_z := Wasm_int.Z_of_uint i32m dst in
-    smem s f.(f_inst) = Some mem ->
+    smem s f.(f_inst) x = Some mem_dst ->
+    smem s f.(f_inst) y = Some mem ->
     (Z.add src_z n_z <= Z.of_N (mem_length mem))%Z ->
-    (Z.add dst_z n_z <= Z.of_N (mem_length mem))%Z ->
+    (Z.add dst_z n_z <= Z.of_N (mem_length mem_dst))%Z ->
     (n_z <> 0)%Z ->
     (dst_z <= src_z)%Z ->
     n' = Wasm_int.int_of_Z i32m (Z.sub n_z 1) ->
     src' = Wasm_int.int_of_Z i32m (Z.add src_z 1) ->
     dst' = Wasm_int.int_of_Z i32m (Z.add dst_z 1) ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy)]
-      hs s f [:: $VN (VAL_int32 dst); $VN (VAL_int32 src); AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0)); AI_basic (BI_store T_i32 (Some (Tp_i8)) (Build_memarg N0 N0));
-              $VN (VAL_int32 dst'); $VN (VAL_int32 src'); $VN (VAL_int32 n'); AI_basic (BI_memory_copy)]
+    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy x y)]
+      hs s f [:: $VN (VAL_int32 dst); $VN (VAL_int32 src); AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0 y)); AI_basic (BI_store T_i32 (Some (Tp_i8)) (Build_memarg N0 N0 x));
+              $VN (VAL_int32 dst'); $VN (VAL_int32 src'); $VN (VAL_int32 n'); AI_basic (BI_memory_copy x y)]
 | r_memory_copy_backward :
-  forall src dst n mem src' dst' n' s f hs,
+  forall x y src dst n mem_dst mem src' dst' n' s f hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let src_z := Wasm_int.Z_of_uint i32m src in
     let dst_z := Wasm_int.Z_of_uint i32m dst in
-    smem s f.(f_inst) = Some mem ->
+    smem s f.(f_inst) x = Some mem_dst ->
+    smem s f.(f_inst) y = Some mem ->
     (Z.add src_z n_z <= Z.of_N (mem_length mem))%Z ->
-    (Z.add dst_z n_z <= Z.of_N (mem_length mem))%Z ->
+    (Z.add dst_z n_z <= Z.of_N (mem_length mem_dst))%Z ->
     (n_z <> 0)%Z ->
     (dst_z > src_z)%Z ->
     n' = Wasm_int.int_of_Z i32m (Z.sub n_z 1) ->
     src' = Wasm_int.int_of_Z i32m (Z.add src_z (Z.sub n_z 1)) ->
     dst' = Wasm_int.int_of_Z i32m (Z.add dst_z (Z.sub n_z 1)) ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy)]
-      hs s f [:: $VN (VAL_int32 dst'); $VN (VAL_int32 src'); AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0)); AI_basic (BI_store T_i32 (Some (Tp_i8)) (Build_memarg N0 N0));
-              $VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n'); AI_basic (BI_memory_copy)]
+    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy x y)]
+      hs s f [:: $VN (VAL_int32 dst'); $VN (VAL_int32 src'); AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0 y)); AI_basic (BI_store T_i32 (Some (Tp_i8)) (Build_memarg N0 N0 x));
+              $VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n'); AI_basic (BI_memory_copy x y)]
 | r_memory_init_bound :
-  forall x src dst n mem data s f hs,
+  forall x y src dst n mem data s f hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let src_z := Wasm_int.Z_of_uint i32m src in
     let dst_z := Wasm_int.Z_of_uint i32m dst in
-    smem s f.(f_inst) = Some mem ->
-    sdata s f.(f_inst) x = Some data ->
+    smem s f.(f_inst) x = Some mem ->
+    sdata s f.(f_inst) y = Some data ->
     ((Z.add src_z n_z > Z.of_nat (data_size data))%Z \/
      (Z.add dst_z n_z > Z.of_N (mem_length mem))%Z) ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_init x)]
+    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_init x y)]
       hs s f [::AI_trap]
 | r_memory_init_return :
-  forall x src dst n mem data s f hs,
+  forall x y src dst n mem data s f hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let src_z := Wasm_int.Z_of_uint i32m src in
     let dst_z := Wasm_int.Z_of_uint i32m dst in
-    smem s f.(f_inst) = Some mem ->
-    sdata s f.(f_inst) x = Some data ->
+    smem s f.(f_inst) x = Some mem ->
+    sdata s f.(f_inst) y = Some data ->
     (Z.add src_z n_z <= Z.of_nat (data_size data))%Z ->
     (Z.add dst_z n_z <= Z.of_N (mem_length mem))%Z ->
     (n_z = 0)%Z ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_init x)]
+    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_init x y)]
       hs s f [::]
 | r_memory_init_step :
-  forall x src dst n mem data src' dst' n' b s f hs,
+  forall x y src dst n mem data src' dst' n' b s f hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let src_z := Wasm_int.Z_of_uint i32m src in
     let dst_z := Wasm_int.Z_of_uint i32m dst in
-    smem s f.(f_inst) = Some mem ->
-    sdata s f.(f_inst) x = Some data ->
+    smem s f.(f_inst) x = Some mem ->
+    sdata s f.(f_inst) y = Some data ->
     (Z.add src_z n_z <= Z.of_nat (data_size data))%Z ->
     (Z.add dst_z n_z <= Z.of_N (mem_length mem))%Z ->
     (n_z <> 0)%Z ->
@@ -678,9 +713,9 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
     n' = Wasm_int.int_of_Z i32m (Z.sub n_z 1) ->
     src' = Wasm_int.int_of_Z i32m (Z.add src_z 1) ->
     dst' = Wasm_int.int_of_Z i32m (Z.add dst_z 1) ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_init x)]
-      hs s f [:: $VN (VAL_int32 dst); v_to_e (VAL_num (wasm_deserialise [::b] T_i32)); AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0));
-              $VN (VAL_int32 dst'); $VN (VAL_int32 src'); $VN (VAL_int32 n'); AI_basic (BI_memory_init x)]
+    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_init x y)]
+      hs s f [:: $VN (VAL_int32 dst); v_to_e (VAL_num (wasm_deserialise [::b] T_i32)); AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 x));
+              $VN (VAL_int32 dst'); $VN (VAL_int32 src'); $VN (VAL_int32 n'); AI_basic (BI_memory_init x y)]
 | r_data_drop:
   forall x hs s f s',
     sdata_drop s f.(f_inst) x = Some s' ->
@@ -697,6 +732,18 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
       forall s f es s' f' es' n f0 hs hs',
         reduce hs s f es hs' s' f' es' ->
         reduce hs s f0 [::AI_frame n f es] hs' s' f0 [::AI_frame n f' es']
+  | r_call_ref : forall hs s f x a,
+      reduce hs s f [::AI_ref a; AI_basic (BI_call_ref x)]
+        hs s f [::AI_invoke a]
+  | r_call_ref_null : forall hs s f x h,
+      reduce hs s f [::$V (VAL_ref (VAL_ref_null h)); AI_basic (BI_call_ref x)]
+        hs s f [::AI_trap]
+  | r_return_call_ref : forall hs s f x a,
+      reduce hs s f [::AI_ref a; AI_basic (BI_return_call_ref x)]
+        hs s f [::AI_return_invoke a]
+  | r_return_call_ref_null : forall hs s f x h,
+      reduce hs s f [::$V (VAL_ref (VAL_ref_null h)); AI_basic (BI_return_call_ref x)]
+        hs s f [::AI_trap]
   .
 
 Definition reduce_tuple hs_s_f_es hs'_s'_f'_es' : Prop :=

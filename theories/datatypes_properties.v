@@ -3,6 +3,7 @@
 From Wasm Require Export datatypes.
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From HB Require Import structures.
+From Stdlib Require Import Logic.Eqdep_dec.
 
 (* see common.v *)
 Set SsrOldRewriteGoalsOrder.
@@ -43,6 +44,11 @@ Definition eqnumber_typeP : Equality.axiom number_type_eqb :=
 
 HB.instance Definition number_type_eqMixin := hasDecEq.Build number_type eqnumber_typeP.
 
+Scheme Equality for heap_type.
+Definition heap_type_eqb v1 v2 : bool := heap_type_eq_dec v1 v2.
+Definition eqheap_typeP : Equality.axiom heap_type_eqb :=
+  eq_dec_Equality_axiom heap_type_eq_dec.
+HB.instance Definition heap_type_eqMixin := hasDecEq.Build heap_type eqheap_typeP.
 Scheme Equality for reference_type.
 Definition reference_type_eqb v1 v2 : bool := reference_type_eq_dec v1 v2.
 Definition eqreference_typeP : Equality.axiom reference_type_eqb :=
@@ -87,6 +93,15 @@ Definition eqfunction_typeP : Equality.axiom function_type_eqb :=
   eq_dec_Equality_axiom function_type_eq_dec.
 
 HB.instance Definition function_type_eqMixin := hasDecEq.Build function_type eqfunction_typeP.
+
+Definition source_subtype_eq_dec : forall x y : source_subtype, {x = y} + {x <> y}.
+Proof. decidable_equality. Defined.
+
+Definition source_subtype_eqb x y : bool := source_subtype_eq_dec x y.
+Definition eqsource_subtypeP : Equality.axiom source_subtype_eqb :=
+  eq_dec_Equality_axiom source_subtype_eq_dec.
+HB.instance Definition source_subtype_eqMixin :=
+  hasDecEq.Build source_subtype eqsource_subtypeP.
 
 Definition t_context_eq_dec : forall x y : t_context, {x = y} + {x <> y}.
 Proof. decidable_equality. Defined.

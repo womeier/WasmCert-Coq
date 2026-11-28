@@ -77,11 +77,28 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
   | BI_const_vec c =>
       tf = (Tf nil [::T_vec (typeof_vec c)])
   | BI_ref_null t =>
-      tf = (Tf nil [::T_ref t])
+      tf = (Tf nil [::T_ref (Ref_type true t)])
   | BI_ref_is_null =>
       exists t, tf = (Tf [::T_ref t] [::T_num T_i32])
+  | BI_ref_i31 =>
+      tf = (Tf [::T_num T_i32] [::T_ref (Ref_type false HT_i31)])
+  | BI_i31_get _ =>
+      exists nullable, tf =
+        (Tf [::T_ref (Ref_type nullable HT_i31)] [::T_num T_i32])
+  | BI_ref_as_non_null =>
+      exists t, tf = (Tf [::t] [::non_nullable_type t]) /\ is_ref_t t
+  | BI_call_ref _ | BI_return_call_ref _ => False
+  | BI_br_on_non_null x =>
+      exists ts t,
+        tf = Tf (ts ++ [::nullable_type t]) ts /\
+        lookup_N C.(tc_labels) x = Some (ts ++ [::t]) /\
+        is_ref_t t
+  | BI_br_on_null x =>
+      exists ts t,
+        tf = Tf (ts ++ [::t]) (ts ++ [::non_nullable_type t]) /\
+        lookup_N C.(tc_labels) x = Some ts /\ is_ref_t t
   | BI_ref_func x =>
-      exists t, tf = (Tf [::] [::T_ref T_funcref]) /\
+      exists t, tf = (Tf [::] [::T_ref (Ref_type false HT_func)]) /\
              lookup_N (tc_funcs C) x = Some t /\
              List.In x (tc_refs C)
   | BI_unop t op =>
@@ -170,20 +187,20 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       exists ts1 ts2 tabt,
       tf = (Tf (ts1 ++ [::T_num T_i32]) ts2)/\
         lookup_N (tc_tables C) x = Some tabt /\
-        tabt.(tt_elem_type) = T_funcref /\
-        lookup_N (tc_types C) y = Some (Tf ts1 ts2)
+        ref_heap tabt.(tt_elem_type) = HT_func /\
+        lookup_function_type (tc_types C) y = Some (Tf ts1 ts2)
   | BI_return_call n =>
-      exists ts1 ts2 ts3 ts4,
+      exists ts1 ts2 ts3 ts4 returns,
       tf = (Tf (ts3 ++ ts1) ts4) /\
         lookup_N (tc_funcs C) n = Some (Tf ts1 ts2) /\
-        tc_return C = Some ts2
+        tc_return C = Some returns /\ ts2 <ts: returns
   | BI_return_call_indirect x y =>
-      exists ts1 ts2 ts3 ts4 tabt,
+      exists ts1 ts2 ts3 ts4 tabt returns,
       tf = (Tf (ts3 ++ ts1 ++ [::T_num T_i32]) ts4)/\
         lookup_N (tc_tables C) x = Some tabt /\
-        tabt.(tt_elem_type) = T_funcref /\
-        lookup_N (tc_types C) y = Some (Tf ts1 ts2) /\
-        tc_return C = Some ts2
+        ref_heap tabt.(tt_elem_type) = HT_func /\
+        lookup_function_type (tc_types C) y = Some (Tf ts1 ts2) /\
+        tc_return C = Some returns /\ ts2 <ts: returns
   | BI_local_get x =>
       exists t,
       tf = (Tf nil [::t]) /\
@@ -251,54 +268,55 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
   | BI_load t tp_sx marg =>
       exists mt,
       tf = (Tf [::T_num T_i32] [::T_num t]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
-        load_store_t_bounds marg.(memarg_align) (option_projl tp_sx) t
+        lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
+        load_store_memarg_bounds marg (option_projl tp_sx) t
   | BI_load_vec lvarg marg =>
       exists mt,
       tf = (Tf [::T_num T_i32] [::T_vec T_v128]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
+        lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
         load_vec_bounds lvarg marg
   | BI_load_vec_lane width marg x =>
       exists mt,
       tf = (Tf [::T_num T_i32; T_vec T_v128] [::T_vec T_v128]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
+        lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
         load_store_vec_lane_bounds width marg x
   | BI_store t tp marg =>
       exists mt,
       tf = (Tf [::T_num T_i32; T_num t] [::]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
-        load_store_t_bounds marg.(memarg_align) tp t
+        lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
+        load_store_memarg_bounds marg tp t
   | BI_store_vec marg =>
       exists mt,
       tf = (Tf [::T_num T_i32; T_vec T_v128] [::]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
+        lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
         load_vec_bounds LVA_none marg
   | BI_store_vec_lane width marg x =>
       exists mt,
       tf = (Tf [::T_num T_i32; T_vec T_v128] [::]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
+        lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
         load_store_vec_lane_bounds width marg x
-  | BI_memory_size =>
+  | BI_memory_size x =>
       exists mt,
       tf = (Tf [::] [::T_num T_i32]) /\
-        lookup_N (tc_mems C) 0%N = Some mt
-  | BI_memory_grow =>
+        lookup_N (tc_mems C) x = Some mt
+  | BI_memory_grow x =>
       exists mt,
       tf = (Tf [::T_num T_i32] [::T_num T_i32]) /\
-        lookup_N (tc_mems C) 0%N = Some mt
-  | BI_memory_fill =>
+        lookup_N (tc_mems C) x = Some mt
+  | BI_memory_fill x =>
       exists mt,
       tf = (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::]) /\
-        lookup_N (tc_mems C) 0%N = Some mt
-  | BI_memory_copy =>
-      exists mt,
+        lookup_N (tc_mems C) x = Some mt
+  | BI_memory_copy x y =>
+      exists mt_dst mt,
       tf = (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::]) /\
-        lookup_N (tc_mems C) 0%N = Some mt
-  | BI_memory_init x =>
+        lookup_N (tc_mems C) x = Some mt_dst /\
+        lookup_N (tc_mems C) y = Some mt
+  | BI_memory_init x y =>
       exists mt dt,
       tf = (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
-        lookup_N (tc_datas C) x = Some dt
+        lookup_N (tc_mems C) x = Some mt /\
+        lookup_N (tc_datas C) y = Some dt
   | BI_data_drop x =>
       exists dt,
       tf = (Tf nil nil) /\
@@ -532,17 +550,19 @@ Definition e_principal_typing (s: store_record) (C: t_context) (e: administrativ
   | AI_trap =>
       True (* Equivalently, add trivial equalities *)
   | AI_ref_extern a =>
-      tf = (Tf nil [::T_ref T_externref])
+      tf = (Tf nil [::T_ref (Ref_type false HT_extern)])
+  | AI_ref_i31 _ =>
+      tf = (Tf nil [::T_ref (Ref_type false HT_i31)])
   | AI_ref a =>
-      exists t, tf = (Tf nil [::T_ref T_funcref]) /\
+      exists t, tf = (Tf nil [::T_ref (Ref_type false HT_func)]) /\
         ext_func_typing s a = Some t
   | AI_invoke a =>
       exists tf0, tf = tf0 /\
         ext_func_typing s a = Some tf0
   | AI_return_invoke a =>
-      exists ts1 ts2 ts3 ts4, tf = (Tf (ts3 ++ ts1) ts4) /\
+      exists ts1 ts2 ts3 ts4 returns, tf = (Tf (ts3 ++ ts1) ts4) /\
       ext_func_typing s a = Some (Tf ts1 ts2) /\
-      tc_return C = Some ts2                     
+      tc_return C = Some returns /\ ts2 <ts: returns
   | AI_label n es0 es =>
       exists ts1 ts2,
       tf = (Tf nil ts2) /\
@@ -693,12 +713,12 @@ Proof.
   - exists (T_vec (typeof_vec v)); split => //.
     by destruct v.
   (* ref -- slightly annoying, since one is basic and the other ones are not *)
-  - destruct v; simpl in *.
+  - destruct v as [h|a|a|n]; simpl in *.
     (* ref_null *)
     + apply et_to_bet in HType; last done; simpl in *.
       invert_be_typing.
-      exists (T_ref r); split => //.
-      by destruct r.
+      exists (T_ref (Ref_type true h)); split => //.
+      by unfold value_typing; simpl; apply value_subtyping_eq.
     (* ref *)
     + apply e_typing_inversion in HType; simpl in *.
       extract_premise.
@@ -708,7 +728,11 @@ Proof.
     (* ref_extern *)
     + apply e_typing_inversion in HType; simpl in *.
       extract_premise.
-      exists (T_ref T_externref).
+      exists (T_ref (Ref_type false HT_extern)).
+      by split => //.
+    + apply e_typing_inversion in HType; simpl in *.
+      extract_premise.
+      exists (T_ref (Ref_type false HT_i31)).
       by split => //.
   Transparent instr_subtyping.
 Qed.
@@ -752,14 +776,16 @@ Proof.
   - apply ety_a' => //=.
     econstructor; first by econstructor.
     apply instr_subtyping_weaken2 with (ty2 := [::T_vec (typeof_vec v)]); by resolve_subtyping.
-  - destruct v as [| f | e] => /=; simpl in *; try injection Hoption as <-; remove_bools_options.
+  - destruct v as [h| f | e | n] => /=; simpl in *; try injection Hoption as <-; remove_bools_options.
     + apply ety_a' => //=.
       econstructor; first by econstructor.
-      apply instr_subtyping_weaken2 with (ty2 := [::T_ref r]); by resolve_subtyping.
+      apply instr_subtyping_weaken2 with (ty2 := [::T_ref (Ref_type true h)]); by resolve_subtyping.
     + eapply ety_subtyping; first by eapply ety_ref; eauto.
-      apply instr_subtyping_weaken2 with (ty2 := [::T_ref T_funcref]); by resolve_subtyping.
+      apply instr_subtyping_weaken2 with (ty2 := [::T_ref (Ref_type false HT_func)]); by resolve_subtyping.
     + eapply ety_subtyping; first by eapply ety_ref_extern; eauto.
-      apply instr_subtyping_weaken2 with (ty2 := [::T_ref T_externref]); by resolve_subtyping.
+      apply instr_subtyping_weaken2 with (ty2 := [::T_ref (Ref_type false HT_extern)]); by resolve_subtyping.
+     + eapply ety_subtyping; first by eapply ety_ref_i31; eauto.
+       apply instr_subtyping_weaken2 with (ty2 := [::T_ref (Ref_type false HT_i31)]); by resolve_subtyping.
 Qed.
 
 Lemma et_values_typing: forall s C vs ts,
@@ -812,6 +838,10 @@ End Typing_inversion_e.
 Ltac invert_e_typing :=
   repeat match goal with
   | H: thread_typing _ _ _ _ |- _ =>
+    let Hinit := fresh "Hinitialization" in
+    assert (Hinit : ltac:(match type of H with
+      | thread_typing _ _ (?f, ?es) _ => exact (frame_initialization f es)
+      end)) by (inversion H; subst; assumption);
     let C := fresh "C" in
     let H1 := fresh "Hframetype" in
     let H2 := fresh "Hetype" in
@@ -922,7 +952,7 @@ Proof.
   remove_bools_options; simpl in *.
   unfold store_typing in Hst.
   destruct s; remove_bools_options.
-  destruct Hst as [? [? [? [Hglobtype ?]]]].
+  destruct Hst as [_ [? [? [? [Hglobtype ?]]]]].
   eapply those_lookup_inv in Hoption5; eauto.
   eapply Forall_lookup with (n := (N.to_nat g1)) in Hglobtype as [gt Hglobtype]; eauto.
   {
@@ -977,22 +1007,17 @@ Proof.
   by rewrite Hoption2.
 Qed.
 
-Lemma mem_context_store: forall s i C,
+Lemma mem_context_store: forall s i C x mt,
     inst_typing s i = Some C ->
-    tc_mems C <> [::] ->
-    exists (n: memaddr), smem_ind s i = Some n /\
+    lookup_N (tc_mems C) x = Some mt ->
+    exists (n: memaddr), smem_ind s i x = Some n /\
               lookup_N (s_mems s) n <> None.
 Proof.
-  move => s i C HIT HMemory.
-  unfold inst_typing, typing.inst_typing in HIT.
-  destruct i => //=. 
-  remove_bools_options; simpl in *.
-  destruct l1 => //.
-  eapply those_lookup_inv with (i := 0) in Hoption1; eauto; last by eauto.
-  rewrite List.nth_error_map in Hoption1.
-  unfold ext_mem_typing in Hoption1.
-  remove_bools_options; simpl in *.
-  exists m0; by rewrite Hoption1.
+  move => s i C x mt HIT HMemory.
+  eapply inst_typing_mem_lookup_inv in HMemory as [a [Hext Ha]]; eauto.
+  exists a; split; first by unfold smem_ind.
+  unfold ext_mem_typing in Hext.
+  by destruct (lookup_N (s_mems s) a).
 Qed.
 
 Lemma Lfilled_break_typing: forall n m k (lh: lholed n) vs LI ts s C t2s tss,

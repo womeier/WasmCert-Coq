@@ -120,3 +120,6 @@ jobs:
 
       - name: Run conformance suite
         run: make run_wast
+
+      - name: Run binary tail-call conformance and regressions
+        run: bash run_wast.sh tests/conformance
