@@ -33,6 +33,36 @@ Proof.
   now rewrite Hbound.
 Qed.
 
+Lemma parse_u32_as_N_prefix_correspondence {m n}
+    (bound : (m <= n)%nat) (input : SizedList byte m) :
+  flatten (runParser
+    (parse_u32_as_N (Toks := SizedList byte) (M := option) (n := n))
+    bound input) =
+  AddressingBinary.decode_address AT_i32 (@Sized.value _ _ _ input).
+Proof.
+  rewrite bounded_u32_decoders_agree.
+  change (option_map observe_reader
+    (runParser (parse_u32_as_N :
+      Parser (SizedList byte) byte option N n) bound input) =
+    decode_u32 (@Sized.value _ _ _ input)).
+  assert (E : forall value rest,
+    option_map observe_reader
+      (runParser (parse_u32_as_N :
+        Parser (SizedList byte) byte option N n) bound input) =
+        Some (value, rest) <->
+    decode_u32 (@Sized.value _ _ _ input) = Some (value, rest)).
+  { intros. rewrite parse_u32_as_N_correct. symmetry.
+    apply decode_u32_correct. }
+  destruct (option_map observe_reader
+    (runParser (parse_u32_as_N :
+      Parser (SizedList byte) byte option N n) bound input))
+    as [[value rest]|] eqn:Run.
+  - symmetry. apply E. reflexivity.
+  - destruct (decode_u32 (@Sized.value _ _ _ input))
+      as [[value rest]|] eqn:Decode; [|reflexivity].
+    exfalso. pose proof (proj2 (E value rest) eq_refl). discriminate.
+Qed.
+
 Definition run_u32_prefix (input: list byte) : option (N * list byte) :=
   flatten (runParser
     (parse_u32_as_N (Toks := SizedList byte) (M := option))

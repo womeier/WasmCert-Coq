@@ -14,7 +14,10 @@ Lemma parse_expr_end : forall n (Hle : (1 <= n)%nat),
 Proof.
   intros n Hle.
   unfold parse_expr, parse_bes_end_with_x0b, language, Fix, Induction.extract.
-  cbn [FixBox call _bes_end_with_x0b].
+  cbn [FixBox call].
+  unfold language_step.
+  cbn [_bes_end_with_x0b].
+  unfold parse_be_layer.
   reflexivity.
 Qed.
 
@@ -45,7 +48,10 @@ Proof.
   inversion Hobs; subst value rest.
   cbn in Hlength. subst remaining.
   unfold parse_expr, parse_bes_end_with_x0b, language, Fix, Induction.extract.
-  cbn [FixBox call _bes_end_with_x0b].
+  cbn [FixBox call].
+  unfold language_step.
+  cbn [_bes_end_with_x0b].
+  unfold parse_be_layer.
   unfold Combinators.alt, Combinators.app, Combinators.bind,
     Combinators.andbind, Combinators.and, Combinators.map,
     Combinators.cmap, exact_byte, Combinators.guardM.

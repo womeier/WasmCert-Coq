@@ -1,5 +1,59 @@
 # Binary tail-call conformance
 
+## Shared expression/code proof scope
+
+The selectively integrated shared handoff (`654b6a1`, `dfb1013`, and final-u64
+interfaces from `10b7fc2`) now proves actual arbitrary-suffix expression parsing,
+local packing, function-body framing and code-section round trips on this tree.
+Relevant SIMD memory proofs are selectively adapted from `d8eecf0`; its
+memory64 runtime AST/validation changes are **not** imported.
+
+`theories/tail_call_code_properties.v` exposes
+`expression_print_prefix_from_shared` and `code_locals_roundtrip_from_shared`.
+Unlike the earlier common-interface adapter, these do **not** assume parser
+completeness, parser success, or expression printer membership. They derive those
+facts from the shared structural `expression_binary_wf` domain.
+
+This is **wire encodability**, not source-module validation or runtime type
+closing. Its exact residual conditions are:
+
+- Ordinary indices and vector counts fit u32; function bodies and framed
+  code-section payloads have u32 byte sizes; expanded local count is `<2^32`.
+- Local, block-value and typed-select reference descriptors belong to the
+  production fragment: all ten abstract heaps, with either nullability.
+  `ref.null` similarly uses an abstract heap descriptor. Indexed heap/value
+  types and exception heaps remain outside these codec domains until their
+  source-to-canonical runtime closing boundary is connected. No module-local
+  `HT_type n` is interpreted as runtime identity `n`.
+- Indexed `call_ref`/`return_call_ref` **instruction immediates** have byte
+  codecs under the u32 bound. This does not establish positive indexed-call
+  validation, expected-type closing, null lowering or execution.
+- Memory arguments have alignment `<64` (encoded flags `<128`), memory index `<2^32`, and
+  **offset `<2^64`**, not the owner's former `<2^32` restriction. The theorem
+  `final_memarg_grammar_bridge` identifies the shared consumed-byte grammar with
+  this tree's previously proved final `memarg_prefix`, including arbitrary
+  suffixes and padded headers. Memory32's `<2^32` offset restriction remains a
+  separate validator check.
+- SIMD constructors require standard encodable opcode/shape combinations;
+  shuffle has exactly 16 lanes `<32`, lane immediates fit one raw byte,
+  and v128 constants have exactly 16 bytes. These bounds do not replace
+  semantic alignment/lane validation. No relaxed SIMD is included.
+
+`binary_format_shared_composition_tests.v` derives a mixed recursive code
+round trip with nonempty non-null locals, an indexed-call opcode, signed
+block index 64 and maximum u64 offset from the structural theorem. It
+explicitly makes no validation claim about that deliberately untyped body.
+`binary_format_shared_framing_tests.v` checks exact code-section size,
+both wrong-size directions, missing end marker and suffix retention.
+
+Reference/value and final-memarg codec bridges, including the adapted SIMD
+memory round trips, are closed under the global context. Whole expression/code
+results inherit the existing classical-real and functional-extensionality
+assumptions of the numeric development; no new axiom or admission is added.
+Whole-module custom/optional/order/guard composition is not claimed here.
+
+## Binary projection provenance
+
 `return_call.wast` and `return_call_indirect.wast` are binary projections of
 `wast_testsuite/proposals/wasm-3.0/{return_call,return_call_indirect}.wast`,
 at testsuite revision `b497cbb853db21be875bd5c81fcc3334168fb0b4`.

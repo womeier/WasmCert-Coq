@@ -270,7 +270,10 @@ Lemma parse_be_tail_complete :
 Proof.
   intros n m Hle input result Htail.
   unfold parse_be, language, Fix, Induction.extract.
-  cbn [FixBox call _be].
+  cbn [FixBox call].
+  unfold language_step.
+  cbn [_be].
+  unfold parse_be_layer.
   unfold Combinators.alt; cbn [runParser].
   rewrite Htail. reflexivity.
 Qed.
@@ -313,7 +316,8 @@ Proof.
   intros n input opcode Hle Hopcode.
   destruct Hopcode as [-> | ->];
     unfold parse_be, language, Fix, Induction.extract;
-    cbn [FixBox call _be];
+    cbn [FixBox call];
+    unfold language_step; cbn [_be]; unfold parse_be_layer;
     unfold Combinators.alt; cbn [runParser];
     destruct (runParser (parse_tail_call :
       Parser (SizedList Byte.byte) Byte.byte option basic_instruction n)

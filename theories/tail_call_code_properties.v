@@ -8,7 +8,8 @@ From Wasm Require Import datatypes_properties binary_format_parser
   binary_format_parser_properties binary_vector_properties
   binary_locals_properties tail_call_parser_properties
   tail_call_sequence_properties tail_call_codec_properties
-  binary_locals_printer_properties binary_parser_combinator_properties.
+  binary_locals_printer_properties binary_parser_combinator_properties
+  binary_format_expression_print.
 
 Lemma parse_code_func_tail_prefix : forall n opcode b input instruction suffix
     (Hle : (List.length (x00 :: opcode :: b :: input) <= n)%nat),
@@ -71,7 +72,7 @@ Proof.
     Hle Hheader Hdeclared Hopcode Hgrammar.
   pose proof (proj2 (parse_u32_as_N_correct n m Hle input declared
     (x00 :: opcode :: b :: rest)) Hheader) as Hhead.
-  unfold parse_code, Combinators.bind, Combinators.andbind, Combinators.map.
+  unfold parse_code, parse_section_payload, Combinators.bind, Combinators.andbind, Combinators.map.
   cbn [runParser].
   destruct (runParser (parse_u32_as_N :
     Parser (SizedList Byte.byte) Byte.byte option N n) Hle input)
@@ -193,7 +194,7 @@ Proof.
     Hle Hheader Hdeclared Hgrammar.
   pose proof (proj2 (parse_u32_as_N_correct n m Hle input declared body)
     Hheader) as Hhead.
-  unfold parse_code, Combinators.bind, Combinators.andbind, Combinators.map.
+  unfold parse_code, parse_section_payload, Combinators.bind, Combinators.andbind, Combinators.map.
   cbn [runParser].
   destruct (runParser (parse_u32_as_N :
     Parser (SizedList Byte.byte) Byte.byte option N n) Hle input)
@@ -236,7 +237,7 @@ Proof.
     Hle Hheader Hdeclared Hgrammar.
   pose proof (proj2 (parse_u32_as_N_correct n m Hle input declared body)
     Hheader) as Hhead.
-  unfold parse_code, Combinators.bind, Combinators.andbind, Combinators.map.
+  unfold parse_code, parse_section_payload, Combinators.bind, Combinators.andbind, Combinators.map.
   cbn [runParser].
   destruct (runParser (parse_u32_as_N :
     Parser (SizedList Byte.byte) Byte.byte option N n) Hle input)
@@ -479,7 +480,7 @@ Proof.
     Hle Hheader Hdeclared Hgrammar.
   pose proof (proj2 (parse_u32_as_N_correct n m Hle input declared body)
     Hheader) as Hhead.
-  unfold parse_code, Combinators.bind, Combinators.andbind, Combinators.map.
+  unfold parse_code, parse_section_payload, Combinators.bind, Combinators.andbind, Combinators.map.
   cbn [runParser].
   destruct (runParser (parse_u32_as_N :
     Parser (SizedList Byte.byte) Byte.byte option N n) Hle input)
@@ -596,7 +597,7 @@ Proof.
     Hle Hheader Hdeclared Hgrammar.
   pose proof (proj2 (parse_u32_as_N_correct n m Hle input declared body)
     Hheader) as Hhead.
-  unfold parse_code, Combinators.bind, Combinators.andbind, Combinators.map.
+  unfold parse_code, parse_section_payload, Combinators.bind, Combinators.andbind, Combinators.map.
   cbn [runParser].
   destruct (runParser (parse_u32_as_N :
     Parser (SizedList Byte.byte) Byte.byte option N n) Hle input)
@@ -652,6 +653,16 @@ Proof.
   change (Some (Success.value result,
     @Sized.value _ _ _ (Success.leftovers result)) = Some (es, suffix)).
   now rewrite Hvalue, Hsuffix.
+Qed.
+
+(** The former arbitrary-sequence premise is now discharged by the actual
+    shared recursive parser theorem and its structural printer domain.
+    This is wire encodability, not source-module validity or runtime closing. *)
+Theorem expression_print_prefix_from_shared es :
+  expression_binary_wf es -> expression_print_prefix es.
+Proof.
+  intro Wf.
+  exact (wasm_expression_print_prefix es Wf).
 Qed.
 
 Theorem code_func_locals_print_prefix_from_expression :
@@ -729,7 +740,7 @@ Proof.
   pose proof (proj2 (parse_u32_as_N_correct n _ Hle
     (mkSizedList (List.app (binary_of_code (Build_module_func type locals es)) suffix))
     declared body) Hheader) as Hhead.
-  unfold parse_code, Combinators.bind, Combinators.andbind, Combinators.map.
+  unfold parse_code, parse_section_payload, Combinators.bind, Combinators.andbind, Combinators.map.
   cbn [runParser].
   match goal with
   | |- context [runParser ?parser ?bound ?tokens] =>
@@ -797,6 +808,21 @@ Proof.
   intros Encoding type locals es Hlength Hlocals Hcomplete Hencoded Hsize.
   apply code_locals_roundtrip_from_expression; try assumption.
   eapply expression_print_prefix_from_common; eassumption.
+Qed.
+
+Corollary code_locals_roundtrip_from_shared type locals es :
+  (N.of_nat (List.length locals) < 4294967296)%N ->
+  List.Forall printable_local_type locals ->
+  expression_binary_wf es ->
+  (N.of_nat (List.length (binary_of_code_func locals es)) <= 4294967295)%N ->
+  binary_format_parser.run (binary_of_code (Build_module_func type locals es))
+    (fun n => (parse_code :
+      Parser (SizedList Byte.byte) Byte.byte option module_func_without_type n)) =
+    Some (locals, es).
+Proof.
+  intros Count Locals Expression Size.
+  apply code_locals_roundtrip_from_expression; try assumption.
+  now apply expression_print_prefix_from_shared.
 Qed.
 
 Lemma empty_expression_print_prefix : expression_print_prefix nil.

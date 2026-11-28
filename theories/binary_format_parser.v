@@ -215,10 +215,16 @@ Definition parse_value_type {n} : byte_parser value_type n :=
   T_vec <$> parse_vector_type <|>
   T_ref <$> parse_reference_type.
 
+Definition parse_block_typeidx {n} : byte_parser typeidx n :=
+  guardM
+    (fun z => if andb (Z.leb 0 z) (Z.leb z 4294967295)
+      then Some (Z.to_N z) else None)
+    (assert_sized (extract parse_signed n) (fun size => N.leb size 5)).
+
 Definition parse_block_type {n} : byte_parser block_type n :=
   (exact_byte x40 $> BT_valtype None) <|>
   (fun t => BT_valtype (Some t)) <$> parse_value_type <|>
-  BT_id <$> parse_typeidx.
+  BT_id <$> parse_block_typeidx.
 
 
 Definition parse_unreachable {n} : byte_parser basic_instruction n :=
@@ -538,15 +544,46 @@ Definition parse_v128_store_lane {n} : byte_parser basic_instruction n :=
   assert_u32 90%N &> ((BI_store_vec_lane 32%N <$> parse_memarg) <*> parse_laneidx) <|>
   assert_u32 91%N &> ((BI_store_vec_lane 64%N <$> parse_memarg) <*> parse_laneidx).
              
+Inductive vector_memory_immediate :=
+| VMI_memarg : (memarg -> basic_instruction) -> vector_memory_immediate
+| VMI_lane : (memarg -> laneidx -> basic_instruction) -> vector_memory_immediate.
+
+Definition vector_memory_opcode (code : N) : option vector_memory_immediate :=
+  match code with
+  | 0%N => Some (VMI_memarg (BI_load_vec LVA_none))
+  | 1%N => Some (VMI_memarg (BI_load_vec (LVA_extend (8%N, 8%N) SX_S)))
+  | 2%N => Some (VMI_memarg (BI_load_vec (LVA_extend (8%N, 8%N) SX_U)))
+  | 3%N => Some (VMI_memarg (BI_load_vec (LVA_extend (16%N, 4%N) SX_S)))
+  | 4%N => Some (VMI_memarg (BI_load_vec (LVA_extend (16%N, 4%N) SX_U)))
+  | 5%N => Some (VMI_memarg (BI_load_vec (LVA_extend (32%N, 2%N) SX_S)))
+  | 6%N => Some (VMI_memarg (BI_load_vec (LVA_extend (32%N, 2%N) SX_U)))
+  | 7%N => Some (VMI_memarg (BI_load_vec (LVA_splat 8%N)))
+  | 8%N => Some (VMI_memarg (BI_load_vec (LVA_splat 16%N)))
+  | 9%N => Some (VMI_memarg (BI_load_vec (LVA_splat 32%N)))
+  | 10%N => Some (VMI_memarg (BI_load_vec (LVA_splat 64%N)))
+  | 11%N => Some (VMI_memarg BI_store_vec)
+  | 84%N => Some (VMI_lane (BI_load_vec_lane 8%N))
+  | 85%N => Some (VMI_lane (BI_load_vec_lane 16%N))
+  | 86%N => Some (VMI_lane (BI_load_vec_lane 32%N))
+  | 87%N => Some (VMI_lane (BI_load_vec_lane 64%N))
+  | 88%N => Some (VMI_lane (BI_store_vec_lane 8%N))
+  | 89%N => Some (VMI_lane (BI_store_vec_lane 16%N))
+  | 90%N => Some (VMI_lane (BI_store_vec_lane 32%N))
+  | 91%N => Some (VMI_lane (BI_store_vec_lane 64%N))
+  | 92%N => Some (VMI_memarg (BI_load_vec (LVA_zero 32%N)))
+  | 93%N => Some (VMI_memarg (BI_load_vec (LVA_zero 64%N)))
+  | _ => None
+  end.
+
+Definition parse_vector_memory_tail {n} (code : N) : byte_parser basic_instruction n :=
+  match vector_memory_opcode code with
+  | Some (VMI_memarg build) => build <$> parse_memarg
+  | Some (VMI_lane build) => (build <$> parse_memarg) <*> parse_laneidx
+  | None => fail
+  end.
+
 Definition parse_vector_memory_instruction {n} : byte_parser basic_instruction n :=
-  exact_byte xfd &>
-  (parse_v128_load <|>
-  parse_v128_load_packed <|>
-  parse_v128_load_splat <|>
-  parse_v128_load_zero <|>
-  parse_v128_store <|>
-  parse_v128_load_lane <|>
-  parse_v128_store_lane).
+  exact_byte xfd &> (parse_u32_as_N >>= (fun code => parse_vector_memory_tail code)).
 
 Definition parse_memory_instruction {n} : byte_parser basic_instruction n :=
   parse_i32_load <|>
@@ -923,11 +960,11 @@ Arguments MkLanguage {_}.
 Context
   {Tok : Type} {A B : Type} {n : nat}.
 
-Definition language : [ Language ] := Fix Language (fun k rec =>
-  let be_aux := Induction.map _be _ rec in
-  let bes_end_with_x0b_aux := Induction.map _bes_end_with_x0b _ rec in
-  let bes_end_with_x05_aux := Induction.map _bes_end_with_x05 _ rec in
-  let bes_end_with_x0b_or_x05_ctd_aux := Induction.map _bes_end_with_x0b_or_x05_ctd _ rec in
+Definition parse_be_layer {k}
+  (bes_end_with_x0b_aux : Box (byte_parser (list basic_instruction)) k)
+  (bes_end_with_x0b_or_x05_ctd_aux :
+    Box (byte_parser (list basic_instruction * list basic_instruction)) k) :
+    byte_parser basic_instruction k :=
   let parse_block :=
     exact_byte x02 &> ((BI_block <$> parse_block_type) <*> bes_end_with_x0b_aux) in
   let parse_loop :=
@@ -936,7 +973,6 @@ Definition language : [ Language ] := Fix Language (fun k rec =>
     (((fun x y => (x, y)) <$> parse_block_type) <*> bes_end_with_x0b_or_x05_ctd_aux) in
   let parse_if :=
     (fun '(x, (y, z)) => BI_if x y z) <$> (exact_byte x04 &> parse_if_body) in
-  let parse_be :=
     parse_tail_call <|>
     parse_unreachable <|>
     parse_nop <|>
@@ -956,7 +992,13 @@ Definition language : [ Language ] := Fix Language (fun k rec =>
     parse_variable_instruction <|>
     parse_table_instruction <|>
     parse_memory_instruction <|>
-    parse_numeric_instruction in
+    parse_numeric_instruction.
+
+Definition language_step k (rec : Box Language k) : Language k :=
+  let bes_end_with_x0b_aux := Induction.map _bes_end_with_x0b _ rec in
+  let bes_end_with_x05_aux := Induction.map _bes_end_with_x05 _ rec in
+  let bes_end_with_x0b_or_x05_ctd_aux := Induction.map _bes_end_with_x0b_or_x05_ctd _ rec in
+  let parse_be := parse_be_layer bes_end_with_x0b_aux bes_end_with_x0b_or_x05_ctd_aux in
   let parse_bes_end_with_x0b :=
     (exact_byte x0b $> nil) <|>
     ((cons <$> parse_be) <*> bes_end_with_x0b_aux) in
@@ -967,7 +1009,9 @@ Definition language : [ Language ] := Fix Language (fun k rec =>
     ((nil, nil) <$ exact_byte x0b) <|>
     (((fun x => (nil, x)) <$ exact_byte x05) <*> parse_bes_end_with_x0b) <|>
     (((fun x '(y, z) => (cons x y, z)) <$> parse_be) <*> bes_end_with_x0b_or_x05_ctd_aux) in
-  MkLanguage parse_be parse_bes_end_with_x0b parse_bes_end_with_x05 parse_bes_end_with_x0b_or_x05_ctd).
+  MkLanguage parse_be parse_bes_end_with_x0b parse_bes_end_with_x05 parse_bes_end_with_x0b_or_x05_ctd.
+
+Definition language : [ Language ] := Fix Language language_step.
 
 Definition parse_be : [ byte_parser basic_instruction ] := fun n => _be n (language n).
 Definition parse_bes_end_with_x0b : [ byte_parser (list basic_instruction) ] := fun n => _bes_end_with_x0b n (language n).
@@ -1165,8 +1209,11 @@ Definition parse_code_func {n} : byte_parser module_func_without_type n :=
      end)
     (parse_vec parse_locals <&> parse_expr).
 
+Definition parse_section_payload {A n} (payload : byte_parser A n) : byte_parser A n :=
+  parse_u32_as_N >>= (fun sz => assert_sized payload (fun szn => N.eqb sz szn)).
+
 Definition parse_code {n} : byte_parser module_func_without_type n :=
-  parse_u32_as_N >>= (fun sz => assert_sized parse_code_func (fun szn => N.eqb sz szn)).
+  parse_section_payload parse_code_func.
 
 Definition parse_module_table {n} : byte_parser module_table n :=
   (exact_byte x40 &> exact_byte x00 &>
@@ -1245,7 +1292,7 @@ Definition parse_elemsec {n} : byte_parser (list module_element) n :=
   exact_byte x09 &> parse_u32_as_N &> parse_vec parse_module_element.
 
 Definition parse_codesec {n} : byte_parser (list module_func_without_type) n :=
-  exact_byte x0a &> parse_u32_as_N &> parse_vec parse_code.
+  exact_byte x0a &> parse_section_payload (parse_vec parse_code).
 
 Definition parse_datasec {n} : byte_parser (list module_data) n :=
   exact_byte x0b &> parse_u32_as_N &> parse_vec parse_module_data.

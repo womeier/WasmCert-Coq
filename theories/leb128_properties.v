@@ -4,7 +4,9 @@
 From Stdlib Require Import ZArith List Lia.
 From parseque Require Import Parseque.
 From Wasm Require Import numerics leb128 binary_format_parser
-  binary_parser_combinator_properties binary_uleb128 binary_format_parser_properties.
+  binary_parser_combinator_properties binary_uleb128 binary_format_parser_properties
+  addressing_binary binary_uleb128_printer.
+Close Scope N_scope.
 
 Inductive unsigned_leb : list Byte.byte -> N -> Prop :=
 | uleb_end : forall b,
@@ -31,6 +33,20 @@ Proof.
     + split; [now constructor | cbn; lia].
 Qed.
 
+Lemma binary_of_u32_verified_encoding value :
+  (value <= 4294967295)%N ->
+  unsigned_leb (binary_of_u32_verified value) value /\
+    (length (binary_of_u32_verified value) <= 5)%nat.
+Proof.
+  intro Range.
+  destruct (binary_of_tailidx_correct value nil Range) as [Prefix _].
+  destruct (bounded_uleb_unsigned_sound _ _ _ _ Prefix)
+    as [bytes [Bytes [Encoding Width]]].
+  repeat rewrite app_nil_r in Bytes.
+  change (binary_of_u32_verified value = bytes) in Bytes.
+  now rewrite Bytes.
+Qed.
+
 Lemma unsigned_leb_bounded_prefix : forall bytes value,
     unsigned_leb bytes value ->
     forall fuel rest, (length bytes <= fuel)%nat ->
@@ -41,6 +57,12 @@ Proof.
     intros [|fuel] rest Hlength; cbn in Hlength; try lia.
   - now constructor.
   - cbn [List.app]. constructor; [exact Hbyte | apply IH; lia].
+Qed.
+
+Lemma unsigned_leb_addressing bs n :
+  unsigned_leb bs n <-> AddressingBinary.unsigned_leb bs n.
+Proof.
+  split; intro H; induction H; constructor; assumption.
 Qed.
 
 Inductive signed_leb : list Byte.byte -> Z -> Prop :=
