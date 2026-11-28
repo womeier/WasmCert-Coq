@@ -120,6 +120,29 @@ Definition type_update_ref_as_non_null (ct : checker_type) : option checker_type
   | t :: _ => if is_ref_t t then Some ct else None
   end.
 
+Definition type_update_throw_ref (ct: checker_type) : option checker_type :=
+  match ct.(CT_type) with
+  | T_ref r :: _ =>
+      if is_exception_reference r then Some <<nil, true>>
+      else None
+  | T_bot :: _ => Some <<nil, true>>
+  | nil => if ct.(CT_unr) then Some <<nil, true>> else None
+  | _ => None
+  end.
+
+(* Checker stacks and tag parameters are reversed. A catch_ref's exception
+   reference is on TOP of the payload, hence at the HEAD here. *)
+Definition catch_clause_checker (C: t_context) (c: catch_clause) : bool :=
+  match c with
+  | Catch_tag_ref x l =>
+      match lookup_N C.(tc_tags) x, lookup_N C.(tc_labels) l with
+      | Some ps, Some ts =>
+          values_subtyping (T_ref (Ref_type false HT_exn) :: ps) ts
+      | _, _ => false
+      end
+  | _ => catch_clause_typing C c
+  end.
+
 (** With subtyping in Wasm 2.0, br_table now needs to find the common subtype to be consumed. **)
 
 Fixpoint common_lab_h (iss : seq tableidx) (lab_c : seq (seq value_type)) (ts : seq value_type) : option (seq value_type) :=
@@ -170,6 +193,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       | BI_ref_null t => type_update ts [::]  [::T_ref (Ref_type true t)]
       | BI_ref_is_null => type_update_ref_is_null ts
       | BI_ref_as_non_null => type_update_ref_as_non_null ts
+      | BI_throw_ref => type_update_throw_ref ts
       (* Parsing and dispatch are available, but accepting these instructions
          requires closed indexed function reference typing. Never substitute
          abstract funcref validation or a dynamic signature-checking trap. *)
@@ -250,7 +274,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       | BI_try_table bt cs es =>
           match expand_t C bt with
           | Some (Tf tn tm) =>
-              if all (catch_clause_typing C) cs &&
+              if all (catch_clause_checker C) cs &&
                  b_e_type_checker (upd_label C (tm :: tc_labels C)) es (Tf tn tm)
               then type_update ts tn tm
               else None

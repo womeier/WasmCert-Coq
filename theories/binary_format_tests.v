@@ -47,6 +47,22 @@ Lemma try_table_binary_roundtrip :
   run_parse_expr (binary_of_expr (try_table_test :: nil)) =
     Some (try_table_test :: nil).
 Proof. vm_compute; reflexivity. Qed.
+
+Lemma reference_catches_binary_roundtrip :
+  run_parse_expr (binary_of_expr
+    (BI_try_table (BT_valtype (Some (T_ref (Ref_type false HT_exn))))
+      (Catch_tag_ref 0%N 1%N :: Catch_all_ref 0%N :: nil)
+      (BI_throw_ref :: nil) :: nil)) =
+  Some (BI_try_table (BT_valtype (Some (T_ref (Ref_type false HT_exn))))
+      (Catch_tag_ref 0%N 1%N :: Catch_all_ref 0%N :: nil)
+      (BI_throw_ref :: nil) :: nil).
+Proof. vm_compute; reflexivity. Qed.
+
+Lemma nonnull_exception_reference_binary_roundtrip :
+  check_toks (binary_of_reference_type (Ref_type false HT_exn))
+    (fun n => parse_reference_type (n := n)) =
+  Running.Singleton (Ref_type false HT_exn).
+Proof. vm_compute; reflexivity. Qed.
 Lemma test_ref_as_non_null :
   run_parse_bes (xd4 :: nil) = Some (BI_ref_as_non_null :: nil).
 Proof. vm_compute. reflexivity. Qed.

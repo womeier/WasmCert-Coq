@@ -153,9 +153,14 @@ Definition parse_number_type {n} : byte_parser number_type n :=
 Definition parse_vector_type {n} : byte_parser vector_type n :=
   (exact_byte x7b $> T_v128).
 
+Definition parse_supported_heap_type {n} : byte_parser heap_type n :=
+  (exact_byte x70 $> HT_func) <|> (exact_byte x6f $> HT_extern) <|>
+  (exact_byte x69 $> HT_exn) <|> (exact_byte x74 $> HT_noexn).
+
 Definition parse_reference_type {n} : byte_parser reference_type n :=
-  (exact_byte x70 $> T_funcref) <|>
-  (exact_byte x6f $> T_externref).
+  (Ref_type true <$> parse_supported_heap_type) <|>
+  (exact_byte x63 &> (Ref_type true <$> parse_supported_heap_type)) <|>
+  (exact_byte x64 &> (Ref_type false <$> parse_supported_heap_type)).
 
 Definition parse_value_type {n} : byte_parser value_type n :=
   T_num <$> parse_number_type <|>
@@ -231,7 +236,10 @@ Definition parse_return_call_ref {n} : byte_parser basic_instruction n :=
 
 (* Reference instructions *)
 Definition parse_ref_null {n}: byte_parser basic_instruction n :=
-  exact_byte xd0 &> ((fun t => BI_ref_null (ref_heap t)) <$> parse_reference_type).
+  exact_byte xd0 &> (BI_ref_null <$> parse_supported_heap_type).
+
+Definition parse_throw_ref {n}: byte_parser basic_instruction n :=
+  exact_byte x0a $> BI_throw_ref.
 
 Definition parse_ref_is_null {n} : byte_parser basic_instruction n :=
   exact_byte xd1 $> BI_ref_is_null.
@@ -847,7 +855,9 @@ Definition parse_numeric_instruction {n} : be_parser n :=
 
 Definition parse_catch_clause {n} : byte_parser catch_clause n :=
   (exact_byte x00 &> ((Catch_tag <$> parse_u32_as_N) <*> parse_u32_as_N)) <|>
-  (exact_byte x02 &> (Catch_all <$> parse_u32_as_N)).
+  (exact_byte x02 &> (Catch_all <$> parse_u32_as_N)) <|>
+  (exact_byte x01 &> ((Catch_tag_ref <$> parse_u32_as_N) <*> parse_u32_as_N)) <|>
+  (exact_byte x03 &> (Catch_all_ref <$> parse_u32_as_N)).
 
 Record Language (n : nat) : Type := MkLanguage {
   _be : byte_parser basic_instruction n;
@@ -889,6 +899,7 @@ Definition language : [ Language ] := Fix Language (fun k rec =>
     parse_br_table <|>
     parse_return <|>
     parse_throw <|>
+    parse_throw_ref <|>
     parse_try_table <|>
     parse_call <|>
     parse_call_indirect <|>

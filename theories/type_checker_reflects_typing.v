@@ -16,9 +16,9 @@ Section Host.
 Context {hfc: host_function_class}.
 
 Lemma catch_clause_context_reverse C c :
-  catch_clause_typing (context_reverse C) c = catch_clause_typing C c.
+  catch_clause_checker (context_reverse C) c = catch_clause_typing C c.
 Proof.
-  destruct c as [x l|l]; unfold catch_clause_typing.
+  destruct c as [x l|l|x l|l]; unfold catch_clause_checker, catch_clause_typing.
   - change (match lookup_N (map rev (tc_tags C)) x,
                   lookup_N (map rev (tc_labels C)) l with
             | Some ps, Some ts => values_subtyping ps ts
@@ -44,6 +44,53 @@ Proof.
     apply/idP/idP => Hsub.
     + apply values_subtyping_rev in Hsub; by rewrite !revK in Hsub.
     + exact (values_subtyping_rev Hsub).
+  - change (match lookup_N (map rev (tc_tags C)) x,
+                  lookup_N (map rev (tc_labels C)) l with
+            | Some ps, Some ts => values_subtyping (T_ref (Ref_type false HT_exn) :: ps) ts
+            | _, _ => false end =
+            match lookup_N (tc_tags C) x, lookup_N (tc_labels C) l with
+            | Some ps, Some ts => values_subtyping (ps ++ [::T_ref (Ref_type false HT_exn)]) ts
+            | _, _ => false end).
+    rewrite !lookup_N_map.
+    case Htags: (lookup_N (tc_tags C) x) => [ps|];
+      case Hlabels: (lookup_N (tc_labels C) l) => [ts|] //=.
+    change (values_subtyping (T_ref (Ref_type false HT_exn) :: rev ps) (rev ts) =
+      values_subtyping (ps ++ [::T_ref (Ref_type false HT_exn)]) ts).
+    apply/idP/idP => Hsub.
+    + apply values_subtyping_rev in Hsub.
+      rewrite rev_cons !revK -cats1 in Hsub.
+      exact Hsub.
+    + apply values_subtyping_rev in Hsub.
+      by rewrite rev_cat /= in Hsub.
+  - change (match lookup_N (map rev (tc_labels C)) l with
+            | Some ts => values_subtyping [::T_ref (Ref_type false HT_exn)] ts
+            | None => false end =
+            match lookup_N (tc_labels C) l with
+            | Some ts => values_subtyping [::T_ref (Ref_type false HT_exn)] ts
+            | None => false end).
+    rewrite lookup_N_map.
+    case Hlabels: (lookup_N (tc_labels C) l) => [ts|] //=.
+    change (values_subtyping [::T_ref (Ref_type false HT_exn)] (rev ts) =
+      values_subtyping [::T_ref (Ref_type false HT_exn)] ts).
+    apply/idP/idP => Hsub.
+    + apply values_subtyping_rev in Hsub; by rewrite revK in Hsub.
+    + exact (values_subtyping_rev Hsub).
+Qed.
+
+Lemma type_update_throw_ref_witness ct ct' :
+  type_update_throw_ref ct = Some ct' ->
+  exists r, is_exception_reference r /\
+    type_update_top ct [::T_ref r] nil = Some ct'.
+Proof.
+  destruct ct as [[|t tail] unr]; unfold type_update_throw_ref => /=.
+  - destruct unr => //; move => [<-].
+    by exists (Ref_type true HT_exn).
+  - destruct t as [n|v|r|] => //=.
+    + case Hr: (is_exception_reference r) => //; move => [<-].
+      exists r; split => //.
+      unfold type_update_top => /=.
+      by rewrite value_subtyping_eq.
+    + move => [<-]; exists (Ref_type true HT_exn); split => //.
 Qed.
 
 Definition ct_subtyping (ct1 ct2: checker_type) :=
@@ -675,6 +722,9 @@ Proof.
     by unfold type_update_top in Htc; simplify_tc_goal.
   - unfold type_update_ref_as_non_null in Htc.
     destruct ct as [[|t c_ts] unr]; destruct unr; simplify_tc_goal.
+  - unfold type_update_throw_ref in Htc.
+    destruct ct as [[|t c_ts] unr]; simpl in Htc; try destruct t;
+      simplify_tc_goal; unfold type_update_top in Htc; simplify_tc_goal.
 Qed.
   
 Lemma check_single_None: forall C e,
@@ -708,6 +758,9 @@ Proof.
       do 3 (try destruct ts => //; simpl in * ); simplify_tc_goal.
       by apply type_update_extend with (l2 := ts2) in Htc.
   - by unfold type_update_ref_as_non_null in *; destruct ts; simplify_tc_goal.
+  - unfold type_update_throw_ref in Htc.
+    destruct ts as [|t tail]; simpl in Htc; try destruct t;
+      simplify_tc_goal; unfold type_update_top in Htc; simplify_tc_goal.
 Qed.
 
 Lemma check_single_extend_top: forall C e ts ts2 ts0,
@@ -726,6 +779,9 @@ Proof.
       do 3 (try destruct ts => //; simpl in * ); simplify_tc_goal.
       by apply type_update_preserve_unr in Htc.
   - by unfold type_update_ref_as_non_null in *; destruct ts; simplify_tc_goal.
+  - unfold type_update_throw_ref in *.
+    destruct ts as [|t tail]; simpl in *; try destruct t;
+      by simplify_tc_goal.
 Qed.
 
 Lemma value_type_select_subtyping: forall v1 v2 v3 v4 v,
@@ -863,8 +919,13 @@ Proof.
       by rewrite take0 /= /value_subtyping eq_refl orbT.
     + replace (is_ref_t t1') with true; last by destruct t1, t1'.
       by eexists; split; eauto => /=; resolve_subtyping.
-    + replace (is_ref_t t1') with true; last by destruct t1, t1'.
-      by eexists; split; eauto => /=; resolve_subtyping.
+     + replace (is_ref_t t1') with true; last by destruct t1, t1'.
+       by eexists; split; eauto => /=; resolve_subtyping.
+  - unfold type_update_throw_ref in *.
+    destruct ct1 as [[|t1 ts1] unr]; destruct ct1' as [[|t1' ts1'] [|]];
+      unfold ct_subtyping, c_types_agree in *; simpl in *; simplify_tc_goal;
+      try destruct t1; try destruct t1'; simplify_tc_goal;
+      try (by exists <<nil, true>>; split => //=).
 Qed.
 
 Lemma check_subtyping: forall C es ct1 ct1' ct2,
@@ -910,6 +971,8 @@ Proof.
       by apply type_update_preserve_top in Hcheck.
     + do 3 (try destruct cts1 => //); simplify_tc_goal; by apply type_update_preserve_top in Hcheck.
   - by unfold type_update_ref_as_non_null in Hcheck; destruct cts1; simplify_tc_goal.
+  - unfold type_update_throw_ref in Hcheck.
+    destruct cts1 as [|t tail]; simpl in *; try destruct t; by simplify_tc_goal.
 Qed.
 
 Lemma check_preserve_top: forall C es cts1 cts2 unr,
@@ -1624,6 +1687,12 @@ Proof.
       exists tn; split => //.
       eapply bet_subtyping; first by eapply bet_br_on_non_null; eauto.
       exact Hsub.
+    + destruct (type_update_throw_ref_witness Hupdate) as [r [Href Htop]].
+      eapply type_update_top_agree_subtyping in Htop; eauto.
+      destruct Htop as [tn [ts1 [ts2 [Hagree' Hsub]]]].
+      exists tn; split => //.
+      eapply bet_subtyping; first by eapply bet_throw_ref; eauto.
+      by apply Hsub.
 Qed.
       
 Lemma tc_to_bet_list: forall C cts bes tm cts',
@@ -1682,6 +1751,9 @@ Proof.
     (* Call *)
     +
       rewrite (eq_all (catch_clause_context_reverse C)).
+      simplify_tc_goal.
+      by unfold c_types_agree; simplify_tc_goal.
+    + unfold type_update_throw_ref => /=.
       simplify_tc_goal.
       by unfold c_types_agree; simplify_tc_goal.
     + destruct tf as [t1 t2] => /=.

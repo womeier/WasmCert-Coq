@@ -75,7 +75,7 @@ Record label_ctx: Type :=
 Definition label_ctx_eq_dec (v1 v2 : label_ctx): {v1 = v2} + {v1 <> v2}.
 Proof.
   by decidable_equality.
-Qed.
+ Qed.
 
 Definition label_ctx_eqb (v1 v2: label_ctx) : bool := label_ctx_eq_dec v1 v2.
 Definition eqlabel_ctxP: Equality.axiom label_ctx_eqb :=
@@ -613,6 +613,7 @@ Proof.
     | n f es
     | a
     | n cs es
+    | exna
     ]; simpl in *; try by (injection Hdecomp as <- <- <-; unfold valid_ccs).
   - destruct acc as [ | [fc lcs] ccs'] => //.
     eapply IH in Hdecomp; eauto; apply split_vals_inv in Hsplit as ->.
@@ -649,6 +650,7 @@ Proof.
     | n f es
     | a
     | n cs es
+    | exna
     ]; simpl in *; try by injection Hdecomp as <- <- <-.
   - injection Hdecomp as <- <- <- => /=.
     apply split_vals_nconst in Hsplit.
@@ -665,6 +667,8 @@ Proof.
   - destruct acc as [ | [fc lcs] ccs'] => //.
     eapply IH in Hdecomp; eauto; apply split_vals_inv in Hsplit as ->.
     by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
+  - injection Hdecomp as <- <- <- => /=.
+    by apply split_vals_nconst in Hsplit.
 Qed.
 
 Lemma ctx_decompose_valid_split: forall ves ccs sctx oe,
@@ -806,6 +810,7 @@ Proof.
       | n f es
       | a
       | n cs es
+      | exna
       ]; simpl in *; try by injection Hdecomp as <- <- <- => /=; apply split_vals_inv in Hsplit as ->.
     (* Label *)
     + destruct acc as [ | [fc lcs] ccs']; first by inversion Hdecomp => /=.

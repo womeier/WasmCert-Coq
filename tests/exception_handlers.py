@@ -25,9 +25,14 @@ def section(n, data):
 
 
 def signature(args=b"", results=b""):
-    return b"\x60" + vec([bytes([x]) for x in args]) + vec(
-        [bytes([x]) for x in results]
-    )
+    def types(data):
+        out = []
+        while data:
+            size = 2 if data[0] in (0x63, 0x64) else 1
+            out.append(data[:size])
+            data = data[size:]
+        return out
+    return b"\x60" + vec(types(args)) + vec(types(results))
 
 
 def module(body, *, tags=(1, 1), helpers=(), extra_types=(), result=b"\x7f"):
@@ -58,6 +63,13 @@ def catch(tag, label):
 
 def catch_all(label):
     return b"\x02" + u32(label)
+
+def catch_ref(tag, label):
+    return b"\x01" + u32(tag) + u32(label)
+
+
+def catch_all_ref(label):
+    return b"\x03" + u32(label)
 
 
 def i32(n):
@@ -154,6 +166,63 @@ invalid(
     try_table(throw0, [catch(0, 0)]),
     result=b"",
 )
+
+nonnull_exn = b"\x64\x69"
+value(
+    "catch-all-ref-is-nonnull",
+    block(try_table(throw0, [catch_all_ref(0)], nonnull_exn), nonnull_exn) + b"\xd1",
+    0,
+)
+value(
+    "catch-ref-payload-then-reference",
+    block(try_table(throw0, [catch_ref(0, 0)], b"\x02"), b"\x02") + b"\x1a",
+    42,
+    extra_types=[signature(results=b"\x7f" + nonnull_exn)],
+)
+value(
+    "catch-ref-mixed-payload-order",
+    block(try_table(i32(11) + b"\x42\x16\x08\0", [catch_ref(0, 0)], b"\x02"),
+          b"\x02") + b"\x1a\x1a",
+    11,
+    tags=(3,),
+    extra_types=[signature(results=b"\x7f\x7e" + nonnull_exn),
+                 signature(b"\x7f\x7e")],
+)
+for name, clauses in [
+    ("rethrow-catch-ref", [catch_ref(0, 0)]),
+    ("rethrow-catch-all-ref", [catch_all_ref(0)]),
+    ("nonmatch-then-catch-ref", [catch_ref(1, 0), catch_ref(0, 0)]),
+]:
+    cases.append((
+        name,
+        module(block(try_table(throw0, clauses, b"\x02"), b"\x02")
+               + b"\x0a",
+               extra_types=[signature(results=(
+                   nonnull_exn if name == "rethrow-catch-all-ref"
+                   else b"\x7f" + nonnull_exn))]),
+        123, "uncaught WebAssembly exception", True,
+    ))
+for heap in (b"\x69", b"\x74"):
+    cases.append((
+        "null-throw-ref-" + heap.hex(),
+        module(b"\xd0" + heap + b"\x0a"),
+        0, "trap", True,
+    ))
+    value("null-is-null-" + heap.hex(), b"\xd0" + heap + b"\xd1", 1)
+cases.append((
+    "return-nonnull-exception-reference",
+    module(block(try_table(throw0, [catch_all_ref(0)], nonnull_exn), nonnull_exn),
+           result=nonnull_exn),
+    0, "exnref 0", True,
+))
+invalid("throw-ref-numeric", i32(1) + b"\x0a")
+invalid("throw-ref-func-null", b"\xd0\x70\x0a")
+invalid("throw-ref-extern-null", b"\xd0\x6f\x0a")
+invalid("throw-ref-missing-operand", b"\x0a")
+invalid("catch-ref-unknown-tag", block(try_table(throw0, [catch_ref(3, 0)])))
+invalid("catch-all-ref-unknown-label", block(try_table(throw0, [catch_all_ref(9)])))
+invalid("catch-ref-requires-reference-label", block(try_table(throw0, [catch_ref(0, 0)])))
+invalid("catch-all-ref-requires-reference-label", block(try_table(throw0, [catch_all_ref(0)])))
 
 with tempfile.TemporaryDirectory(prefix="wasmcert-handlers-") as directory:
     for name, binary, code, expected, execute in cases:

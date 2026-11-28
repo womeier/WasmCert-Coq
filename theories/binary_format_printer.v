@@ -225,6 +225,8 @@ Definition binary_of_catch (c: catch_clause) : list byte :=
   match c with
   | Catch_tag x l => x00 :: binary_of_idx x ++ binary_of_idx l
   | Catch_all l => x02 :: binary_of_idx l
+  | Catch_tag_ref x l => x01 :: binary_of_idx x ++ binary_of_idx l
+  | Catch_all_ref l => x03 :: binary_of_idx l
   end.
 
 Fixpoint binary_of_be (be : basic_instruction) : list byte :=
@@ -250,6 +252,7 @@ Fixpoint binary_of_be (be : basic_instruction) : list byte :=
   | BI_return_call x => x12 :: binary_of_idx x
   | BI_return_call_indirect x y => x13 :: binary_of_idx y ++ binary_of_idx x
   | BI_throw x => x08 :: binary_of_idx x
+  | BI_throw_ref => [::x0a]
   | BI_try_table bt cs ins =>
       x1f :: binary_of_block_type bt ++ binary_of_vec binary_of_catch cs ++
         binary_of_instrs ins ++ x0b :: nil

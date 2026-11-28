@@ -503,11 +503,13 @@ Record memarg : Set :=
     memarg_align: u32
   }.
   
-(** The non-reference catch clauses of final exception handling. Reference
-    clauses will use the shared reference representation, not a local value. *)
+(** The four final exception-handling catch clauses. Reference clauses use
+    the shared heap/nullability descriptors and main exception-reference values. *)
 Inductive catch_clause : Type :=
 | Catch_tag : tagidx -> labelidx -> catch_clause
-| Catch_all : labelidx -> catch_clause.
+| Catch_all : labelidx -> catch_clause
+| Catch_tag_ref : tagidx -> labelidx -> catch_clause
+| Catch_all_ref : labelidx -> catch_clause.
 
 Inductive basic_instruction : Type := (* be *)
 (** std-doc:
@@ -611,6 +613,7 @@ Instructions in this group affect the flow of control.
   | BI_call_ref : typeidx -> basic_instruction
   | BI_return_call_ref : typeidx -> basic_instruction
   | BI_br_on_non_null : labelidx -> basic_instruction
+  | BI_throw_ref
   .
 
 
@@ -635,7 +638,8 @@ References other than null are represented with additional administrative instru
 Inductive value_ref : Set :=
 | VAL_ref_null: heap_type -> value_ref
 | VAL_ref_func: funcaddr -> value_ref
-| VAL_ref_extern: externaddr -> value_ref
+  | VAL_ref_extern: externaddr -> value_ref
+  | VAL_ref_exn: exnaddr -> value_ref
 .
 
 Inductive value : Type :=
@@ -1097,6 +1101,7 @@ Inductive administrative_instruction : Type := (* e *)
     reference value and does not add a competing shared reference type. *)
 | AI_raise : exnaddr -> administrative_instruction
 | AI_handler : nat -> list catch_clause -> list administrative_instruction -> administrative_instruction
+| AI_ref_exn : exnaddr -> administrative_instruction
 .
 
 (** std-doc:

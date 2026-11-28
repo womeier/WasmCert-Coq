@@ -63,6 +63,11 @@ Definition typeof_ref (s: store_record) (v: value_ref) : option reference_type :
       | _ => None
       end
   | VAL_ref_extern eaddr => Some T_externref
+  | VAL_ref_exn a =>
+      match lookup_N s.(s_exns) a with
+      | Some _ => Some (Ref_type false HT_exn)
+      | None => None
+      end
   end.
 
 Definition typeof_value (s: store_record) (v: value) : option value_type :=
@@ -191,6 +196,9 @@ types in a point-wise manner.
 
 https://www.w3.org/TR/wasm-core-2/valid/instructions.html
  **)
+Definition is_exception_reference (r: reference_type) : bool :=
+  match ref_heap r with HT_exn | HT_noexn => true | _ => false end.
+
 Definition catch_clause_typing (C: t_context) (c: catch_clause) : bool :=
   match c with
   | Catch_tag x l =>
@@ -201,6 +209,17 @@ Definition catch_clause_typing (C: t_context) (c: catch_clause) : bool :=
   | Catch_all l =>
       match lookup_N C.(tc_labels) l with
       | Some ts => values_subtyping nil ts
+      | None => false
+      end
+  | Catch_tag_ref x l =>
+      match lookup_N C.(tc_tags) x, lookup_N C.(tc_labels) l with
+      | Some ps, Some ts =>
+          values_subtyping (ps ++ [::T_ref (Ref_type false HT_exn)]) ts
+      | _, _ => false
+      end
+  | Catch_all_ref l =>
+      match lookup_N C.(tc_labels) l with
+      | Some ts => values_subtyping [::T_ref (Ref_type false HT_exn)] ts
       | None => false
       end
   end.
@@ -282,6 +301,9 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   all (catch_clause_typing C) cs ->
   be_typing (upd_label C (tm :: C.(tc_labels))) es (Tf tn tm) ->
   be_typing C [::BI_try_table bt cs es] (Tf tn tm)
+| bet_throw_ref : forall C r t1s t2s,
+  is_exception_reference r ->
+  be_typing C [::BI_throw_ref] (Tf (t1s ++ [::T_ref r]) t2s)
 | bet_call : forall C i tf,
   lookup_N (tc_funcs C) i = Some tf ->
   be_typing C [::BI_call i] tf
@@ -575,6 +597,9 @@ Inductive e_typing : store_record -> t_context -> seq administrative_instruction
   e_typing s C [::AI_handler n cs es] (Tf nil ts)
 | ety_ref_extern : forall s C a,
   e_typing s C [::AI_ref_extern a] (Tf [::] [::T_ref T_externref])
+| ety_ref_exn : forall s C a ex,
+  lookup_N s.(s_exns) a = Some ex ->
+  e_typing s C [::AI_ref_exn a] (Tf nil [::T_ref (Ref_type false HT_exn)])
 | ety_ref : forall s C a tf,
   ext_func_typing s a = Some tf ->
   e_typing s C [::AI_ref a] (Tf [::] [::T_ref T_funcref])

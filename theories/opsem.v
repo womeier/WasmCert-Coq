@@ -210,6 +210,10 @@ Inductive reduce_simple : seq administrative_instruction -> seq administrative_i
     (forall h, ref <> VAL_ref_null h) ->
     reduce_simple [::$V (VAL_ref ref); AI_basic (BI_br_on_non_null x)]
       [::$V (VAL_ref ref); AI_basic (BI_br x)]
+  | rs_throw_ref_null : forall h,
+      reduce_simple [::$V (VAL_ref (VAL_ref_null h)); AI_basic BI_throw_ref] [::AI_trap]
+  | rs_throw_ref_exn : forall a,
+      reduce_simple [::AI_ref_exn a; AI_basic BI_throw_ref] [::AI_raise a]
 .
 
 Inductive reduce : host_state -> store_record -> frame -> list administrative_instruction ->
@@ -765,6 +769,22 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
   | r_handler_all : forall hs s f n l cs a,
       reduce hs s f [::AI_handler n (Catch_all l :: cs) [::AI_raise a]]
         hs s f [::AI_basic (BI_br l)]
+  | r_handler_tag_ref : forall hs s f n x l cs a ex tag,
+      lookup_N s.(s_exns) a = Some ex ->
+      lookup_N f.(f_inst).(inst_tags) x = Some tag ->
+      ex.(exninst_tag) = tag ->
+      reduce hs s f [::AI_handler n (Catch_tag_ref x l :: cs) [::AI_raise a]]
+        hs s f (v_to_e_list ex.(exninst_fields) ++
+          [::AI_ref_exn a; AI_basic (BI_br l)])
+  | r_handler_next_ref : forall hs s f n x l cs a ex tag,
+      lookup_N s.(s_exns) a = Some ex ->
+      lookup_N f.(f_inst).(inst_tags) x = Some tag ->
+      ex.(exninst_tag) <> tag ->
+      reduce hs s f [::AI_handler n (Catch_tag_ref x l :: cs) [::AI_raise a]]
+        hs s f [::AI_handler n cs [::AI_raise a]]
+  | r_handler_all_ref : forall hs s f n l cs a,
+      reduce hs s f [::AI_handler n (Catch_all_ref l :: cs) [::AI_raise a]]
+        hs s f [::AI_ref_exn a; AI_basic (BI_br l)]
   | r_call_ref : forall hs s f x a,
       reduce hs s f [::AI_ref a; AI_basic (BI_call_ref x)]
         hs s f [::AI_invoke a]

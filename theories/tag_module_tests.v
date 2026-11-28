@@ -1,6 +1,6 @@
 (** Tests for tags in the main module-instance typing relation. *)
 From Stdlib Require Import List NArith.
-From Wasm Require Import instantiation_func.
+From Wasm Require Import instantiation_func type_checker.
 Import ListNotations.
 
 Section Host.
@@ -51,5 +51,20 @@ Proof.
   intros [ps [Hlookup Hfields]].
   inversion Hlookup; subst; discriminate Hfields.
 Qed.
+
+Definition exception_ref_context : t_context :=
+  {| tc_types := []; tc_funcs := []; tc_tables := []; tc_mems := [];
+     tc_globals := []; tc_elems := []; tc_datas := []; tc_locals := [];
+     tc_labels := []; tc_return := None; tc_refs := [];
+     tc_tags := [[T_num T_i32]] |}.
+
+Example catch_all_ref_produces_nonnull :
+  b_e_type_checker exception_ref_context
+    [BI_block (BT_valtype (Some (T_ref (Ref_type false HT_exn))))
+      [BI_try_table (BT_valtype (Some (T_ref (Ref_type false HT_exn)))) [Catch_all_ref 0%N]
+        [BI_const_num (VAL_int32 Wasm_int.Int32.one); BI_throw 0%N]];
+     BI_ref_is_null]
+    (Tf [] [T_num T_i32]) = true.
+Proof. vm_compute; reflexivity. Qed.
 
 End Host.

@@ -312,9 +312,12 @@ Lemma typeof_ref_extension: forall s s' v t,
 Proof.
   move => s s' v t Hext Htype.
   destruct v; simpl in * => //=.
-  remove_bools_options.
-  eapply ext_func_typing_extension in Hoption; eauto.
-  by rewrite Hoption.
+  - remove_bools_options.
+    eapply ext_func_typing_extension in Hoption; eauto.
+    by rewrite Hoption.
+  - remove_bools_options.
+    eapply store_extension_lookup_exn in Hoption; eauto.
+    by rewrite Hoption.
 Qed.
   
 Lemma value_typing_extension: forall s s' v t,
@@ -775,6 +778,9 @@ Proof.
   - move=> s C tf s' HST1 HST2 Hext.
     by apply ety_ref_extern.
   (* ref *)
+  - move=> s C a ex Hlookup s' HST1 HST2 Hext.
+    eapply ety_ref_exn.
+    by eapply store_extension_lookup_exn; eauto.
   - move=> s C a tf Hextfunc s' HST1 HST2 Hext.
     eapply ety_ref; eauto.
     by eapply ext_func_typing_extension; eauto.
@@ -1977,7 +1983,7 @@ Proof.
   - by exists cl, i.
   - by repeat (destruct ves => //).
   - destruct (lfill_singleton_invert H x) as [[? Hlheq] [-> ->]] => //.
-    + by do 2 (destruct v as [v|v|v] => //=).
+    + destruct v as [v|v|v] => //=; by destruct v.
     + by apply IHHreduce.
 Qed.
   
@@ -2409,6 +2415,33 @@ derived from the two transitive pairs on the suffixes. Stated as an individual l
   - apply instr_subtyping_eq.
   Unshelve.
   all: try exact nil.
+  - destruct (store_typing_exn_lookup HST1 H) as [ps [Htag Hfields]].
+    destruct (inst_typing_tag_lookup HIT1 H0) as [ps' [Htag' Hctx]].
+    rewrite Htag in Htag'; injection Htag' as <-.
+    rewrite Hoption in Hctx; injection Hctx as <-.
+    replace (v_to_e_list (exninst_fields extr0) ++
+      [::AI_ref_exn a; AI_basic (BI_br l)])
+      with (v_to_e_list (exninst_fields extr0 ++ [::VAL_ref (VAL_ref_exn a)]) ++
+        [::AI_basic (BI_br l)]).
+    2: { by rewrite /v_to_e_list map_cat /= -catA. }
+    eapply ety_composition.
+    + apply et_values_typing.
+      eapply values_typing_trans; last exact H1.
+      unfold values_typing.
+      rewrite all2_cat; last by apply values_typing_size in Hfields.
+      unfold values_typing in Hfields.
+      rewrite Hfields /= /value_typing /= H.
+      by simpl.
+    + apply ety_a with (bes := [::BI_br l]).
+      by apply bet_br with (t1s := nil).
+  - eapply ety_handler; eauto.
+    by eapply ety_raise; eauto.
+  - change (e_typing s (upd_local_label_return C' tlocs lab ret)
+      ([::AI_ref_exn a] ++ [::AI_basic (BI_br l)]) (Tf nil extr)).
+    eapply ety_composition.
+    + by eapply ety_ref_exn; eauto.
+    + apply ety_a with (bes := [::BI_br l]).
+      by apply bet_br with (t1s := nil).
 Qed.
 
 Theorem t_preservation: forall s f es s' f' es' ts hs hs',

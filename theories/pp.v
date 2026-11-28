@@ -399,6 +399,7 @@ Definition pp_value_ref (v : value_ref) : string :=
   | VAL_ref_null t => pp_reference_type (Ref_type true t) ++ ".null" ++ newline
   | VAL_ref_func a => "funcref " ++ pp_addr a ++ newline
   | VAL_ref_extern a => "externref " ++ pp_addr a ++ newline
+  | VAL_ref_exn a => "exnref " ++ pp_addr a ++ newline
   end.
 
 Definition pp_value (v: value) : string :=
@@ -649,6 +650,8 @@ Fixpoint pp_basic_instruction (i : indentation) (be : basic_instruction) : strin
     indent i (with_fg be_style "return_call_indirect " ++ pp_id x ++ " " ++ pp_id y ++ newline)
   | BI_throw x =>
     indent i (with_fg be_style "throw " ++ pp_id x ++ newline)
+  | BI_throw_ref =>
+    indent i (with_fg be_style "throw_ref" ++ newline)
   | BI_local_get x =>
     indent i (with_fg be_style "local.get " ++ pp_id x ++ newline)
   | BI_local_set x =>
@@ -802,6 +805,8 @@ Fixpoint pp_administrative_instruction (n : indentation) (e : administrative_ins
   | AI_handler k cs es =>
     indent n (with_fg ae_style "handler " ++ string_of_nat k ++ newline)
     ++ pp_administrative_instructions (S n) es
+  | AI_ref_exn a =>
+    indent n (with_fg ae_style "ref.exn " ++ pp_addr a ++ newline)
   end.
 
 Definition pp_administrative_instructions (n : nat) (es : list administrative_instruction) : string :=
