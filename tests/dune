@@ -4,6 +4,11 @@
      (glob_files *.wasm))
 )
 
+(test
+ (name multi_memory_lookup_extracted)
+ (modules multi_memory_lookup_extracted)
+ (libraries wasmcert_runtime zarith))
+
 (rule
  (alias runtest)
  (deps run_wast_test.sh ../run_wast.sh)
