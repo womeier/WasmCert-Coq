@@ -506,6 +506,14 @@ Proof.
     destruct (decode_memarg_offset_tokens align 0%N (Success.leftovers flags)); reflexivity.
 Qed.
 
+Lemma decode_memarg_tokens_correct_sized n (input: SizedList byte n) :
+  flatten_memarg (decode_memarg_tokens input) =
+    decode_memarg (@Sized.value _ (@List.length byte) _ input).
+Proof.
+  destruct input as [input Hsize]. simpl in Hsize. subst n.
+  rewrite sized_list_refl. apply decode_memarg_tokens_correct.
+Qed.
+
 Section Parser.
 Context {Toks: nat -> Type} `{Sized Toks byte}
   {M: Type -> Type} `{RawAlternative M}.

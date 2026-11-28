@@ -275,8 +275,14 @@ Proof.
   intros [Func|Extern]; subst heap; destruct nullable; reflexivity.
 Qed.
 
-Theorem binary_table_type_printer_parser_roundtrip tt rest :
-  (ref_heap tt.(tt_elem_type) = HT_func \/ ref_heap tt.(tt_elem_type) = HT_extern) ->
+(* Handoff to the shared full reference decoder, including indexed forms:
+   this is an exact source-byte/remainder contract, not permission to identify
+   a source HT_type index with a runtime canonical name. Source closing and
+   stored-descriptor agreement remain separate shared runtime obligations. *)
+Theorem binary_table_type_printer_parser_roundtrip_from_reference_codec tt rest :
+  (forall suffix,
+    decode_reference_type (binary_of_reference_type tt.(tt_elem_type) ++ suffix) =
+      Some (tt.(tt_elem_type), suffix)) ->
   (lim_min tt.(tt_limits) < address_bound tt.(tt_address_type))%N ->
   (match lim_max tt.(tt_limits) with
    | Some maximum => maximum < address_bound tt.(tt_address_type)
@@ -288,9 +294,23 @@ Proof.
   rewrite binary_table_type_parser_correct, binary_table_type_encoding.
   unfold decode_table_type.
   rewrite <- app_assoc.
-  rewrite binary_abstract_reference_decoder_roundtrip by exact Reference.
+  rewrite Reference.
   rewrite binary_address_limits_decoder_roundtrip by assumption.
   destruct tt; reflexivity.
+Qed.
+
+Theorem binary_table_type_printer_parser_roundtrip tt rest :
+  (ref_heap tt.(tt_elem_type) = HT_func \/ ref_heap tt.(tt_elem_type) = HT_extern) ->
+  (lim_min tt.(tt_limits) < address_bound tt.(tt_address_type))%N ->
+  (match lim_max tt.(tt_limits) with
+   | Some maximum => maximum < address_bound tt.(tt_address_type)
+   | None => True
+   end)%N ->
+  run_table_type_prefix (binary_of_table_type tt ++ rest) = Some (tt, rest).
+Proof.
+  intros Reference Minimum Maximum.
+  apply binary_table_type_printer_parser_roundtrip_from_reference_codec; auto.
+  intro suffix. now apply binary_abstract_reference_decoder_roundtrip.
 Qed.
 
 Definition run_memarg_prefix (input: list byte) : option (datatypes.memarg * list byte) :=
