@@ -210,6 +210,37 @@ def check_preparer():
                     raise AssertionError("silently deferred a binary-scope assertion")
 
 
+def section_framing_cases():
+    header = b"\0asm\x01\0\0\0"
+    files, commands = {}, []
+    for section in range(1, 14):
+        for size in (0, 2):
+            filename = f"section-{section}-wrong-size-{size}.wasm"
+            files[filename] = header + bytes([section, size, 0])
+            commands.append({"type": "assert_malformed", "filename": filename})
+        filename = f"section-{section}-padded-size.wasm"
+        # Padded u32 sizes are legal, including for EH's tag section.
+        files[filename] = header + bytes([section, 0x81, 0, 0])
+        commands.append({"type": "assert_invalid", "filename": filename}
+                        if section == 8 else load(filename))
+    for filename, binary in {
+        "custom-truncated-payload.wasm": header + b"\0\x02\0",
+        "custom-truncated-payload-padded.wasm": header + b"\0\x82\0\0",
+        "tag-after-global.wasm": header + sec(6, b"\0") + sec(13, b"\0"),
+        "memory-after-tag.wasm": header + sec(13, b"\0") + sec(5, b"\0"),
+        "duplicate-tag-section.wasm": header + sec(13, b"\0") + sec(13, b"\0"),
+    }.items():
+        files[filename] = binary
+        commands.append({"type": "assert_malformed", "filename": filename})
+    # Section order is not numerical: 5, 13, 6, with customs at each boundary.
+    filename = "customs-around-tag.wasm"
+    custom = b"\0\x81\0\0"  # padded size, empty UTF8 name, empty payload
+    files[filename] = (header + custom + sec(5, b"\0") + custom
+                       + sec(13, b"\0") + custom + sec(6, b"\0") + custom)
+    commands.append(load(filename))
+    return files, commands
+
+
 def main(exe):
     text = ';; ignored (\n(; " ;; (; nested ;) ;) (module binary "\\00(;\\22")\n(register "x")'
     assert [text[a:b] for a, b in forms(text)] == [
@@ -282,6 +313,9 @@ def main(exe):
     payload_files, payload_commands = exception_payload_cases()
     files.update(payload_files)
     positive.extend(payload_commands)
+    framing_files, framing_commands = section_framing_cases()
+    files.update(framing_files)
+    positive.extend(framing_commands)
     check_driver(exe, files, positive, len(positive))
     negative = [
         load("throw.wasm"), assertion("assert_trap"),
@@ -306,7 +340,8 @@ def main(exe):
                   "not a binary module",
                   "return values mismatch"])
     print(f"EH binary projection harness: {len(positive)} positive commands; "
-          f"{len(negative) - 4} deliberate failures detected, continuation checked; framing 5/5")
+          f"{len(negative) - 4} deliberate failures detected, continuation checked; "
+          f"additional section framing/order {len(framing_commands)}/{len(framing_commands)}")
 
 
 if __name__ == "__main__":
