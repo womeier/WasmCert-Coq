@@ -19,7 +19,13 @@
   (alias runtest)
   (deps exception_handlers.py)
   (action
-   (run python3 %{dep:exception_handlers.py} %{exe:../src/wasm_coq_interpreter.exe})))
+    (run python3 %{dep:exception_handlers.py} %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps exception_projection_tests.py prepare_exception_binary.py)
+ (action
+  (run python3 %{dep:exception_projection_tests.py} %{exe:eh_script/eh_script.exe})))
 
 (rule
   (alias runtest)

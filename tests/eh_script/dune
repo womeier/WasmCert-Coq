@@ -1,0 +1,3 @@
+(executable
+ (name eh_script)
+ (libraries wasmcert_runtime yojson))
