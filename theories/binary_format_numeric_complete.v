@@ -124,7 +124,7 @@ Proof.
     exists payload; auto.
 Qed.
 
-Lemma fixed_instruction_complete n opcode (be : basic_instruction) :
+Lemma fixed_instruction_complete {A} n opcode (be : A) :
   parser_complete
     (Combinators.cmap be
       (exact_byte (Toks := SizedList byte) (M := option) (n := n) opcode))
