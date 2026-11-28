@@ -7,7 +7,8 @@ From Wasm Require Import datatypes binary_format_parser
   binary_format_language_properties binary_format_atomic_properties
   binary_format_numeric_complete binary_format_control_complete
   binary_memory_grammar_properties binary_memory_properties
-  binary_parser_combinators binary_codec binary_format_simd_complete.
+  binary_parser_combinators binary_codec binary_format_simd_complete
+  binary_format_numeric_properties.
 Local Notation byte := Byte.byte.
 
 Definition tail_initial b := b = x12 \/ b = x13.
@@ -242,7 +243,11 @@ Ltac layer_initial_set :=
 Ltac reject_layer_initial :=
   unfold tail_initial, reference_initial, parametric_initial, variable_initial,
     table_initial, memory_initial in *;
-  intuition (try congruence; try lia).
+  intuition (try congruence;
+    try (repeat match goal with
+      | H : ?b = ?c |- _ => is_var b; subst b
+      | H : ?b = ?c |- _ => is_var c; subst c
+      end; cbn [Byte.to_N] in *; lia)).
 
 Ltac normal_layer_dispatch tag Complete Head :=
   lazymatch goal with
@@ -446,4 +451,390 @@ Proof.
     split; [exact Saved |eexists; reflexivity].
   - apply (LayerFC m bound input _ suffix _ Bytes).
     split; [exact Saved |eexists; reflexivity].
+Qed.
+
+Lemma binary_u32_index_encoding bytes index :
+  binary_format_properties.binary_u32 bytes index -> index_encoding bytes index.
+Proof.
+  intro Encoding.
+  destruct (parse_u32_binary_complete (length bytes) _ (Nat.le_refl _)
+    (mkSizedList bytes) bytes nil index
+    ltac:(unfold input_bytes; simpl; now rewrite app_nil_r) Encoding)
+    as [s [Run [Value Rest]]].
+  destruct (binary_format_vector_properties.parse_u32_bounded_prefix_sound
+    (length bytes) _ (Nat.le_refl _) (mkSizedList bytes) s Run)
+    as [prefix [Bytes E]].
+  change (input_bytes (mkSizedList bytes) = prefix ++ output_bytes s) in Bytes.
+  change (output_bytes s = nil) in Rest.
+  rewrite Rest, app_nil_r in Bytes.
+  change (bytes = prefix) in Bytes; subst prefix.
+  rewrite Value in E; exact E.
+Qed.
+
+Ltac extended_layer_dispatch tag Complete Head Other :=
+  lazymatch goal with
+  | |- parser_complete (Combinators.alt ?p ?q) _ =>
+    let selected :=
+      lazymatch type of Complete with parser_complete ?parser _ => parser end in
+    let actual_head := parser_term_head p in
+    let selected_head := parser_term_head selected in
+    tryif constr_eq actual_head selected_head then
+      (apply parser_complete_alt_left; exact Complete)
+    else
+      first
+        [(let AllowedSet := open_constr:(_ : byte -> Prop) in
+          let Initial := fresh "Initial" in
+          assert (Initial : parser_initial_set p AllowedSet) by layer_initial_set;
+          eapply parser_complete_alt_right_initial_set with
+            (Allowed := AllowedSet) (opcode := tag);
+          [exact Initial
+          |solve [reject_layer_initial]
+          |exact Head
+          |extended_layer_dispatch tag Complete Head Other])
+        |Other constr:(tt); extended_layer_dispatch tag Complete Head Other]
+  | _ => exact Complete
+  end.
+
+Ltac reject_table_layer Failed :=
+  lazymatch goal with
+  | |- parser_complete (Combinators.alt ?p _) _ =>
+    let head := parser_term_head p in
+    constr_eq head (@parse_table_instruction);
+    eapply parser_complete_alt_right_failure; [exact Failed |]
+  end.
+
+Definition memory_fc_encoding bytes be :=
+  binary_memory_instruction bytes be /\
+  exists header payload code, bytes = xfc :: header ++ payload /\
+    binary_format_properties.binary_u32 header code /\ (8 <= code <= 11)%N.
+
+Theorem parse_be_layer_memory_complete n
+    (ends : Box (Parser (SizedList byte) byte option (list basic_instruction)) n)
+    (branches : Box (Parser (SizedList byte) byte option
+      (list basic_instruction * list basic_instruction)) n) :
+  parser_complete
+    (parse_be_layer (Toks := SizedList byte) (M := option) ends branches)
+    binary_memory_instruction.
+Proof.
+  assert (CompleteFC : parser_complete
+    (parse_memory_instruction (Toks := SizedList byte) (M := option) (n := n))
+    memory_fc_encoding).
+  { eapply parser_complete_weaken; [exact (parse_memory_instruction_binary_complete n) |].
+    intros bytes value [E _]; exact E. }
+  assert (HeadFC : forall bytes value, memory_fc_encoding bytes value ->
+    exists rest, bytes = xfc :: rest).
+  { intros bytes value [_ [header [payload [code [Parts _]]]]].
+    now exists (header ++ payload). }
+  assert (FailedTable : forall m (bound : (m <= n)%nat) input prefix suffix be,
+    input_bytes input = prefix ++ suffix -> memory_fc_encoding prefix be ->
+    runParser (parse_table_instruction (M := option) (n := n)) bound input = None).
+  { intros m bound input prefix suffix be Bytes
+      [_ [header [payload [code [Parts [Encoding Range]]]]]].
+    apply (parse_table_reject_fc n m bound input header code (payload ++ suffix)).
+    - rewrite Bytes, Parts. simpl. now rewrite app_assoc.
+    - now apply binary_u32_index_encoding.
+    - left; lia. }
+  assert (LayerFC : parser_complete
+    (parse_be_layer (Toks := SizedList byte) (M := option) ends branches)
+    memory_fc_encoding).
+  { unfold parse_be_layer.
+    let Other := fun _ => reject_table_layer FailedTable in
+    extended_layer_dispatch xfc CompleteFC HeadFC Other. }
+  assert (Normal : forall tag,
+    (tag = xfd \/ (40 <= Byte.to_N tag <= 64)%N) ->
+    parser_complete
+      (parse_be_layer (Toks := SizedList byte) (M := option) ends branches)
+      (fun bytes value => binary_memory_instruction bytes value /\
+        exists rest, bytes = tag :: rest)).
+  { intros tag Valid.
+    assert (Complete : parser_complete
+      (parse_memory_instruction (Toks := SizedList byte) (M := option) (n := n))
+      (fun bytes value => binary_memory_instruction bytes value /\
+        exists rest, bytes = tag :: rest)).
+    { eapply parser_complete_weaken; [exact (parse_memory_instruction_binary_complete n) |].
+      intros bytes value [E _]; exact E. }
+    assert (Head : forall bytes value,
+      binary_memory_instruction bytes value /\ (exists rest, bytes = tag :: rest) ->
+      exists rest, bytes = tag :: rest) by tauto.
+    unfold parse_be_layer.
+    normal_layer_dispatch tag Complete Head. }
+  intros m bound input prefix suffix be Bytes Encoding.
+  pose proof Encoding as Saved.
+  destruct Encoding as [op bytes be E|op bytes be E|bytes be E].
+  - destruct E as [args [marg [Parts [E Value]]]]; subst bytes.
+    apply (Normal (scalar_memop_tag op) ltac:(right; destruct op; cbn; lia)
+      m bound input _ suffix be Bytes).
+    split; [exact Saved |exists args; reflexivity].
+  - destruct E.
+    + apply (Normal x3f ltac:(right; cbn; lia)
+        m bound input _ suffix _ Bytes).
+      split; [exact Saved |exists args; reflexivity].
+    + apply (Normal x40 ltac:(right; cbn; lia)
+        m bound input _ suffix _ Bytes).
+      split; [exact Saved |exists args; reflexivity].
+    + apply (LayerFC m bound input _ suffix _ Bytes).
+      split; [exact Saved |]. exists code, args, 11%N.
+      split; [reflexivity |]. split; [assumption |lia].
+    + apply (LayerFC m bound input _ suffix _ Bytes).
+      split; [exact Saved |]. exists code, (dest ++ src), 10%N.
+      split; [reflexivity |]. split; [assumption |lia].
+    + apply (LayerFC m bound input _ suffix _ Bytes).
+      split; [exact Saved |]. exists code, (data ++ mem), 8%N.
+      split; [reflexivity |]. split; [assumption |lia].
+    + apply (LayerFC m bound input _ suffix _ Bytes).
+      split; [exact Saved |]. exists code, args, 9%N.
+      split; [reflexivity |]. split; [assumption |lia].
+  - destruct E.
+    + apply (Normal xfd ltac:(now left) m bound input _ suffix _ Bytes).
+      split; [exact Saved |eexists; reflexivity].
+    + apply (Normal xfd ltac:(now left) m bound input _ suffix _ Bytes).
+      split; [exact Saved |eexists; reflexivity].
+Qed.
+
+Ltac reject_memory_layer Failed :=
+  lazymatch goal with
+  | |- parser_complete (Combinators.alt ?p _) _ =>
+    let head := parser_term_head p in
+    constr_eq head (@parse_memory_instruction);
+    eapply parser_complete_alt_right_failure; [exact Failed |]
+  end.
+
+Definition numeric_fc_encoding bytes be :=
+  numeric_atomic_encoding bytes be /\
+  exists header payload code, bytes = xfc :: header ++ payload /\
+    index_encoding header code /\ (code < 8)%N.
+
+Definition numeric_fd_encoding bytes be :=
+  numeric_atomic_encoding bytes be /\
+  exists header payload code, bytes = xfd :: header ++ payload /\
+    index_encoding header code /\ vector_memory_opcode code = None.
+
+Theorem parse_be_layer_numeric_complete n
+    (ends : Box (Parser (SizedList byte) byte option (list basic_instruction)) n)
+    (branches : Box (Parser (SizedList byte) byte option
+      (list basic_instruction * list basic_instruction)) n) :
+  parser_complete
+    (parse_be_layer (Toks := SizedList byte) (M := option) ends branches)
+    numeric_atomic_encoding.
+Proof.
+  assert (Normal : forall tag, (65 <= Byte.to_N tag <= 196)%N ->
+    parser_complete
+      (parse_be_layer (Toks := SizedList byte) (M := option) ends branches)
+      (fun bytes value => numeric_atomic_encoding bytes value /\
+        exists rest, bytes = tag :: rest)).
+  { intros tag Valid.
+    assert (Complete : parser_complete
+      (parse_numeric_instruction (Toks := SizedList byte) (M := option) (n := n))
+      (fun bytes value => numeric_atomic_encoding bytes value /\
+        exists rest, bytes = tag :: rest)).
+    { eapply parser_complete_weaken; [apply parse_numeric_instruction_complete |].
+      intros bytes value [E _]; exact E. }
+    assert (Head : forall bytes value,
+      numeric_atomic_encoding bytes value /\ (exists rest, bytes = tag :: rest) ->
+      exists rest, bytes = tag :: rest) by tauto.
+    unfold parse_be_layer; normal_layer_dispatch tag Complete Head. }
+  assert (CompleteFC : parser_complete
+    (parse_numeric_instruction (Toks := SizedList byte) (M := option) (n := n))
+    numeric_fc_encoding).
+  { eapply parser_complete_weaken; [apply parse_numeric_instruction_complete |].
+    intros bytes value [E _]; exact E. }
+  assert (HeadFC : forall bytes value, numeric_fc_encoding bytes value ->
+    exists rest, bytes = xfc :: rest).
+  { intros bytes value [_ [header [payload [code [Parts _]]]]].
+    now exists (header ++ payload). }
+  assert (FailedTableFC : forall m (bound : (m <= n)%nat) input prefix suffix be,
+    input_bytes input = prefix ++ suffix -> numeric_fc_encoding prefix be ->
+    runParser (parse_table_instruction (M := option) (n := n)) bound input = None).
+  { intros m bound input prefix suffix be Bytes
+      [_ [header [payload [code [Parts [E Range]]]]]].
+    apply (parse_table_reject_fc n m bound input header code (payload ++ suffix)).
+    - rewrite Bytes, Parts; simpl; now rewrite app_assoc.
+    - exact E.
+    - left; lia. }
+  assert (FailedMemoryFC : forall m (bound : (m <= n)%nat) input prefix suffix be,
+    input_bytes input = prefix ++ suffix -> numeric_fc_encoding prefix be ->
+    runParser (parse_memory_instruction (M := option) (n := n)) bound input = None).
+  { intros m bound input prefix suffix be Bytes
+      [_ [header [payload [code [Parts [E Range]]]]]].
+    apply (parse_memory_reject_fc n m bound input header code (payload ++ suffix)).
+    - rewrite Bytes, Parts; simpl; now rewrite app_assoc.
+    - exact E.
+    - now left. }
+  assert (LayerFC : parser_complete
+    (parse_be_layer (Toks := SizedList byte) (M := option) ends branches)
+    numeric_fc_encoding).
+  { unfold parse_be_layer.
+    let Other := fun _ =>
+      first [reject_table_layer FailedTableFC |reject_memory_layer FailedMemoryFC] in
+    extended_layer_dispatch xfc CompleteFC HeadFC Other. }
+  assert (CompleteFD : parser_complete
+    (parse_numeric_instruction (Toks := SizedList byte) (M := option) (n := n))
+    numeric_fd_encoding).
+  { eapply parser_complete_weaken; [apply parse_numeric_instruction_complete |].
+    intros bytes value [E _]; exact E. }
+  assert (HeadFD : forall bytes value, numeric_fd_encoding bytes value ->
+    exists rest, bytes = xfd :: rest).
+  { intros bytes value [_ [header [payload [code [Parts _]]]]].
+    now exists (header ++ payload). }
+  assert (FailedMemoryFD : forall m (bound : (m <= n)%nat) input prefix suffix be,
+    input_bytes input = prefix ++ suffix -> numeric_fd_encoding prefix be ->
+    runParser (parse_memory_instruction (M := option) (n := n)) bound input = None).
+  { intros m bound input prefix suffix be Bytes
+      [_ [header [payload [code [Parts [E NotMemory]]]]]].
+    apply (parse_memory_reject_fd n m bound input header code (payload ++ suffix)).
+    - rewrite Bytes, Parts; simpl; now rewrite app_assoc.
+    - exact E.
+    - exact NotMemory. }
+  assert (LayerFD : parser_complete
+    (parse_be_layer (Toks := SizedList byte) (M := option) ends branches)
+    numeric_fd_encoding).
+  { unfold parse_be_layer.
+    let Other := fun _ => reject_memory_layer FailedMemoryFD in
+    extended_layer_dispatch xfd CompleteFD HeadFD Other. }
+  intros m bound input prefix suffix be Bytes Encoding.
+  pose proof Encoding as Saved.
+  destruct Encoding as
+    [opcode be Lower Opcode
+    |payload v E Count
+    |payload v E Count
+    |payload Count
+    |payload Count
+    |header payload E Count
+    |prefix code be E Opcode
+    |body be E].
+  - assert (Bound : (N.to_nat (Byte.to_N opcode) - 69 < 128)%nat).
+    { change (N.to_nat (Byte.to_N opcode) - 69 < length fixed_numeric_instructions)%nat.
+      apply nth_error_Some; rewrite Opcode; discriminate. }
+    apply (Normal opcode ltac:(lia) m bound input _ suffix _ Bytes).
+    split; [exact Saved |exists nil; reflexivity].
+  - apply (Normal x41 ltac:(cbn; lia) m bound input _ suffix _ Bytes).
+    split; [exact Saved |exists payload; reflexivity].
+  - apply (Normal x42 ltac:(cbn; lia) m bound input _ suffix _ Bytes).
+    split; [exact Saved |exists payload; reflexivity].
+  - apply (Normal x43 ltac:(cbn; lia) m bound input _ suffix _ Bytes).
+    split; [exact Saved |exists payload; reflexivity].
+  - apply (Normal x44 ltac:(cbn; lia) m bound input _ suffix _ Bytes).
+    split; [exact Saved |exists payload; reflexivity].
+  - apply (LayerFD m bound input _ suffix _ Bytes).
+    split; [exact Saved |]. exists header, payload, 12%N.
+    split; [reflexivity |]. split; [exact E |reflexivity].
+  - assert (Bound : (N.to_nat code < 8)%nat).
+    { change (N.to_nat code < length saturating_instructions)%nat.
+      apply nth_error_Some; rewrite Opcode; discriminate. }
+    apply (LayerFC m bound input _ suffix _ Bytes).
+    split; [exact Saved |]. destruct E as [header [Parts E]].
+    exists header, nil, code.
+    rewrite app_nil_r. split; [exact Parts |]. split; [exact E |lia].
+  - apply (LayerFD m bound input _ suffix _ Bytes).
+    split; [exact Saved |].
+    destruct (simd_encoding_has_kind _ _ E)
+      as [kind [header [payload [code [Parts [Enc Kind]]]]]].
+    exists header, payload, code. split; [now rewrite Parts |].
+    split; [exact Enc |now apply (numeric_simd_not_vector_memory kind)].
+Qed.
+
+Definition basic_fixed_opcodes : list (byte * basic_instruction) :=
+  (x00, BI_unreachable) :: (x01, BI_nop) :: (x0f, BI_return) :: nil.
+
+Theorem parse_be_layer_fixed_complete n
+    (ends : Box (Parser (SizedList byte) byte option (list basic_instruction)) n)
+    (branches : Box (Parser (SizedList byte) byte option
+      (list basic_instruction * list basic_instruction)) n) opcode be :
+  In (opcode, be) basic_fixed_opcodes ->
+  parser_complete
+    (parse_be_layer (Toks := SizedList byte) (M := option) ends branches)
+    (fun bytes value => bytes = opcode :: nil /\ value = be).
+Proof.
+  intro Member. unfold basic_fixed_opcodes in Member; cbn [In] in Member.
+  destruct Member as [E|[E|[E|E]]]; try contradiction;
+    inversion E; subst opcode be.
+  - pose proof (fixed_instruction_complete n x00 BI_unreachable) as Complete.
+    change (parser_complete (parse_unreachable (n := n))
+      (fun bytes value => bytes = x00 :: nil /\ value = BI_unreachable)) in Complete.
+    unfold parse_be_layer.
+    normal_layer_dispatch x00 Complete
+      (binary_format_type_properties.fixed_encoding_head x00 BI_unreachable).
+  - pose proof (fixed_instruction_complete n x01 BI_nop) as Complete.
+    change (parser_complete (parse_nop (n := n))
+      (fun bytes value => bytes = x01 :: nil /\ value = BI_nop)) in Complete.
+    unfold parse_be_layer.
+    normal_layer_dispatch x01 Complete
+      (binary_format_type_properties.fixed_encoding_head x01 BI_nop).
+  - pose proof (fixed_instruction_complete n x0f BI_return) as Complete.
+    change (parser_complete (parse_return (n := n))
+      (fun bytes value => bytes = x0f :: nil /\ value = BI_return)) in Complete.
+    unfold parse_be_layer.
+    normal_layer_dispatch x0f Complete
+      (binary_format_type_properties.fixed_encoding_head x0f BI_return).
+Qed.
+
+Definition basic_indexed_opcodes : list (byte * (N -> basic_instruction)) :=
+  (x0c, BI_br) :: (x0d, BI_br_if) :: (x10, BI_call) :: nil.
+
+Theorem parse_be_layer_indexed_complete n
+    (ends : Box (Parser (SizedList byte) byte option (list basic_instruction)) n)
+    (branches : Box (Parser (SizedList byte) byte option
+      (list basic_instruction * list basic_instruction)) n) opcode make :
+  In (opcode, make) basic_indexed_opcodes ->
+  parser_complete
+    (parse_be_layer (Toks := SizedList byte) (M := option) ends branches)
+    (indexed_instruction_encoding opcode make).
+Proof.
+  intro Member. unfold basic_indexed_opcodes in Member; cbn [In] in Member.
+  destruct Member as [E|[E|[E|E]]]; try contradiction;
+    inversion E; subst opcode make.
+  - pose proof (indexed_instruction_complete n x0c BI_br) as Complete.
+    change (parser_complete (parse_br (n := n))
+      (indexed_instruction_encoding x0c BI_br)) in Complete.
+    unfold parse_be_layer.
+    normal_layer_dispatch x0c Complete (indexed_instruction_head x0c BI_br).
+  - pose proof (indexed_instruction_complete n x0d BI_br_if) as Complete.
+    change (parser_complete (parse_br_if (n := n))
+      (indexed_instruction_encoding x0d BI_br_if)) in Complete.
+    unfold parse_be_layer.
+    normal_layer_dispatch x0d Complete (indexed_instruction_head x0d BI_br_if).
+  - pose proof (indexed_instruction_complete n x10 BI_call) as Complete.
+    change (parser_complete (parse_call (n := n))
+      (indexed_instruction_encoding x10 BI_call)) in Complete.
+    unfold parse_be_layer.
+    normal_layer_dispatch x10 Complete (indexed_instruction_head x10 BI_call).
+Qed.
+
+Theorem parse_be_layer_br_table_complete n
+    (ends : Box (Parser (SizedList byte) byte option (list basic_instruction)) n)
+    (branches : Box (Parser (SizedList byte) byte option
+      (list basic_instruction * list basic_instruction)) n) :
+  parser_complete
+    (parse_be_layer (Toks := SizedList byte) (M := option) ends branches)
+    br_table_instruction_encoding.
+Proof.
+  pose proof (parse_br_table_complete n) as Complete.
+  assert (Head : forall bytes be, br_table_instruction_encoding bytes be ->
+    exists rest, bytes = x0e :: rest).
+  { intros bytes be [targets [fallback [labels [label [Bytes _]]]]].
+    now exists (targets ++ fallback). }
+  unfold parse_be_layer; normal_layer_dispatch x0e Complete Head.
+Qed.
+
+Theorem parse_be_layer_call_indirect_complete n
+    (ends : Box (Parser (SizedList byte) byte option (list basic_instruction)) n)
+    (branches : Box (Parser (SizedList byte) byte option
+      (list basic_instruction * list basic_instruction)) n) :
+  parser_complete
+    (parse_be_layer (Toks := SizedList byte) (M := option) ends branches)
+    (indirect_instruction_encoding x11
+      (fun typ tab => BI_call_indirect tab typ)).
+Proof.
+  pose proof (indirect_instruction_complete n x11
+    (fun typ tab => BI_call_indirect tab typ)) as Complete.
+  change (parser_complete (parse_call_indirect (n := n))
+    (indirect_instruction_encoding x11
+      (fun typ tab => BI_call_indirect tab typ))) in Complete.
+  assert (Head : forall bytes be,
+    indirect_instruction_encoding x11
+      (fun typ tab => BI_call_indirect tab typ) bytes be ->
+    exists rest, bytes = x11 :: rest).
+  { intros bytes be [first [second [x [y [Bytes _]]]]].
+    now exists (first ++ second). }
+  unfold parse_be_layer; normal_layer_dispatch x11 Complete Head.
 Qed.
