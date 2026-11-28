@@ -241,6 +241,53 @@ Section IntegerGuards.
     - apply N2Z.inj_le. rewrite Z2N.id; lia.
     - rewrite <- S. exact Width.
   Qed.
+
+  Lemma parse_source_heap_type_cases s :
+    runParser (@parse_source_heap_type Toks _ option _ _ _ _ _ _ n)
+      bound input = Some s ->
+    (exists h, Success.value s = gc_types.shared_heap_of_abstract h) \/
+    (exists x, Success.value s = HT_type x /\
+      (x <= 4294967295)%N /\
+      (N.of_nat (m - Success.size s) <= 5)%N).
+  Proof.
+    unfold parse_source_heap_type.
+    rewrite run_alt_option.
+    intro Parsed.
+    change
+      (match option_map (Success.map gc_types.shared_heap_of_abstract)
+        (runParser
+          (@parse_gc_abstract_heap_type Toks _ option _ _ _ _ _ _ n) bound input)
+       with
+       | Some result => Some result
+       | None => option_map (Success.map HT_type)
+           (runParser (@parse_heap_typeidx Toks _ option _ _ _ _ _ _ n) bound input)
+       end = Some s) in Parsed.
+    destruct (runParser
+      (@parse_gc_abstract_heap_type Toks _ option _ _ _ _ _ _ n) bound input)
+      as [abstract|] eqn:Abstract; cbn [option_map] in Parsed.
+    - inversion Parsed; subst.
+      left. exists (Success.value abstract). reflexivity.
+    - destruct (runParser
+        (@parse_heap_typeidx Toks _ option _ _ _ _ _ _ n) bound input)
+        as [index|] eqn:Index; cbn [option_map] in Parsed; [|discriminate].
+      inversion Parsed; subst.
+      right. exists (Success.value index). split; [reflexivity |].
+      now apply parse_heap_typeidx_guards in Index.
+  Qed.
+
+  Lemma parse_source_heap_index_guards s x :
+    runParser (@parse_source_heap_type Toks _ option _ _ _ _ _ _ n)
+      bound input = Some s ->
+    Success.value s = HT_type x ->
+    (x <= 4294967295)%N /\
+    (N.of_nat (m - Success.size s) <= 5)%N.
+  Proof.
+    intros Parsed Value.
+    apply parse_source_heap_type_cases in Parsed.
+    destruct Parsed as [[h Abstract] | [index [Index Guards]]].
+    - rewrite Value in Abstract. destruct h; discriminate.
+    - rewrite Value in Index. inversion Index; subst. exact Guards.
+  Qed.
 End IntegerGuards.
 
 Section VectorLengths.

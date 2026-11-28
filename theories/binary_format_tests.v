@@ -3,6 +3,7 @@ From Stdlib Require Import Strings.Byte ZArith.
 From parseque Require Import Parseque.
 From Wasm Require Import binary_format_parser binary_format_printer
                          datatypes_properties check_toks.
+Open Scope list_scope.
 
 (** A vector's u32 length may have a non-minimal LEB128 representation.
     In particular, a padded zero length must not require an element parser
@@ -67,6 +68,76 @@ Proof. vm_compute. reflexivity. Qed.
 
 Lemma heap_index_leftovers_rejected :
   run_parse_heap_typeidx (x00 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+(* Indexed source codecs do not reinterpret a module-local index as a runtime
+   canonical name. Production runtime parsing awaits canonical null lowering. *)
+Lemma source_nullable_index_zero :
+  run_parse_source_reference_type (x63 :: x00 :: nil) =
+    Some (Ref_type true (HT_type 0%N)).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_nonnull_index_zero :
+  run_parse_source_reference_type (x64 :: x00 :: nil) =
+    Some (Ref_type false (HT_type 0%N)).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_null_index_zero :
+  run_parse_source_ref_null (xd0 :: x00 :: nil) =
+    Some (BI_ref_null (HT_type 0%N)).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_index_64_signed_encoding :
+  run_parse_source_heap_type (xc0 :: x00 :: nil) = Some (HT_type 64%N).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_index_u32_max :
+  run_parse_source_reference_type
+    (x63 :: xff :: xff :: xff :: xff :: x0f :: nil) =
+    Some (Ref_type true (HT_type 4294967295%N)).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_null_padded_index_zero :
+  run_parse_source_ref_null (xd0 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil) =
+    Some (BI_ref_null (HT_type 0%N)).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_reference_prefix_preserves_suffix :
+  run_parse_prefix (fun _ => parse_source_reference_type)
+    (x63 :: x00 :: x0b :: nil) =
+    Some (Ref_type true (HT_type 0%N), x0b :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_null_prefix_preserves_suffix :
+  run_parse_prefix (fun _ => parse_source_ref_null)
+    (xd0 :: x00 :: x15 :: x00 :: x0b :: nil) =
+    Some (BI_ref_null (HT_type 0%N), x15 :: x00 :: x0b :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_index_overlong_rejected :
+  run_parse_source_ref_null
+    (xd0 :: x80 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_index_overflow_rejected :
+  run_parse_source_reference_type
+    (x63 :: x80 :: x80 :: x80 :: x80 :: x10 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_negative_index_rejected :
+  run_parse_source_heap_type (x40 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_truncated_index_rejected :
+  run_parse_source_reference_type (x64 :: x80 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_null_requires_heap_not_reference_type :
+  run_parse_source_ref_null (xd0 :: x63 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_nullable_abstract_unchanged :
+  run_parse_source_reference_type (x63 :: x70 :: nil) = Some T_funcref.
 Proof. vm_compute. reflexivity. Qed.
 
 Open Scope string_scope.

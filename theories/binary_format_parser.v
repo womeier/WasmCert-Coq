@@ -194,6 +194,21 @@ Definition parse_gc_heap_type {n} : byte_parser heap_type n :=
 Definition parse_reference_type {n} : byte_parser reference_type n :=
   gc_types.shared_reference_of_abstract <$> parse_gc_abstract_reference_type.
 
+(** Source-phase codecs for the canonical closing boundary. These return
+    module-local HT_type indices, never runtime identities. Keep the production
+    runtime-facing parser on its abstract fragment until source expectations,
+    stored descriptors and null values are closed by inst_defined_types. *)
+Definition parse_source_heap_type {n} : byte_parser heap_type n :=
+  parse_gc_heap_type <|> (HT_type <$> parse_heap_typeidx).
+
+Definition parse_source_reference_type {n} : byte_parser reference_type n :=
+  (exact_byte x63 &> (Ref_type true <$> parse_source_heap_type)) <|>
+  (exact_byte x64 &> (Ref_type false <$> parse_source_heap_type)) <|>
+  ((Ref_type true) <$> parse_gc_heap_type).
+
+Definition parse_source_ref_null {n} : byte_parser basic_instruction n :=
+  exact_byte xd0 &> (BI_ref_null <$> parse_source_heap_type).
+
 Definition parse_value_type {n} : byte_parser value_type n :=
   T_num <$> parse_number_type <|>
   T_vec <$> parse_vector_type <|>
@@ -1470,6 +1485,15 @@ Definition run_parse_prefix {A}
 Definition run_parse_gc_abstract_reference_type (bs : list byte) :
     option (gc_types.abstract_reference_type * list byte) :=
   run_parse_prefix (fun _ => parse_gc_abstract_reference_type) bs.
+
+Definition run_parse_source_heap_type (bs : list byte) : option heap_type :=
+  run bs (fun _ => parse_source_heap_type).
+
+Definition run_parse_source_reference_type (bs : list byte) : option reference_type :=
+  run bs (fun _ => parse_source_reference_type).
+
+Definition run_parse_source_ref_null (bs : list byte) : option basic_instruction :=
+  run bs (fun _ => parse_source_ref_null).
 
 Definition run_parse_expr (bs : list byte) : option (list basic_instruction) :=
   run bs (fun n => parse_expr).
