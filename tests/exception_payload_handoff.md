@@ -23,22 +23,30 @@ registry, canonical equivalence, portable-boundary status and exact failure stag
 | --- | --- | --- |
 | Same canonical reference, producer index 0 / importer index 1 | Parse, validate, link and re-export the tag | Producer/registration pass; consumer parses/validates but fails import matching. Actual and expected tag IDs are both `(7,0)`, canonical equivalence is **true**, portability guard is **false**. |
 | Different canonical reference, both source index 0 | Parse, validate, reject at import matching | Correctly unlinkable. Actual/expected IDs are `(7,0)` / `(9,0)`, canonical equivalence **false**. The portability guard also rejects, so this negative result alone is not evidence that indexed nominal linking is complete. |
-| Same canonical reference at different indices, indexed nullable local → imported emitter → throw → catch → `ref.is_null` | Link and return `i32 1`; local default must be lowered in its producer instance | Producer/registration pass; consumer fails binary parsing at its indexed local descriptor. The subsequent invocation failure is a cascade, not executed payload transport. |
+| Same canonical reference at different indices, indexed nullable local → imported emitter → throw → catch → `ref.is_null` | Link and return `i32 1`; local default must be lowered in its producer instance | Producer/registration pass; consumer now parses and validates, then fails import matching with canonical equivalence true and portability false. The subsequent invocation failure is a cascade, not executed payload transport. |
 
-Measured result: **7/10 commands, exit 1, zero infrastructure errors**.
+Current measured result: **7 passing commands and 3 failing commands out of 10**,
+exit 1, zero infrastructure errors. The failures are two required-success
+consumer links and one invocation cascade, not seven failures.
 Canonical ID numbers above belong to this fresh driver/spectest run, not to
 module-local indices or hard-coded identity expectations. The fixture manifest
 and driver results preserve the actual values and SHA-256 hashes.
 
 The transport function has no text input. Its source type section already
 uses the declaration parser's indexed-reference support. Its local declaration
-is `(ref null type 1)` in binary, which currently reaches
-`parse_locals -> parse_value_type -> parse_reference_type`; that last parser is
-the proved **abstract** GC/EH fragment, not the indexed declaration grammar.
-This is an explicit common-parser composition dependency. Do not weaken the
-existing abstract parser iff/consumed-prefix contracts or special-case this
-fixture. Once it parses, the same closed tag/function import and main runtime
-context/default-lowering dependencies still need to be satisfied.
+is `(ref null type 1)` in binary. `parse_locals` now uses
+`parse_declaration_value_type`, with the shared signed index codec, rather than
+the abstract-only reference parser. `run_parse_source_locals_correct` proves
+the actual prefix decoder iff its independent source grammar, including the
+signed-index width/range checks. `module_type_checker_locals_closed` proves
+successful validation checks each expanded local in the actual canonical
+module name context. Out-of-scope indexed local types parse but are invalid;
+wire overflow is malformed. The existing abstract fragment contracts were not
+weakened. This repairs syntax and source validation only; canonical runtime
+default lowering and cross-instance transport are still pending.
+
+Latest stage log: `/tmp/opencode/eh-parser-source-indexed.log`. The earlier
+artifact paths below are retained; rerunning writes current results.
 
 Artifacts from the measured run:
 `/tmp/opencode/eh-indexed-payload-boundaries-final/provenance.json`,
@@ -69,23 +77,30 @@ declared function expansion/variance, primitive source/closed typing correctness
 and extension properties; those primitive facts alone do not migrate main
 runtime contexts or stored values.
 
-The required **connected** emission contract, expressed using the current
-public EH judgments, is:
+**Updated connected bridge: administrative stack signatures must be closed.**
+The parent reports a further tail-caller counterexample: the caller need not
+have any source name for a callee's middle type. Thus merely attaching a source
+name map to the old administrative stack signature does not suffice. No
+source-spelling existence premise, source-index reconstruction or source-typed
+emission transport is requested.
 
-- `inst_typing s inst = Some C`;
-- `close_function_type inst.(inst_defined_types) 0 (Tf ps []) = Some (Closed_ft cps [])`;
-- fields have the shared closed runtime typing at `cps`;
-- **then** `e_typing s C (v_to_e_list fields) (Tf [] ps)`, with the analogous
-  result under local/label/return context updates preserving the same closed
-  name map.
+The precise required *migrated* public contract is:
 
-The actual main typing/constant-value rules must implement this law. A new
-standalone lemma about an unused classifier is not a handoff. The current
-context-free `values_typing s fields ps` cannot replace contextual closing:
-`source_payload_transport_counterexample` already disproves that shortcut.
-If main administrative typing migrates entirely to closed stack types, the
-equivalent closed-stack emission contract is preferable; EH will adapt to
-that shared representation rather than reconstruct local indices.
+```coq
+forall s C fields cps,
+  store_typing s ->
+  Forall2 (closed_value_typing s) fields cps ->
+  e_typing s C (v_to_e_list fields) (Closed_ft [] cps).
+```
+
+Here `e_typing` must be the **main migrated judgment whose stack signature
+argument is closed**, not a new unused wrapper around the current source
+judgment. The signature above is a required handoff, not an already exported
+theorem in this branch. The shared owner may use its existing alias for the
+closed list judgment/context, but it must imply this main administrative
+typing conclusion under local/label/return updates, without requiring a caller
+source list `ps`. Both the source-index counterexample and the reported
+tail-caller counterexample rule out the old context-free source emission law.
 
 The other required connected contracts are:
 
@@ -120,6 +135,7 @@ must only be removed when the main closed field/emission contracts above hold.
 No portable-boundary restriction has been removed to make a red fixture green.
 No pending GC migration or uncommitted other-worktree changes were imported.
 Parent coordination needed: a pinned compiling main closed runtime/context/
-producer revision and the common parser's indexed-local composition revision.
+producer/**administrative-stack-signature** revision. Indexed-local source
+parsing and its explicit canonical-context validation are now repaired here.
 Until those handoffs, the indexed cases remain explicit failing conformance
 probes and the draft PR is not finished.

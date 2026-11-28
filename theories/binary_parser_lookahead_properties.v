@@ -13,6 +13,29 @@ Definition parser_initial_byte {A n}
     runParser p bound input = Some s ->
     exists tail, input_bytes input = b :: tail.
 
+(** Shared generic prefix laws, independent of the instruction AST. *)
+Lemma parser_sound_cmap {A B n}
+    (p : Parser (SizedList Byte.byte) Byte.byte option A n) (b : B) P Q :
+  parser_sound p P ->
+  (forall bs a, P bs a -> Q bs b) ->
+  parser_sound (Combinators.cmap b p) Q.
+Proof. unfold Combinators.cmap. apply parser_sound_map. Qed.
+
+Lemma parser_sound_prefix_byte {A n} b
+    (q : Box (Parser (SizedList Byte.byte) Byte.byte option A) n) Q R :
+  (forall k (lt : k < n), parser_sound (call q lt) Q) ->
+  (forall bs a, Q bs a -> R (b :: bs) a) ->
+  parser_sound (Combinators.rand (exact_byte b) q) R.
+Proof.
+  intros Hq Combine.
+  change (parser_sound (Combinators.bind (exact_byte b) (fun _ => q)) R).
+  eapply parser_sound_bind with
+    (P := fun bs value => bs = b :: nil /\ value = b) (Q := fun _ => Q).
+  - apply parser_sound_exact_byte.
+  - intros value k lt; apply Hq.
+  - intros xs ys value a [-> _] Enc; apply Combine; exact Enc.
+Qed.
+
 Lemma exact_byte_initial n b :
   parser_initial_byte
     (exact_byte (Toks := SizedList Byte.byte) (M := option) (n := n) b) b.

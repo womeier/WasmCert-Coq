@@ -239,7 +239,8 @@ Definition module_components_type_checker (m : module) : option ((list extern_ty
 Definition module_type_checker (m : module) : option ((list extern_type) * (list extern_type)) * string :=
   match close_and_validate_type_groups nil (module_type_groups m) with
   | Some (registry, ids) =>
-      if source_type_identitiesb registry ids (List.concat m.(mod_types)) ids
+      if source_type_identitiesb registry ids (List.concat m.(mod_types)) ids &&
+         module_locals_closingb registry ids m
       then module_components_type_checker m
       else (None, "inconsistent closed module type signatures")
   | None => (None, "invalid module type declarations")

@@ -1,10 +1,29 @@
 (** Properties of the actual binary-format printer.
     These scalar results do not assert whole-module round trips. *)
-From Stdlib Require Import ZArith List Lia.
+From Stdlib Require Import ZArith NArith PArith List Lia.
+From mathcomp Require ssrnat.
 From Wasm Require Import binary_format_printer binary_format_parser
   numerics leb128_properties leb128_printer_properties
   leb128_unsigned_printer_properties binary_parser_combinator_properties.
 From parseque Require Import Parseque.
+
+Local Lemma printer_double_nat n : ssrnat.double n = Nat.add n n.
+Proof. induction n; rewrite ssrnat.doubleE; simpl; lia. Qed.
+
+Local Lemma printer_positive_nat p : ssrnat.nat_of_pos p = Pos.to_nat p.
+Proof.
+  induction p; cbn [ssrnat.nat_of_pos];
+    rewrite ?ssrnat.NatTrec.doubleE, ?IHp, ?Pos2Nat.inj_xI, ?Pos2Nat.inj_xO,
+      ?printer_double_nat; try reflexivity; lia.
+Qed.
+
+Lemma printer_bin_of_nat n : ssrnat.bin_of_nat n = N.of_nat n.
+Proof.
+  apply N2Nat.inj; rewrite Nat2N.id.
+  pose proof (ssrnat.bin_of_natK n) as K.
+  destruct (ssrnat.bin_of_nat n); simpl in *;
+    rewrite ?printer_positive_nat in K; exact K.
+Qed.
 
 Theorem binary_of_heap_typeidx_roundtrip x bs :
   binary_of_heap_typeidx x = Some bs ->

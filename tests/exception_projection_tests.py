@@ -241,6 +241,34 @@ def section_framing_cases():
     return files, commands
 
 
+def source_local_cases():
+    header = b"\0asm\x01\0\0\0"
+    files, commands = {}, []
+
+    def fixture(types, heap):
+        code = b"\x01\x01\x63" + heap + b"\x20\0\xd1\x0b"
+        return (header + sec(1, vec(types)) + sec(3, b"\x01" + u32(len(types) - 1))
+                + sec(7, b"\x01\x04main\0\0") + sec(10, vec([u32(len(code)) + code])))
+
+    main = b"\x60\0\x01\x7f"
+    for index, heap in [(0, b"\0"), (0, b"\x80\0"), (63, b"\x3f"),
+                        (64, b"\xc0\0"), (127, b"\xff\0"), (128, b"\x80\x01")]:
+        filename = f"indexed-local-{index}-{heap.hex()}.wasm"
+        files[filename] = fixture([b"\x60\0\0"] * (index + 1) + [main], heap)
+        commands.extend([load(filename), assertion("assert_return", [literal(1)])])
+    # These are well-formed source binary indices, but do not resolve in this
+    # module's name map. They must parse and fail VALIDATION, not malformed.
+    for label, heap in [("out-of-range", b"\x02"),
+                        ("u32-max", b"\xff\xff\xff\xff\x0f")]:
+        filename = f"indexed-local-{label}.wasm"
+        files[filename] = fixture([b"\x60\0\0", main], heap)
+        commands.append({"type": "assert_invalid", "filename": filename})
+    filename = "indexed-local-u32-overflow.wasm"
+    files[filename] = fixture([b"\x60\0\0", main], b"\x80\x80\x80\x80\x10")
+    commands.append({"type": "assert_malformed", "filename": filename})
+    return files, commands
+
+
 def main(exe):
     text = ';; ignored (\n(; " ;; (; nested ;) ;) (module binary "\\00(;\\22")\n(register "x")'
     assert [text[a:b] for a, b in forms(text)] == [
@@ -316,6 +344,9 @@ def main(exe):
     framing_files, framing_commands = section_framing_cases()
     files.update(framing_files)
     positive.extend(framing_commands)
+    local_files, local_commands = source_local_cases()
+    files.update(local_files)
+    positive.extend(local_commands)
     check_driver(exe, files, positive, len(positive))
     negative = [
         load("throw.wasm"), assertion("assert_trap"),

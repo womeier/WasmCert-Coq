@@ -37,8 +37,9 @@ Proof.
   unfold module_type_checker in Hmodcheck.
   destruct (close_and_validate_type_groups nil (module_type_groups m))
     as [[registry ids]|] eqn:Hclosed => //.
-  destruct (source_type_identitiesb registry ids (List.concat (mod_types m)) ids)
-    eqn:Hidentity => //.
+   destruct (source_type_identitiesb registry ids (List.concat (mod_types m)) ids &&
+     module_locals_closingb registry ids m) eqn:Hsource => //.
+   move/andP in Hsource; destruct Hsource as [Hidentity Hlocals].
   split; first by exists registry, ids; split.
   unfold module_components_type_checker in Hmodcheck.
   destruct m.

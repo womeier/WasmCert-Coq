@@ -1149,7 +1149,10 @@ Definition parse_module_element {n}: byte_parser module_element n :=
   assert_u32 7%N &> parse_module_element_7.
 
 Definition parse_locals {n} : byte_parser (N * value_type) n :=
-  parse_u32_as_N <&> parse_value_type.
+  (** Locals are source declarations, not closed runtime descriptors.
+      Indexed heap types use the same s33 codec as type declarations; their
+      meaning/well-formedness is checked in the module's closed name context. *)
+  parse_u32_as_N <&> parse_declaration_value_type.
 
 (* Spec defines code and functypes separately *)
 Definition module_func_without_type : Type := (list value_type) * expr.

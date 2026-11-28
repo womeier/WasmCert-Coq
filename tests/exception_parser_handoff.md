@@ -5,7 +5,7 @@ Pinned sources: `ea96c785ba6004c3994622b75b2d1312336c218f` and
 Neither aggregate branch was merged. No addressing, multi-memory AST,
 extended-constant or unfinished closed-runtime migration was imported.
 
-## Compiling connected increment
+## Initial connected increment at d3daf14
 
 - `binary_format_parser.v` exposes the pinned production interfaces
   `module_section_results`, `finish_module_sections` and
@@ -38,7 +38,7 @@ EH leaf, module postprocessor and section framing proof modules
 (`/tmp/opencode/eh-module-parser-coqchk.log`). No admission, parser-success
 grammar, test expectation weakening or new axiom was used.
 
-## Verification
+## Initial verification at d3daf14
 
 The forced extracted binary driver adds **45** framing/order commands:
 too-small/too-large sizes for each section ID 1–13; legal padded sizes;
@@ -64,7 +64,7 @@ Logs: `/tmp/opencode/eh-module-parser-full-build.log`,
 `/tmp/opencode/eh-module-parser-indexed.log`,
 `/tmp/opencode/eh-module-parser-assumptions.log`.
 
-## Still required — no whole-module verification claim
+## Initial dependency audit — no whole-module verification claim
 
 The pinned whole-module proof's transitive closure has 40 modules absent from
 the initial EH tree. Several cannot be copied unchanged:
@@ -91,6 +91,54 @@ Consequently neither `binary_of_module_roundtrip` nor
 has yet been ported to this EH tree. The top-level pinned modules are not
 installed with false coverage claims or unresolved proof obligations.
 
-Indexed-local parser composition and the connected GC closed-runtime payload
-handoff remain separately documented in `exception_payload_handoff.md`.
+## Follow-up after d3daf14
+
+The shared vector/optional/arbitrary-custom proof dependencies have now been
+selectively adapted without the addressing decoder. Arbitrary custom decoding,
+custom-before/after iteration, custom-prefixed optional absence and the actual
+tag wrapper's grammar iff compile. `binary_of_tagsec_roundtrip` proves a
+bounded round trip for the actual tag-section printer, not the entire module.
+The canonical code-section-only corollaries in the copied custom-completeness
+module were not imported: they depend on still-unported whole-expression
+printer membership.
+
+Full exact-tree build, forced tests and kernel checking pass for this follow-up
+as well. The driver now has **126 positive commands**, with the same 12
+deliberate wrong-outcome/stage failures detected. The official non-text
+projection remains **489/489**, with **18 text-only deferrals**; strict core
+remains 53,999/54,004 (the same five alignment expectations).
+Kernel checks include `interp_instantiate_sound` after the stronger local
+source-validation check, not only isolated parser helpers.
+
+The eight audited custom/tag/reference/local decoding contracts are globally
+closed. `module_type_checker_locals_closed`, which mentions the actual full
+validator, exposes inherited classical real-decision and dependent functional
+extensionality assumptions; no new axiom was added. Audit/build logs:
+`/tmp/opencode/eh-parser-custom-locals-assumptions.log`,
+`/tmp/opencode/eh-parser-custom-locals-final-build.log`,
+`/tmp/opencode/eh-parser-custom-locals-final-tests.log`,
+`/tmp/opencode/eh-parser-custom-locals-final-coqchk.log`.
+
+`binary_format_reference_properties.v` now discharges independent full source
+heap/reference/value grammar leaves (including EH abstract heaps and signed
+indexed references), and `run_parse_source_locals_correct` characterizes actual
+local descriptor decoding with arbitrary suffixes/bounds. `parse_locals` uses
+that declaration codec. `source_local_properties.v` reflects the production
+validator's new mandatory canonical-context local-closing check; this does not
+change source indices into runtime identities or claim canonical null lowering.
+
+Additional binary local fixtures cover indices 0/63/64/127/128, padded s33,
+out-of-context and maximum-u32 indices (validation failures), and wire overflow
+(parse failure). The transport consumer now passes parsing/validation and
+reaches the portability import failure. The indexed summary means **7 passing
+commands and 3 failing commands**, not seven failing commands.
+
+Still unported: the actual whole-module `binary_of_module_roundtrip`,
+`run_parse_module_general_correct` and string iff; recursive instruction
+composition including `try_table`; recursive declaration/field/group grammar;
+and remaining atomic, block/type, record/segment and printer membership
+dependencies. None is assumed to follow from these new concrete leaf proofs.
+
+The connected GC closed-runtime/**closed administrative stack signature**
+handoff is separately documented in `exception_payload_handoff.md`.
 The PR remains draft and final EH is unfinished.

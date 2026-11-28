@@ -610,6 +610,17 @@ Definition module_components_typing (m : module) (impts : list extern_type) (exp
    List.Forall (fun x => exists ps,
      lookup_function_type tfs x = Some (Tf ps nil)) tags.
 
+Definition source_local_closesb registry names t :=
+  match gc_type_context.close_value_type names 0 t with
+  | Some closed => gc_declaration_typing.closed_value_validb registry closed
+  | None => false
+  end.
+
+Definition module_locals_closingb registry names (m : module) :=
+  List.forallb
+    (fun f => List.forallb (source_local_closesb registry names) f.(modfunc_locals))
+    m.(mod_funcs).
+
 Definition module_typing (m : module) (impts expts : list extern_type) : Prop :=
   (exists registry ids,
     close_and_validate_type_groups nil (module_type_groups m) = Some (registry, ids) /\

@@ -168,6 +168,28 @@ Proof.
   - auto.
 Qed.
 
+Lemma run_bind_option {A B n m}
+    (p : Parser (SizedList Byte.byte) Byte.byte option A n)
+    (q : A -> Box (Parser (SizedList Byte.byte) Byte.byte option B) n)
+    (bound : m <= n) input :
+  runParser (Combinators.bind p q) bound input =
+  match runParser p bound input with
+  | None => None
+  | Some sa =>
+      match runParser
+        (call (q (Success.value sa))
+          (Nat.le_trans _ _ _ (Success.small sa) bound))
+        (Nat.le_refl _) (Success.leftovers sa) with
+      | None => None
+      | Some sb => Some (Success.map snd (Success.and sa sb))
+      end
+  end.
+Proof.
+  unfold Combinators.bind, Combinators.map, Combinators.andbind; simpl.
+  destruct (runParser p bound input); [|reflexivity].
+  simpl; destruct (runParser _ _ _); reflexivity.
+Qed.
+
 Lemma parser_sound_app {A B n}
     (p : Parser (SizedList Byte.byte) Byte.byte option (A -> B) n)
     (q : Box (Parser (SizedList Byte.byte) Byte.byte option A) n)
@@ -322,6 +344,34 @@ Proof.
   exfalso.
   apply (Disjoint xs prefix (output_bytes r) suffix (Success.value r) a Px Qa).
   now rewrite <- Ex.
+Qed.
+
+Lemma parser_complete_andbind {A B n}
+    (p : Parser (SizedList Byte.byte) Byte.byte option A n)
+    (q : A -> Box (Parser (SizedList Byte.byte) Byte.byte option B) n)
+    (P : list Byte.byte -> A -> Prop)
+    (Q : A -> list Byte.byte -> B -> Prop)
+    (R : list Byte.byte -> A * B -> Prop) :
+  parser_complete p P ->
+  (forall a k (lt : k < n), parser_complete (call (q a) lt) (Q a)) ->
+  (forall bytes a b, R bytes (a, b) ->
+    exists xs ys, bytes = xs ++ ys /\ P xs a /\ Q a ys b) ->
+  parser_complete (Combinators.andbind p q) R.
+Proof.
+  intros Hp Hq Split m bound input prefix suffix [a b] E Rab.
+  destruct (Split prefix a b Rab) as [xs [ys [Parts [Pa Qb]]]].
+  rewrite Parts, <- app_assoc in E.
+  destruct (Hp m bound input xs (ys ++ suffix) a E Pa)
+    as [sa [Ra [Va Outa]]].
+  rewrite <- Va in Qb.
+  destruct (Hq (Success.value sa) _
+    (Nat.le_trans _ _ _ (Success.small sa) bound)
+    _ (Nat.le_refl _) (Success.leftovers sa) ys suffix b Outa Qb)
+    as [sb [Rb [Vb Outb]]].
+  exists (Success.and sa sb). split.
+  - unfold Combinators.andbind; simpl.
+    rewrite Ra. simpl. rewrite Rb. reflexivity.
+  - split; [simpl; now rewrite Va, Vb | exact Outb].
 Qed.
 
 Lemma parser_complete_bind {A B n}
