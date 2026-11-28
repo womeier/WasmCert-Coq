@@ -174,6 +174,16 @@ Definition close_and_validate_type_groups groups source :
 Definition function_type_groups (types : list function_type) : list recursive_type :=
   map (fun f => [Sub_type true [] (Comp_func f)]) types.
 
+Definition close_reference_type names (source : reference_type) : option closed_reference_type :=
+  option_map (Closed_ref source.(ref_nullable)) (close_heap_type names 0 source.(ref_heap)).
+
+Definition close_table_type names (source : table_type) : option closed_table_type :=
+  option_map (Build_table_type source.(tt_limits))
+    (close_reference_type names source.(tt_elem_type)).
+
+Definition close_global_type names (source : global_type) : option closed_global_type :=
+  option_map (Build_global_type source.(tg_mut)) (close_value_type names 0 source.(tg_t)).
+
 (** Source signatures are closed using the whole instance's identity map.
     Checking the resulting expansion makes the legacy signature view and
     the canonical runtime view agree; no source index is a runtime identity. *)

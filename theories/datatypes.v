@@ -234,6 +234,14 @@ Inductive closed_value_type : Set :=
 | CV_ref : bool -> closed_heap_type -> closed_value_type.
 
 Definition closed_function_type := function_type_gen closed_value_type.
+
+Record closed_reference_type : Set := Closed_ref {
+  closed_ref_nullable : bool;
+  closed_ref_heap : closed_heap_type;
+}.
+
+Definition closed_reference_value (r : closed_reference_type) : closed_value_type :=
+  CV_ref r.(closed_ref_nullable) r.(closed_ref_heap).
 Definition closed_subtype :=
   subtype closed_value_type closed_type_use closed_function_type.
 Definition canonical_group := list closed_subtype.
@@ -287,10 +295,16 @@ optionally maximum size. The limits are given in numbers of entries.
 
 [https://www.w3.org/TR/wasm-core-2/syntax/types.html#table-types]
 *)
-Record table_type : Set := {
+Record table_type_gen (R : Set) : Set := Build_table_type {
   tt_limits : limits;
-  tt_elem_type : reference_type;
+  tt_elem_type : R;
 }.
+
+Arguments Build_table_type {R} _ _.
+Arguments tt_limits {R} _.
+Arguments tt_elem_type {R} _.
+Definition table_type := table_type_gen reference_type.
+Definition closed_table_type := table_type_gen closed_reference_type.
 
 
 (** std-doc:
@@ -304,10 +318,16 @@ Global types classify global variables, which hold a value and can either be mut
 
 [https://www.w3.org/TR/wasm-core-2/syntax/types.html#global-types]
 *)
-Record global_type : Set := (* tg *) {
+Record global_type_gen (V : Set) : Set := Build_global_type { (* tg *)
   tg_mut : mutability;
-  tg_t : value_type
+  tg_t : V
 }.
+
+Arguments Build_global_type {V} _ _.
+Arguments tg_mut {V} _.
+Arguments tg_t {V} _.
+Definition global_type := global_type_gen value_type.
+Definition closed_global_type := global_type_gen closed_value_type.
 
   
 (** std-doc:
@@ -322,6 +342,12 @@ Inductive extern_type : Set :=
 | ET_mem : memory_type -> extern_type
 | ET_global : global_type -> extern_type
 .
+
+Inductive closed_extern_type : Set :=
+| CET_func : defined_type -> closed_extern_type
+| CET_table : closed_table_type -> closed_extern_type
+| CET_mem : memory_type -> closed_extern_type
+| CET_global : closed_global_type -> closed_extern_type.
 
 (** std-doc:
 A structured instruction can consume input and produce output on the operand stack according to its annotated block type. 
@@ -371,6 +397,12 @@ Arguments Closed_ft {V} _ _.
 Arguments Comp_func {V F} _.
 Arguments Comp_struct {V F} _.
 Arguments Comp_array {V F} _.
+Arguments Build_table_type {R} _ _.
+Arguments tt_limits {R} _.
+Arguments tt_elem_type {R} _.
+Arguments Build_global_type {V} _ _.
+Arguments tg_mut {V} _.
+Arguments tg_t {V} _.
 
 Notation T_funcref := (Ref_type true HT_func).
 Notation T_externref := (Ref_type true HT_extern).

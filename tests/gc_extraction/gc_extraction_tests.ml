@@ -385,6 +385,70 @@ let () =
     (Runtime.resolve_type inst1 BigZ.zero = Runtime.resolve_type inst2 BigZ.one);
   check "production out-of-bounds type resolution fails"
     (Runtime.resolve_type inst2 (BigZ.of_int 2) = None);
+  let function_reference = VAL_ref (VAL_ref_func BigZ.zero) in
+  let indexed nullable index =
+    T_ref { ref_nullable = nullable; ref_heap = HT_type (BigZ.of_int index) } in
+  check "closed runtime classifier retains native canonical identity"
+    (Runtime.classify_value s2 function_reference =
+      Some (CV_ref (false, CH_defined (CT_def (id 0 0)))));
+  check "source expected type closes with importer names not producer index"
+    (Runtime.check_source_value s2 inst2 function_reference (indexed false 1));
+  check "same raw index with different canonical identity is rejected"
+    (not (Runtime.check_source_value s2 inst2 function_reference (indexed false 0)));
+  check "closed function reference matches nullable expected canonical identity"
+    (Runtime.check_source_value s2 inst2 function_reference (indexed true 1));
+  check "unresolved source-index runtime null is rejected"
+    (Runtime.classify_reference s2 (VAL_ref_null (HT_type BigZ.zero)) = None);
+  check "canonical bottom null matches nullable defined function"
+    (Runtime.check_source_value s2 inst2 (VAL_ref (VAL_ref_null HT_nofunc))
+      (indexed true 1));
+  check "source indexed null lowers to the function hierarchy bottom"
+    (Runtime.lower_null s2 inst2 (HT_type BigZ.one) = Some (VAL_ref_null HT_nofunc));
+  check "out-of-bounds source null does not escape as an index"
+    (Runtime.lower_null s2 inst2 (HT_type (BigZ.of_int 99)) = None);
+  check "canonical bottom null does not match non-null defined function"
+    (not (Runtime.check_source_value s2 inst2 (VAL_ref (VAL_ref_null HT_nofunc))
+      (indexed false 1)));
+  let source_global nullable index =
+    { tg_mut = MUT_const; tg_t = indexed nullable index } in
+  let producer_global = Types.close_global inst1.inst_defined_types (source_global false 0) in
+  let importer_global = Types.close_global inst2.inst_defined_types (source_global false 1) in
+  check "closed global descriptors agree across source index renaming"
+    (producer_global = importer_global);
+  let match_globals a b =
+    match a, b with
+    | Some a, Some b -> Types.match_import s2.s_types (CET_global a) (CET_global b)
+    | _ -> false
+  in
+  check "closed import matching accepts same identity at different source indices"
+    (match_globals producer_global importer_global);
+  check "closed import matching rejects different identity at same source index"
+    (not (match_globals producer_global
+      (Types.close_global inst2.inst_defined_types (source_global false 0))));
+  check "closed import descriptor resolves the nominal function index"
+    (Types.close_import s2.s_types inst2.inst_defined_types (MID_func BigZ.one) =
+      Some (CET_func (id 0 0)));
+  check "immutable closed global import is covariant"
+    (Types.match_import [] (CET_global { tg_mut = MUT_const; tg_t = i31 })
+      (CET_global { tg_mut = MUT_const; tg_t = eq }));
+  check "mutable closed global import is invariant"
+    (not (Types.match_import [] (CET_global { tg_mut = MUT_var; tg_t = i31 })
+      (CET_global { tg_mut = MUT_var; tg_t = eq })));
+  let bounds = { lim_min = BigZ.of_int 3; lim_max = Some (BigZ.of_int 8) } in
+  let source_table = { tt_limits = bounds;
+    tt_elem_type = { ref_nullable = true; ref_heap = HT_type BigZ.one } } in
+  check "closing tables preserves all current limits metadata"
+    (Types.close_table inst2.inst_defined_types source_table =
+      Some { tt_limits = bounds; tt_elem_type =
+        { closed_ref_nullable = true; closed_ref_heap = CH_defined (CT_def (id 0 0)) } });
+  let ct h = { tt_limits = bounds; tt_elem_type =
+    { closed_ref_nullable = true; closed_ref_heap = CH_abstract h } } in
+  check "closed table imports reject element covariance"
+    (not (Types.match_import [] (CET_table (ct HT_i31)) (CET_table (ct HT_eq))));
+  check "closed table imports retain limits subtyping"
+    (Types.match_import [] (CET_table (ct HT_i31))
+      (CET_table { (ct HT_i31) with tt_limits =
+        { lim_min = BigZ.one; lim_max = Some (BigZ.of_int 8) } }));
   let bad = { blank with mod_types = function_groups [Tf ([], [T_bot])] } in
   check "production module validation rejects invalid type declaration"
     (match Runtime.interp_instantiate_wrapper (Obj.magic ()) s2 bad [] with
@@ -483,6 +547,12 @@ let () =
     (Types.array_type mixed_store.s_types (id 0 1) = Some (packed PT_i16));
   check "aggregate source index cannot expand as function"
     (Runtime.expand_function mixed_store mixed_instance BigZ.zero = None);
+  check "source indexed data null lowers to the GC hierarchy bottom"
+    (Runtime.lower_null mixed_store mixed_instance (HT_type BigZ.zero) =
+      Some (VAL_ref_null HT_none));
+  check "lowered data null checks against the indexed expected type"
+    (Runtime.check_source_value mixed_store mixed_instance
+      (VAL_ref (VAL_ref_null HT_none)) (indexed true 0));
   check "production native identity uses uncompressed mixed source index"
     (Runtime.lookup_function_type mixed_store BigZ.zero = Some (id 1 0));
   let repeated_store, repeated_instance = instantiate mixed_store mixed in

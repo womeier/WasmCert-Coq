@@ -74,6 +74,70 @@ Definition typeof_value (s: store_record) (v: value) : option value_type :=
   | VAL_ref v' => option_map T_ref (typeof_ref s v')
   end.                      
 
+(** Closed runtime classification. A source HT_type is never a runtime null
+    annotation: it must be lowered in its producer instance before storage.
+    The compatibility classifier above remains for the ongoing source-context
+    proof migration; canonical storage must use these closed descriptors. *)
+Definition typeof_closed_ref (s : store_record) (v : value_ref) :
+    option closed_reference_type :=
+  match v with
+  | VAL_ref_null h =>
+      match h with
+      | HT_type _ => None
+      | _ => Some (Closed_ref true (CH_abstract h))
+      end
+  | VAL_ref_func address =>
+      option_map (fun id => Closed_ref false (CH_defined (CT_def id)))
+        (lookup_func_defined_type s address)
+  | VAL_ref_extern _ => Some (Closed_ref false (CH_abstract HT_extern))
+  | VAL_ref_i31 _ => Some (Closed_ref false (CH_abstract HT_i31))
+  end.
+
+Definition typeof_closed_value (s : store_record) (v : value) : option closed_value_type :=
+  match v with
+  | VAL_num n => Some (CV_num (typeof_num n))
+  | VAL_vec v => Some (CV_vec (typeof_vec v))
+  | VAL_ref r => option_map closed_reference_value (typeof_closed_ref s r)
+  end.
+
+Definition closed_value_typing (s : store_record) (v : value) (expected : closed_value_type) : bool :=
+  match typeof_closed_value s v with
+  | None => false
+  | Some actual =>
+      closed_value_validb s.(s_types) actual &&
+      closed_value_validb s.(s_types) expected &&
+      closed_value_matchesb s.(s_types) actual expected
+  end.
+
+Definition source_value_typing (s : store_record) (inst : moduleinst)
+    (v : value) (expected : value_type) : bool :=
+  match gc_type_context.close_value_type inst.(inst_defined_types) 0 expected with
+  | None => false
+  | Some closed => closed_value_typing s v closed
+  end.
+
+(** Indexed nulls are lowered in the producing instance. Bottom heaps retain
+    their hierarchy (nofunc versus none); no producer-local index escapes. *)
+Definition lower_closed_null registry (expected : closed_heap_type) : option value_ref :=
+  match expected with
+  | CH_abstract heap =>
+      if abstract_heap_validb heap then Some (VAL_ref_null heap) else None
+  | CH_defined (CT_rec _) => None
+  | CH_defined (CT_def id) =>
+      match defined_heap_kind registry id with
+      | Some HT_func => Some (VAL_ref_null HT_nofunc)
+      | Some HT_struct | Some HT_array => Some (VAL_ref_null HT_none)
+      | _ => None
+      end
+  end.
+
+Definition lower_source_null (s : store_record) (inst : moduleinst)
+    (source : heap_type) : option value_ref :=
+  match gc_type_context.close_heap_type inst.(inst_defined_types) 0 source with
+  | None => None
+  | Some expected => lower_closed_null s.(s_types) expected
+  end.
+
 (* This works as long as the principal type of values is not a scheme. Otherwise, this needs to be a Prop in future extensions *)
 Definition value_typing (s: store_record) (v: value) (t: value_type) : bool :=
   match typeof_value s v with

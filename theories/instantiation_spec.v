@@ -728,6 +728,51 @@ Definition import_subtyping (t1 t2: extern_type) : bool :=
   | _, _ => false
   end.
 
+(** Canonical import boundary. Both operands have already been closed in
+    their respective instances; source indices are not compared here. *)
+Definition close_import_desc registry names (source : module_import_desc) :
+    option closed_extern_type :=
+  match source with
+  | MID_func index =>
+      match lookup_N names index with
+      | None => None
+      | Some id =>
+          match gc_type_context.expand_function_type registry id with
+          | Some _ => Some (CET_func id)
+          | None => None
+          end
+      end
+  | MID_table t => option_map CET_table (close_table_type names t)
+  | MID_mem t => Some (CET_mem t)
+  | MID_global t => option_map CET_global (close_global_type names t)
+  end.
+
+Definition closed_reference_equivb registry (a b : closed_reference_type) : bool :=
+  closed_value_matchesb registry (closed_reference_value a) (closed_reference_value b) &&
+  closed_value_matchesb registry (closed_reference_value b) (closed_reference_value a).
+
+Definition closed_import_subtyping registry (actual expected : closed_extern_type) : bool :=
+  match actual, expected with
+  | CET_func a, CET_func b =>
+      match gc_type_context.expand_function_type registry a,
+            gc_type_context.expand_function_type registry b with
+      | Some _, Some _ => gc_type_context.defined_type_matches registry a b
+      | _, _ => false
+      end
+  | CET_table a, CET_table b =>
+      closed_reference_equivb registry a.(tt_elem_type) b.(tt_elem_type) &&
+      limits_subtyping a.(tt_limits) b.(tt_limits)
+  | CET_mem a, CET_mem b => import_mem_subtyping a b
+  | CET_global a, CET_global b =>
+      (a.(tg_mut) == b.(tg_mut)) &&
+      closed_value_matchesb registry a.(tg_t) b.(tg_t) &&
+      match b.(tg_mut) with
+      | MUT_const => true
+      | MUT_var => closed_value_matchesb registry b.(tg_t) a.(tg_t)
+      end
+  | _, _ => false
+  end.
+
 (* In Wasm 2.0, the module exports are now a part of the module instance. *)
 Definition instantiate (s : store_record) (m : module) (v_imps : list extern_value)
                        (z : (store_record * frame * list basic_instruction)) : Prop :=

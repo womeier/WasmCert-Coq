@@ -72,6 +72,11 @@ Module Utility.
       Definition close_validated := close_and_validate_type_groups.
       Definition close_functions registry types :=
         close_and_validate_type_groups registry (function_type_groups types).
+      Definition close_reference := close_reference_type.
+      Definition close_table := close_table_type.
+      Definition close_global := close_global_type.
+      Definition close_import := close_import_desc.
+      Definition match_import := closed_import_subtyping.
       Definition composite_matches := closed_composite_matchesb.
       Definition close := close_type_groups.
       Definition expand := expand_defined_type.
@@ -216,6 +221,11 @@ Definition expand_function := expand_inst_function_type.
 Definition native_function_type := native_func_defined_type.
 Definition lookup_function_type := lookup_func_defined_type.
 Definition instance_context := inst_typing.
+Definition classify_reference := typeof_closed_ref.
+Definition classify_value := typeof_closed_value.
+Definition check_closed_value := closed_value_typing.
+Definition check_source_value := source_value_typing.
+Definition lower_null := lower_source_null.
 
 Definition empty_store_record : store_record := {|
     s_funcs := nil;

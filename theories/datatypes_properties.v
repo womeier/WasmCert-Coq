@@ -72,7 +72,8 @@ Definition eqmutabilityP : Equality.axiom mutability_eqb :=
 
 HB.instance Definition mutability_eqMixin := hasDecEq.Build mutability eqmutabilityP.
 
-Scheme Equality for global_type.
+Definition global_type_eq_dec (a b : global_type) : {a = b} + {a <> b}.
+Proof. decide equality; [apply value_type_eq_dec | apply mutability_eq_dec]. Defined.
 Definition global_type_eqb v1 v2 : bool := global_type_eq_dec v1 v2.
 Definition eqglobal_typeP : Equality.axiom global_type_eqb :=
   eq_dec_Equality_axiom global_type_eq_dec.
