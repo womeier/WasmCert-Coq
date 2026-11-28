@@ -1,4 +1,7 @@
-(* Custom implementation of LEB128 integer format -- unverified *)
+(** LEB128 integer encoding and parsing.
+    [leb128_properties] proves roundtrips for the public encoders and the
+    option/Parseque parsers, including preservation of an arbitrary suffix.
+    The older bit-oriented helpers below are retained for compatibility. *)
 (* https://en.wikipedia.org/wiki/LEB128 *)
 From Stdlib Require Import ZArith Init.Byte.
 From parseque Require Import Parseque.
@@ -105,8 +108,25 @@ Definition encode_unsigned_aux (n : N) : list byte :=
       make_msb_of_non_first_byte_one unsigned_bs
   end.
 
+(** A payload byte and a structurally recursive base-128 writer.  The bit-size
+    fuel is a conservative bound on the number of groups, not on the value;
+    encoding large indices therefore does not construct unary integers. *)
+Definition payload_byte (n : N) : byte :=
+  match Byte.of_N (N.modulo n 128) with
+  | Some b => b
+  | None => x00 (* the remainder is always in range *)
+  end.
+
+Fixpoint write_unsigned (fuel : nat) (n : N) : list byte :=
+  match fuel with
+  | O => payload_byte n :: nil
+  | S fuel' =>
+      if N.ltb n 128 then payload_byte n :: nil
+      else make_msb_one (payload_byte n) :: write_unsigned fuel' (N.div n 128)
+  end.
+
 Definition encode_unsigned (n : N) : list byte :=
-  List.rev (encode_unsigned_aux n).
+  write_unsigned (N.to_nat (N.size n)) n.
 
 Definition encode_signed_aux (z : Z) : list byte :=
   match z with
@@ -118,8 +138,17 @@ Definition encode_signed_aux (z : Z) : list byte :=
                       (bits_of_pos_pad nil 0 7 n')))
   end.
 
+Fixpoint write_signed (fuel : nat) (z : Z) : list byte :=
+  let b := payload_byte (Z.to_N (Z.modulo z 128)) in
+  match fuel with
+  | O => b :: nil
+  | S fuel' =>
+      if andb (Z.leb (-64) z) (Z.ltb z 64) then b :: nil
+      else make_msb_one b :: write_signed fuel' (Z.div z 128)
+  end.
+
 Definition encode_signed (z : Z) : list byte :=
-  List.rev (encode_signed_aux z).
+  write_signed (N.to_nat (N.size (Z.to_N (Z.abs z)))) z.
 
 Section Language.
 
@@ -160,12 +189,14 @@ Section Language.
     Context
       {Tok : Type} {A B : Type} {n : nat}.
 
-    Definition parse_unsigned_aux : [ Unsigned ] := Fix Unsigned (fun _ rec =>
+    Definition unsigned_step : [ Box Unsigned :-> Unsigned ] := fun _ rec =>
       let aux := Induction.map _unsigned _ rec in
       let unsigned_ :=
         parse_unsigned_end <|>
         (((fun lsb rest => N.add lsb (N.mul 128%N rest)) <$> parse_unsigned_ctd) <*> aux) in
-      MkUnsigned unsigned_).
+      MkUnsigned unsigned_.
+
+    Definition parse_unsigned_aux : [ Unsigned ] := Fix Unsigned unsigned_step.
     
     (** top-level function *)
     Definition parse_unsigned : [ byte_parser N ] :=
@@ -206,12 +237,14 @@ Section Signed_sec.
   Context
     {Tok : Type} {A B : Type} {n : nat}.
     
-    Definition signed_aux : [ Signed ] := Fix Signed (fun _ rec =>
+    Definition signed_step : [ Box Signed :-> Signed ] := fun _ rec =>
       let aux := Induction.map _signed _ rec in
       let signed_ :=
         parse_signed_end <|>
         (((fun lsb rest => Zplus lsb (Zmult 128%Z rest)) <$> parse_signed_ctd) <*> aux) in
-      MkSigned _ signed_).
+      MkSigned _ signed_.
+
+    Definition signed_aux : [ Signed ] := Fix Signed signed_step.
     
     Definition parse_signed : [ byte_parser Z ] := fun n => _signed n (signed_aux n).
     

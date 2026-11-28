@@ -6,10 +6,11 @@
     hypotheses.
 
     This file verifies the byte-count and numeric-range guards on the actual
-    Parseque execution path.  It does not yet prove the recursive LEB128
-    parser's correspondence to the integer encoding grammar. *)
-From Wasm Require Import binary_format_parser binary_format_printer datatypes.
-From Stdlib Require Import ZArith Lia Strings.Byte.
+    Parseque execution path.  Recursive LEB128 grammar correspondence and
+    encoder roundtrips are proved in [leb128_properties]. *)
+From Wasm Require Import binary_format_parser binary_format_printer datatypes
+                         leb128_properties.
+From Stdlib Require Import ZArith Lia Strings.Byte NArith.Nnat.
 From parseque Require Import Parseque.
 
 Section OptionParsers.
@@ -138,6 +139,229 @@ Section OptionParsers.
     eexists; repeat split; eauto.
   Qed.
 End OptionParsers.
+
+Section ObservedParsers.
+  Context {A B : Type} {n : nat}.
+  Variable bs : list Byte.byte.
+  Variable bound : List.length bs <= n.
+
+  Lemma observe_guardM_option (f : A -> option B)
+      (p : Parser (SizedList Byte.byte) Byte.byte option A n) :
+    observe_leb (runParser (Combinators.guardM f p) bound (mkSizedList bs)) =
+    match observe_leb (runParser p bound (mkSizedList bs)) with
+    | Some (a, rest) => option_map (fun b => (b, rest)) (f a)
+    | None => None
+    end.
+  Proof.
+    rewrite run_guardM_option.
+    destruct (runParser p bound (mkSizedList bs)) as [s|]; [|reflexivity].
+    unfold observe_leb, Success.guardM. simpl.
+    destruct (f (Success.value s)); reflexivity.
+  Qed.
+
+  Lemma observe_assert_sized_option
+      (p : Parser (SizedList Byte.byte) Byte.byte option A n) constraint :
+    observe_leb (runParser (assert_sized p constraint) bound (mkSizedList bs)) =
+    match observe_leb (runParser p bound (mkSizedList bs)) with
+    | Some (a, rest) =>
+        if constraint (N.of_nat (List.length bs - List.length rest))
+        then Some (a, rest) else None
+    | None => None
+    end.
+  Proof.
+    rewrite run_assert_sized_option.
+    destruct (runParser p bound (mkSizedList bs))
+      as [[a k Hk [rest Length]]|]; [|reflexivity].
+    subst k. unfold observe_leb. simpl.
+    destruct (constraint (N.of_nat (List.length bs - List.length rest)));
+      reflexivity.
+  Qed.
+End ObservedParsers.
+
+Lemma parse_u32_observe n bs (bound : List.length bs <= n) :
+  observe_leb
+    (runParser
+      (@parse_u32_as_N (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+      bound (mkSizedList bs)) =
+  match read_unsigned bs with
+  | Some (v, rest) =>
+      if N.leb (N.of_nat (List.length bs - List.length rest)) 5 then
+        if N.leb v 4294967295 then Some (v, rest) else None
+      else None
+  | None => None
+  end.
+Proof.
+  unfold parse_u32_as_N.
+  rewrite observe_guardM_option, observe_assert_sized_option,
+    extract_unsigned_correct.
+  destruct (read_unsigned bs) as [[v rest]|]; [|reflexivity].
+  destruct (N.leb (N.of_nat (List.length bs - List.length rest)) 5);
+    [destruct (N.leb v 4294967295) |]; reflexivity.
+Qed.
+
+Lemma parse_s32_observe n bs (bound : List.length bs <= n) :
+  observe_leb
+    (runParser
+      (@parse_s32 (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+      bound (mkSizedList bs)) =
+  match read_signed bs with
+  | Some (z, rest) =>
+      if N.leb (N.of_nat (List.length bs - List.length rest)) 5 then
+        if andb (Z.leb z 2147483647) (Z.leb (-2147483648) z)
+        then Some (Wasm_int.Int32.repr z, rest) else None
+      else None
+  | None => None
+  end.
+Proof.
+  unfold parse_s32.
+  rewrite observe_guardM_option, observe_assert_sized_option,
+    extract_signed_correct.
+  destruct (read_signed bs) as [[z rest]|]; [|reflexivity].
+  destruct (N.leb (N.of_nat (List.length bs - List.length rest)) 5);
+    [destruct (andb (Z.leb z 2147483647) (Z.leb (-2147483648) z)) |];
+    reflexivity.
+Qed.
+
+Lemma parse_s64_observe n bs (bound : List.length bs <= n) :
+  observe_leb
+    (runParser
+      (@parse_s64 (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+      bound (mkSizedList bs)) =
+  match read_signed bs with
+  | Some (z, rest) =>
+      if N.leb (N.of_nat (List.length bs - List.length rest)) 10 then
+        if andb (Z.leb z 9223372036854775807)
+                (Z.leb (-9223372036854775808) z)
+        then Some (Wasm_int.Int64.repr z, rest) else None
+      else None
+  | None => None
+  end.
+Proof.
+  unfold parse_s64.
+  rewrite observe_guardM_option, observe_assert_sized_option,
+    extract_signed_correct.
+  destruct (read_signed bs) as [[z rest]|]; [|reflexivity].
+  destruct (N.leb (N.of_nat (List.length bs - List.length rest)) 10);
+    [destruct (andb (Z.leb z 9223372036854775807)
+                   (Z.leb (-9223372036854775808) z)) |]; reflexivity.
+Qed.
+
+Lemma parse_s33_observe n bs (bound : List.length bs <= n) :
+  observe_leb
+    (runParser
+      (@parse_s33 (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+      bound (mkSizedList bs)) =
+  match read_signed bs with
+  | Some (z, rest) =>
+      if N.leb (N.of_nat (List.length bs - List.length rest)) 5 then
+        if andb (Z.leb (-4294967296) z) (Z.leb z 4294967295)
+        then Some (z, rest) else None
+      else None
+  | None => None
+  end.
+Proof.
+  unfold parse_s33.
+  rewrite observe_guardM_option, observe_assert_sized_option,
+    extract_signed_correct.
+  destruct (read_signed bs) as [[z rest]|]; [|reflexivity].
+  destruct (N.leb (N.of_nat (List.length bs - List.length rest)) 5);
+    [destruct (andb (Z.leb (-4294967296) z) (Z.leb z 4294967295)) |];
+    reflexivity.
+Qed.
+
+Lemma parse_u32_encode x rest n
+    (bound : List.length (leb128.encode_unsigned x ++ rest) <= n) :
+  (x <= 4294967295)%N ->
+  observe_leb
+    (runParser
+      (@parse_u32_as_N (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+      bound (mkSizedList (leb128.encode_unsigned x ++ rest))) =
+  Some (x, rest).
+Proof.
+  intro Range. rewrite parse_u32_observe, read_encode_unsigned.
+  rewrite List.length_app, Nat.add_sub.
+  assert (Width : N.leb (N.of_nat (List.length (leb128.encode_unsigned x))) 5 =
+    true).
+  { apply N.leb_le. pose proof (encode_u32_length x Range). lia. }
+  rewrite Width. now rewrite (proj2 (N.leb_le _ _) Range).
+Qed.
+
+Lemma parse_s32_encode z rest n
+    (bound : List.length (leb128.encode_signed z ++ rest) <= n) :
+  (-2147483648 <= z <= 2147483647)%Z ->
+  observe_leb
+    (runParser
+      (@parse_s32 (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+      bound (mkSizedList (leb128.encode_signed z ++ rest))) =
+  Some (Wasm_int.Int32.repr z, rest).
+Proof.
+  intro Range. rewrite parse_s32_observe, read_encode_signed.
+  rewrite List.length_app, Nat.add_sub.
+  assert (Width : N.leb (N.of_nat (List.length (leb128.encode_signed z))) 5 =
+    true).
+  { apply N.leb_le. pose proof (encode_s32_length z Range). lia. }
+  assert (Fits :
+    andb (Z.leb z 2147483647) (Z.leb (-2147483648) z) = true).
+  { apply Bool.andb_true_iff. split; apply Z.leb_le; lia. }
+  now rewrite Width, Fits.
+Qed.
+
+Lemma parse_s64_encode z rest n
+    (bound : List.length (leb128.encode_signed z ++ rest) <= n) :
+  (-9223372036854775808 <= z <= 9223372036854775807)%Z ->
+  observe_leb
+    (runParser
+      (@parse_s64 (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+      bound (mkSizedList (leb128.encode_signed z ++ rest))) =
+  Some (Wasm_int.Int64.repr z, rest).
+Proof.
+  intro Range. rewrite parse_s64_observe, read_encode_signed.
+  rewrite List.length_app, Nat.add_sub.
+  assert (Width : N.leb (N.of_nat (List.length (leb128.encode_signed z))) 10 =
+    true).
+  { apply N.leb_le. pose proof (encode_s64_length z Range). lia. }
+  assert (Fits :
+    andb (Z.leb z 9223372036854775807) (Z.leb (-9223372036854775808) z) = true).
+  { apply Bool.andb_true_iff. split; apply Z.leb_le; lia. }
+  now rewrite Width, Fits.
+Qed.
+
+Lemma parse_s33_encode z rest n
+    (bound : List.length (leb128.encode_signed z ++ rest) <= n) :
+  (-4294967296 <= z <= 4294967295)%Z ->
+  observe_leb
+    (runParser
+      (@parse_s33 (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+      bound (mkSizedList (leb128.encode_signed z ++ rest))) =
+  Some (z, rest).
+Proof.
+  intro Range. rewrite parse_s33_observe, read_encode_signed.
+  rewrite List.length_app, Nat.add_sub.
+  assert (Width : N.leb (N.of_nat (List.length (leb128.encode_signed z))) 5 =
+    true).
+  { apply N.leb_le. pose proof (encode_s33_length z Range). lia. }
+  assert (Fits :
+    andb (Z.leb (-4294967296) z) (Z.leb z 4294967295) = true).
+  { apply Bool.andb_true_iff. split; apply Z.leb_le; lia. }
+  now rewrite Width, Fits.
+Qed.
+
+Lemma parse_heap_typeidx_encode x rest n
+    (bound : List.length (leb128.encode_signed (Z.of_N x) ++ rest) <= n) :
+  (x <= 4294967295)%N ->
+  observe_leb
+    (runParser
+      (@parse_heap_typeidx (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+      bound (mkSizedList (leb128.encode_signed (Z.of_N x) ++ rest))) =
+  Some (x, rest).
+Proof.
+  intro Range. unfold parse_heap_typeidx.
+  rewrite observe_guardM_option, parse_s33_encode.
+  - rewrite (proj2 (Z.leb_le _ _) (N2Z.is_nonneg x)).
+    simpl. now rewrite N2Z.id.
+  - pose proof (N2Z.is_nonneg x).
+    apply N2Z.inj_le in Range. lia.
+Qed.
 
 Section IntegerGuards.
   Context {Toks : nat -> Type} `{Sized Toks Byte.byte}.
@@ -401,6 +625,28 @@ Section CompleteInputs.
     destruct (@Sized.value _ _ _ (Success.leftovers s));
       [reflexivity | discriminate].
   Qed.
+
+  Lemma run_option_observe
+      (p : forall n, Parser (SizedList Byte.byte) Byte.byte option A n)
+      bs a :
+    @run option _ _ _ _ Byte.byte tokBytes A bs p = Some a <->
+    observe_leb
+      (runParser (p (List.length bs)) (Nat.le_refl _) (mkSizedList bs)) =
+    Some (a, nil).
+  Proof.
+    rewrite run_option_correct, observe_leb_success.
+    split.
+    - intros [s [R [V S]]]. exists s. split; [exact R |].
+      split; [exact V |].
+      pose proof (@Sized.sized _ _ _ (Success.leftovers s)) as L.
+      rewrite S in L.
+      destruct (@Sized.value _ _ _ (Success.leftovers s));
+        [reflexivity | discriminate].
+    - intros [s [R [V S]]]. exists s. split; [exact R |].
+      split; [exact V |].
+      pose proof (@Sized.sized _ _ _ (Success.leftovers s)) as L.
+      rewrite S in L. simpl in L. symmetry. exact L.
+  Qed.
 End CompleteInputs.
 
 Lemma run_typeidx_guards bs x :
@@ -422,6 +668,76 @@ Proof.
   intros [s [R [V S]]].
   apply parse_heap_typeidx_guards in R.
   rewrite V, S, Nat.sub_0_r in R. exact R.
+Qed.
+
+Lemma run_encode_typeidx x :
+  (x <= 4294967295)%N ->
+  @run option _ _ _ _ Byte.byte tokBytes typeidx (binary_of_typeidx x)
+    (fun _ => parse_typeidx) = Some x.
+Proof.
+  intro Range. apply run_option_observe.
+  unfold binary_of_typeidx, binary_of_idx, binary_of_u32, binary_of_N,
+    parse_typeidx.
+  pose proof (parse_u32_encode x nil
+    (List.length (leb128.encode_unsigned x ++ nil)) (Nat.le_refl _) Range) as R.
+  now rewrite List.app_nil_r in R.
+Qed.
+
+Theorem run_typeidx_roundtrip bs x :
+  @run option _ _ _ _ Byte.byte tokBytes typeidx bs
+    (fun _ => parse_typeidx) = Some x ->
+  @run option _ _ _ _ Byte.byte tokBytes typeidx (binary_of_typeidx x)
+    (fun _ => parse_typeidx) = Some x.
+Proof.
+  intro R. apply run_typeidx_guards in R.
+  apply run_encode_typeidx. exact (proj1 R).
+Qed.
+
+Lemma run_encode_heap_typeidx x :
+  (x <= 4294967295)%N ->
+  run_parse_heap_typeidx (leb128.encode_signed (Z.of_N x)) = Some x.
+Proof.
+  intro Range. unfold run_parse_heap_typeidx. apply run_option_observe.
+  pose proof (parse_heap_typeidx_encode x nil
+    (List.length (leb128.encode_signed (Z.of_N x) ++ nil))
+    (Nat.le_refl _) Range) as R.
+  now rewrite List.app_nil_r in R.
+Qed.
+
+Theorem run_heap_typeidx_roundtrip bs x :
+  run_parse_heap_typeidx bs = Some x ->
+  run_parse_heap_typeidx (leb128.encode_signed (Z.of_N x)) = Some x.
+Proof.
+  intro R. apply run_heap_typeidx_guards in R.
+  apply run_encode_heap_typeidx. exact (proj1 R).
+Qed.
+
+Theorem run_i32_roundtrip x :
+  @run option _ _ _ _ Byte.byte tokBytes _ (binary_of_i32 x)
+    (fun _ => parse_s32) = Some x.
+Proof.
+  apply run_option_observe. unfold binary_of_i32.
+  assert (Range :
+    (-2147483648 <= Wasm_int.Int32.signed x <= 2147483647)%Z)
+    by apply Wasm_int.Int32.signed_range.
+  pose proof (parse_s32_encode (Wasm_int.Int32.signed x) nil
+    (List.length (leb128.encode_signed (Wasm_int.Int32.signed x) ++ nil))
+    (Nat.le_refl _) Range) as R.
+  rewrite List.app_nil_r, Wasm_int.Int32.repr_signed in R. exact R.
+Qed.
+
+Theorem run_i64_roundtrip x :
+  @run option _ _ _ _ Byte.byte tokBytes _ (binary_of_i64 x)
+    (fun _ => parse_s64) = Some x.
+Proof.
+  apply run_option_observe. unfold binary_of_i64.
+  assert (Range :
+    (-9223372036854775808 <= Wasm_int.Int64.signed x <= 9223372036854775807)%Z)
+    by apply Wasm_int.Int64.signed_range.
+  pose proof (parse_s64_encode (Wasm_int.Int64.signed x) nil
+    (List.length (leb128.encode_signed (Wasm_int.Int64.signed x) ++ nil))
+    (Nat.le_refl _) Range) as R.
+  rewrite List.app_nil_r, Wasm_int.Int64.repr_signed in R. exact R.
 Qed.
 
 Lemma run_vec_empty_count {A : Type}
