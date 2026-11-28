@@ -981,3 +981,94 @@ Proof.
   intros be Henc. rewrite <- (List.app_nil_r (binary_of_be be)).
   apply run_of_prefix. now apply parse_be_memory_prefix_round_trip.
 Qed.
+
+(** The top-level success connection is not restricted to canonical printer
+    bytes: padded LEB subopcodes of bulk memory instructions are admitted too. *)
+Inductive memory_bulk_code : N -> Prop :=
+| MBC_init : memory_bulk_code 8
+| MBC_drop : memory_bulk_code 9
+| MBC_copy : memory_bulk_code 10
+| MBC_fill : memory_bulk_code 11.
+
+Lemma run_table_bulk_reject : forall rest code tail bound
+  (Hbound: (S (List.length rest) <= bound)%nat),
+  decode_uint 32 5 rest = Some (code, tail) ->
+  memory_bulk_code code ->
+  @runParser (SizedList byte) byte option basic_instruction bound
+    parse_table_instruction (S (List.length rest)) Hbound
+    (mkSizedList (xfc :: rest)) = None.
+Proof.
+  intros rest code tail bound Hbound Hdecode Hcode.
+  pose proof (table_instruction_prefix_correct bound
+    (xfc :: rest) Hbound) as H.
+  assert (Hreject: decode_table_instruction (xfc :: rest) = None).
+  { unfold decode_table_instruction, decode_or, decode_sequence, decode_fc_prefix,
+      decode_assert_u32, decode_exact_byte.
+    cbn -[decode_uint]. rewrite Hdecode.
+    destruct Hcode; reflexivity. }
+  rewrite Hreject in H.
+  change (observe_prefix
+    (@runParser (SizedList byte) byte option basic_instruction bound
+      parse_table_instruction (S (List.length rest)) Hbound
+      (mkSizedList (xfc :: rest))) = None) in H.
+  destruct (@runParser (SizedList byte) byte option basic_instruction bound
+    parse_table_instruction (S (List.length rest)) Hbound
+    (mkSizedList (xfc :: rest))); [discriminate|reflexivity].
+Qed.
+
+Lemma parse_be_layer_bulk_memory_success : forall rest code tail bound value suffix
+  (ends: Box (byte_parser (list basic_instruction)) bound)
+  (branches: Box (byte_parser (list basic_instruction * list basic_instruction)) bound)
+  (Hbound: (List.length (xfc :: rest) <= bound)%nat),
+  decode_uint 32 5 rest = Some (code, tail) ->
+  memory_bulk_code code ->
+  observe_prefix (runParser
+    (parse_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (xfc :: rest))) = Some (value, suffix) ->
+  observe_prefix (runParser
+    (parse_be_layer ends branches:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (xfc :: rest))) = Some (value, suffix).
+Proof.
+  intros rest code tail bound value suffix ends branches Hbound Hdecode Hcode Hmem.
+  unfold parse_be_layer.
+  remember (parse_memory_instruction:
+    byte_parser basic_instruction bound) as pm eqn:Hpm in *.
+  clear Hpm.
+  remember (parse_numeric_instruction:
+    byte_parser basic_instruction bound) as pn eqn:Hpn.
+  clear Hpn.
+  cbn -[exact_byte parse_table_instruction parse_block_type parse_labelidx parse_vec
+    parse_funcidx parse_typeidx parse_tableidx parse_reference_type parse_u32_as_N].
+  repeat (rewrite run_exact_byte_mismatch by reflexivity;
+    cbn -[exact_byte parse_table_instruction parse_block_type parse_labelidx parse_vec
+      parse_funcidx parse_typeidx parse_tableidx parse_reference_type parse_u32_as_N]).
+  rewrite (run_table_bulk_reject rest code tail bound Hbound Hdecode Hcode).
+  cbn -[exact_byte].
+  lazymatch goal with
+  | |- observe_prefix (option_rect _ _ _ ?result _) = _ =>
+      change (observe_prefix result = Some (value, suffix)) in Hmem;
+      destruct result; [exact Hmem|discriminate Hmem]
+  end.
+Qed.
+
+Theorem parse_be_bulk_memory_success : forall rest code tail bound value suffix
+  (Hbound: (List.length (xfc :: rest) <= bound)%nat),
+  decode_uint 32 5 rest = Some (code, tail) ->
+  memory_bulk_code code ->
+  observe_prefix (runParser
+    (parse_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (xfc :: rest))) = Some (value, suffix) ->
+  observe_prefix (runParser
+    (parse_be bound:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (xfc :: rest))) = Some (value, suffix).
+Proof.
+  intros rest code tail bound value suffix Hbound Hdecode Hcode Hmem.
+  destruct bound as [|bound]; [simpl in Hbound; lia|].
+  unfold parse_be, language, Induction.Fix, Induction.extract.
+  cbn [Induction.FixBox Induction.call _be].
+  now eapply parse_be_layer_bulk_memory_success; eauto.
+Qed.
