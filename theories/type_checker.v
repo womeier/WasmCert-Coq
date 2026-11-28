@@ -103,6 +103,22 @@ Definition type_update_ref_is_null (ct : checker_type) : option checker_type :=
       else None
   end.
 
+Definition is_i31_t (t : value_type) : bool :=
+  match t with
+  | T_ref (Ref_type _ HT_i31) | T_bot => true
+  | _ => false
+  end.
+
+Definition type_update_i31_get (ct : checker_type) : option checker_type :=
+  match ct.(CT_type) with
+  | nil =>
+      if ct.(CT_unr) then Some <<[::T_num T_i32], true>> else None
+  | t :: ts' =>
+      if is_i31_t t then
+        Some <<(T_num T_i32 :: ts'), ct.(CT_unr)>>
+      else None
+  end.
+
 Definition type_update_drop (ct : checker_type) : option checker_type :=
   match ct.(CT_type) with
   | nil =>
@@ -112,6 +128,21 @@ Definition type_update_drop (ct : checker_type) : option checker_type :=
   | t :: ts' =>
       Some <<ts', ct.(CT_unr)>>
   end.
+
+Definition type_update_ref_as_non_null (ct : checker_type) : option checker_type :=
+  match ct.(CT_type) with
+  | nil =>
+      if ct.(CT_unr) then Some <<[::T_bot], true>> else None
+  | t :: ts => if is_ref_t t
+               then Some <<non_nullable_type t :: ts, ct.(CT_unr)>> else None
+  end.
+
+Definition type_update_br_on_null (ct : checker_type)
+    (labels : list value_type) : option checker_type :=
+  let t := head T_bot ct.(CT_type) in
+  if is_ref_t t then
+    type_update ct (t :: labels) (non_nullable_type t :: labels)
+  else None.
 
 (** With subtyping in Wasm 2.0, br_table now needs to find the common subtype to be consumed. **)
 
@@ -160,13 +191,36 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       match be with
       | BI_const_num v => type_update ts [::] [::T_num (typeof_num v)]
       | BI_const_vec v => type_update ts [::] [::T_vec (typeof_vec v)]
-      | BI_ref_null t => type_update ts [::]  [::T_ref t]
+      | BI_ref_null t => type_update ts [::]  [::T_ref (Ref_type true t)]
       | BI_ref_is_null => type_update_ref_is_null ts
+      | BI_ref_i31 =>
+          type_update ts [::T_num T_i32] [::T_ref (Ref_type false HT_i31)]
+      | BI_i31_get _ => type_update_i31_get ts
+      | BI_ref_as_non_null => type_update_ref_as_non_null ts
+      (* Parsing and dispatch are available, but accepting these instructions
+         requires closed indexed function reference typing. Never substitute
+         abstract funcref validation or a dynamic signature-checking trap. *)
+      | BI_call_ref _ | BI_return_call_ref _ => None
+      | BI_br_on_non_null x =>
+          match lookup_N C.(tc_labels) x with
+          | Some label_types =>
+              if (label_types != nil) && is_ref_t (head T_bot label_types)
+               then type_update ts
+                 (nullable_type (head T_bot label_types) :: behead label_types)
+                 (behead label_types)
+              else None
+           | None => None
+           end
+       | BI_br_on_null x =>
+           match lookup_N C.(tc_labels) x with
+           | Some labels => type_update_br_on_null ts labels
+           | None => None
+           end
       | BI_ref_func x =>
           match lookup_N C.(tc_funcs) x with
           | Some _ =>
               if x \in C.(tc_refs)
-              then type_update ts [::] [::T_ref T_funcref]
+               then type_update ts [::] [::T_ref (Ref_type false HT_func)]
               else None
           | _ => None
           end
@@ -273,10 +327,10 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       | BI_call_indirect x y =>
           match lookup_N C.(tc_tables) x with
           | Some tabt =>
-              if tabt.(tt_elem_type) == T_funcref then
-                match lookup_N (tc_types C) y with
+                if ref_heap tabt.(tt_elem_type) == HT_func then
+                match lookup_function_type (tc_types C) y with
                 | Some (Tf tn tm) =>
-                    type_update ts ((T_num T_i32 :: tn)) tm
+                    type_update ts (Addressing.address_value_type tabt.(tt_address_type) :: tn) tm
                 | None => None 
                 end
               else None
@@ -299,11 +353,11 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           | Some t2s =>
               match lookup_N C.(tc_tables) x with
               | Some tabt =>
-                  if tabt.(tt_elem_type) == T_funcref then
-                    match lookup_N (tc_types C) y with
+                    if ref_heap tabt.(tt_elem_type) == HT_func then
+                    match lookup_function_type (tc_types C) y with
                     | Some (Tf tn tm) =>
                         if (t2s == tm) then
-                          type_update_top ts ((T_num T_i32 :: tn)) nil
+                          type_update_top ts (Addressing.address_value_type tabt.(tt_address_type) :: tn) nil
                         else None
                     | None => None 
                     end
@@ -344,31 +398,34 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           match lookup_N (tc_tables C) x with
           | None => None 
           | Some tabt =>
-              type_update ts [::(T_num T_i32)] [::T_ref tabt.(tt_elem_type)]
+              type_update ts [::Addressing.address_value_type tabt.(tt_address_type)] [::T_ref tabt.(tt_elem_type)]
           end
       | BI_table_set x =>
           match lookup_N (tc_tables C) x with
           | None => None 
           | Some tabt =>
-              type_update ts [::(T_ref tabt.(tt_elem_type)); (T_num T_i32)] nil
+              type_update ts [::T_ref tabt.(tt_elem_type); Addressing.address_value_type tabt.(tt_address_type)] nil
           end
       | BI_table_size x =>
           match lookup_N (tc_tables C) x with
           | None => None 
           | Some tabt =>
-              type_update ts nil [::T_num T_i32]
+              type_update ts nil [::Addressing.address_value_type tabt.(tt_address_type)]
           end
       | BI_table_grow x =>
           match lookup_N (tc_tables C) x with
           | None => None 
           | Some tabt =>
-              type_update ts [::T_num T_i32; (T_ref tabt.(tt_elem_type))] [::T_num T_i32]
+              type_update ts
+                [::Addressing.address_value_type tabt.(tt_address_type); T_ref tabt.(tt_elem_type)]
+                [::Addressing.address_value_type tabt.(tt_address_type)]
           end
       | BI_table_fill x =>
           match lookup_N (tc_tables C) x with
           | None => None 
           | Some tabt =>
-              type_update ts [::(T_num T_i32); (T_ref tabt.(tt_elem_type)); (T_num T_i32)] nil
+              type_update ts [::Addressing.address_value_type tabt.(tt_address_type);
+                T_ref tabt.(tt_elem_type); Addressing.address_value_type tabt.(tt_address_type)] nil
           end
       | BI_table_copy x y =>
           match lookup_N (tc_tables C) x with
@@ -377,7 +434,11 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
               match lookup_N (tc_tables C) y with
               | Some tabt2 =>
                   if tabt1.(tt_elem_type) == tabt2.(tt_elem_type)
-                  then type_update ts [::(T_num T_i32); (T_num T_i32); (T_num T_i32)] nil
+                  then type_update ts
+                    [::Addressing.address_value_type
+                         (Addressing.copy_address_type tabt1.(tt_address_type) tabt2.(tt_address_type));
+                       Addressing.address_value_type tabt2.(tt_address_type);
+                       Addressing.address_value_type tabt1.(tt_address_type)] nil
                   else None
               | None => None
               end
@@ -389,7 +450,8 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
               match lookup_N (tc_elems C) y with
               | Some t =>
                   if tabt.(tt_elem_type) == t
-                  then type_update ts [::(T_num T_i32); (T_num T_i32); (T_num T_i32)] nil
+                  then type_update ts [::T_num T_i32; T_num T_i32;
+                    Addressing.address_value_type tabt.(tt_address_type)] nil
                   else None
               | None => None
               end
@@ -400,83 +462,96 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           | Some tabt => Some ts
           end
       | BI_load t tp_sx marg =>
-          match lookup_N C.(tc_mems) 0%N with
-          | Some _ =>
-              if load_store_t_bounds marg.(memarg_align) (option_projl tp_sx) t
-              then type_update ts [::(T_num T_i32)] [::T_num t]
+          match lookup_N C.(tc_mems) marg.(memarg_memory) with
+          | Some mt =>
+              if load_store_t_bounds marg.(memarg_align) (option_projl tp_sx) t &&
+                 Addressing.offset_valid mt.(mt_address_type) marg.(memarg_offset)
+              then type_update ts [::Addressing.address_value_type mt.(mt_address_type)] [::T_num t]
               else None
           | None => None
           end
       | BI_load_vec lvarg marg =>
-          match lookup_N C.(tc_mems) 0%N with
-          | Some _ =>
-              if load_vec_bounds lvarg marg
-              then type_update ts [::(T_num T_i32)] [::T_vec T_v128]
+          match lookup_N C.(tc_mems) marg.(memarg_memory) with
+          | Some mt =>
+              if load_vec_bounds lvarg marg &&
+                 Addressing.offset_valid mt.(mt_address_type) marg.(memarg_offset)
+              then type_update ts [::Addressing.address_value_type mt.(mt_address_type)] [::T_vec T_v128]
               else None
           | None => None
           end
       | BI_load_vec_lane width marg x =>
-          match lookup_N C.(tc_mems) 0%N with
-          | Some _ =>
-              if load_store_vec_lane_bounds width marg x
-              then type_update ts [:: T_vec T_v128; T_num T_i32] [::T_vec T_v128]
+          match lookup_N C.(tc_mems) marg.(memarg_memory) with
+          | Some mt =>
+              if load_store_vec_lane_bounds width marg x &&
+                 Addressing.offset_valid mt.(mt_address_type) marg.(memarg_offset)
+              then type_update ts [::T_vec T_v128; Addressing.address_value_type mt.(mt_address_type)] [::T_vec T_v128]
               else None
           | None => None
           end
       | BI_store t tp marg =>
-          match lookup_N C.(tc_mems) 0%N with
-          | Some _ =>
-              if load_store_t_bounds marg.(memarg_align) tp t
-              then type_update ts [::T_num t; T_num T_i32] [::]
+          match lookup_N C.(tc_mems) marg.(memarg_memory) with
+          | Some mt =>
+              if load_store_t_bounds marg.(memarg_align) tp t &&
+                 Addressing.offset_valid mt.(mt_address_type) marg.(memarg_offset)
+              then type_update ts [::T_num t; Addressing.address_value_type mt.(mt_address_type)] [::]
               else None
           | None => None
           end
       | BI_store_vec marg =>
-          match lookup_N C.(tc_mems) 0%N with
-          | Some _ =>
-              if store_vec_bounds marg
-              then type_update ts [::T_vec T_v128; T_num T_i32] [::]
+          match lookup_N C.(tc_mems) marg.(memarg_memory) with
+          | Some mt =>
+              if store_vec_bounds marg &&
+                 Addressing.offset_valid mt.(mt_address_type) marg.(memarg_offset)
+              then type_update ts [::T_vec T_v128; Addressing.address_value_type mt.(mt_address_type)] [::]
               else None
           | None => None
           end
       | BI_store_vec_lane width marg x =>
-          match lookup_N C.(tc_mems) 0%N with
-          | Some _ =>
-              if load_store_vec_lane_bounds width marg x
-              then type_update ts [::T_vec T_v128; T_num T_i32] [::]
+          match lookup_N C.(tc_mems) marg.(memarg_memory) with
+          | Some mt =>
+              if load_store_vec_lane_bounds width marg x &&
+                 Addressing.offset_valid mt.(mt_address_type) marg.(memarg_offset)
+              then type_update ts [::T_vec T_v128; Addressing.address_value_type mt.(mt_address_type)] [::]
               else None
           | None => None
           end
-      | BI_memory_size =>
-          match lookup_N C.(tc_mems) 0%N with
-          | Some _ =>
-              type_update ts [::] [::(T_num T_i32)]
+      | BI_memory_size x =>
+          match lookup_N C.(tc_mems) x with
+          | Some mt =>
+              type_update ts [::] [::Addressing.address_value_type mt.(mt_address_type)]
           | None => None
           end
-      | BI_memory_grow =>
-          match lookup_N C.(tc_mems) 0%N with
-          | Some _ =>
-              type_update ts [::(T_num T_i32)] [::(T_num T_i32)]
+      | BI_memory_grow x =>
+          match lookup_N C.(tc_mems) x with
+          | Some mt =>
+              type_update ts [::Addressing.address_value_type mt.(mt_address_type)]
+                [::Addressing.address_value_type mt.(mt_address_type)]
           | None => None
           end
-      | BI_memory_fill =>
-          match lookup_N C.(tc_mems) 0%N with
-          | Some _ =>
-              type_update ts [::(T_num T_i32); (T_num T_i32); (T_num T_i32)] nil
+      | BI_memory_fill x =>
+          match lookup_N C.(tc_mems) x with
+          | Some mt =>
+              type_update ts [::Addressing.address_value_type mt.(mt_address_type);
+                T_num T_i32; Addressing.address_value_type mt.(mt_address_type)] nil
           | None => None
           end
-      | BI_memory_copy =>
-          match lookup_N C.(tc_mems) 0%N with
-          | Some _ =>
-              type_update ts [::(T_num T_i32); (T_num T_i32); (T_num T_i32)] nil
-          | None => None
+      | BI_memory_copy x y =>
+          match lookup_N C.(tc_mems) x, lookup_N C.(tc_mems) y with
+          | Some mt_dst, Some mt_src =>
+              type_update ts
+                [::Addressing.address_value_type
+                     (Addressing.copy_address_type mt_dst.(mt_address_type) mt_src.(mt_address_type));
+                   Addressing.address_value_type mt_src.(mt_address_type);
+                   Addressing.address_value_type mt_dst.(mt_address_type)] nil
+          | _, _ => None
           end
-      | BI_memory_init x =>
-          match lookup_N C.(tc_mems) 0%N with
-          | Some _ =>
-              match lookup_N C.(tc_datas) x with
+      | BI_memory_init x y =>
+          match lookup_N C.(tc_mems) x with
+          | Some mt =>
+              match lookup_N C.(tc_datas) y with
               | Some _ =>
-                  type_update ts [::(T_num T_i32); (T_num T_i32); (T_num T_i32)] nil
+                  type_update ts [::T_num T_i32; T_num T_i32;
+                    Addressing.address_value_type mt.(mt_address_type)] nil
               | None => None
               end
           | None => None
@@ -509,9 +584,17 @@ Definition rev_tf (tf: function_type) :=
   | Tf tn tm => Tf (rev tn) (rev tm)
   end.
 
+Definition rev_source_subtype (t : source_subtype) : source_subtype :=
+  Sub_type t.(subtype_final) t.(subtype_supers)
+    (match t.(subtype_composite) with
+     | Comp_func f => Comp_func (rev_tf f)
+     | Comp_struct fields => Comp_struct fields
+     | Comp_array field => Comp_array field
+     end).
+
 Definition context_reverse (C: t_context): t_context :=
   {|
-    tc_types := map rev_tf C.(tc_types);
+    tc_types := map rev_source_subtype C.(tc_types);
     tc_funcs := map rev_tf C.(tc_funcs);
     tc_tables := C.(tc_tables);
     tc_mems := C.(tc_mems);

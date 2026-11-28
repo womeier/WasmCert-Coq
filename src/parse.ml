@@ -71,3 +71,16 @@ let parse_args args =
 
 let parse_wast scriptstr = 
   Wasm.Parse.Script.parse_string scriptstr
+
+let parse_wast_dispatch scriptstr =
+  let source, directives = Wast_binary_script.prepare scriptstr in
+  let commands = Wasm.Parse.Script.parse_string source in
+  if List.for_all ((=) Wast_binary_script.Ordinary) directives then
+    (* The legacy parser also accepts inline module fields, which it groups
+       into one command. Preserve that pre-existing behaviour unchanged. *)
+    List.map (fun command -> Wast_binary_script.Ordinary, command) commands
+  else begin
+    if List.length commands <> List.length directives then
+      failwith "Binary script command/dispatch count mismatch";
+    List.combine directives commands
+  end

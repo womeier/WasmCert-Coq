@@ -2,6 +2,7 @@
 (* (C) M. Bodin - see LICENSE.txt *)
 
 From Stdlib Require Import Lia Wf_nat ZArith.
+From Wasm Require Import table_storage.
 From mathcomp Require Import ssreflect ssrnat ssrbool seq eqtype.
 From compcert Require Integers.
 From HB Require Import structures.
@@ -120,7 +121,7 @@ Ltac rewrite_by E :=
     | rewrite {} R ].
 
 Ltac remove_bools_options :=
-  repeat lazymatch goal with
+  repeat (table_storage_view; lazymatch goal with
   | H: is_true (_ && _ ) |- _ =>
     move/andP in H; destruct H
   | H: (_ && _) = true |- _ =>
@@ -173,8 +174,8 @@ Ltac remove_bools_options :=
     |- _ => 
       let Hcons := fresh "Hcons" in
       let cons_l := fresh "cons_l" in
-      destruct l as [| ? cons_l] eqn:Hcons; last by []
-  end.
+       destruct l as [| ? cons_l] eqn:Hcons; last by []
+  end).
 
 (** Apply, but turning unification errors into equality obligations **)
 Ltac uapply_aux T G :=

@@ -1,5 +1,157 @@
 (mdx
   (deps 
      (package coq-wasm)
-     (glob_files *.wasm))
+      (glob_files *.wasm))
 )
+
+(test
+  (name addressing_extracted)
+  (modules addressing_extracted)
+   (libraries wasmcert_extracted parray zarith))
+
+(test
+ (name wast_binary_script_test)
+ (modules wast_binary_script_test)
+ (libraries wasmcert_extracted))
+
+(rule
+ (target binary_script_definitions.wast)
+ (deps binary_script_definitions.py)
+ (action
+  (with-stdout-to %{target}
+   (run python3 %{dep:binary_script_definitions.py}))))
+
+(rule
+ (alias runtest)
+ (deps binary_script_definitions.wast ../run_wast.sh)
+ (action
+  (setenv EXE %{exe:../src/wasm_coq_interpreter.exe}
+   (setenv JOBS 1
+    (run bash %{dep:../run_wast.sh} . binary_script_definitions)))))
+
+(rule
+ (alias runtest)
+ (deps binary_script_definitions.py binary_script_definitions_test.sh ../run_wast.sh)
+ (action
+  (run bash %{dep:binary_script_definitions_test.sh}
+   %{dep:binary_script_definitions.py} %{dep:../run_wast.sh}
+   %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (target table64_binary.wast)
+ (deps table64_binary.py)
+ (action
+  (with-stdout-to %{target}
+   (run python3 %{dep:table64_binary.py}))))
+
+(rule
+ (alias runtest)
+ (deps table64_binary.wast ../run_wast.sh)
+ (action
+  (setenv EXE %{exe:../src/wasm_coq_interpreter.exe}
+   (setenv JOBS 1
+    (run bash %{dep:../run_wast.sh} . table64_binary)))))
+
+(rule
+ (alias runtest)
+ (deps wast_to_binary.py wast_to_binary_test.py)
+ (action (run python3 %{dep:wast_to_binary_test.py})))
+
+(rule
+ (target memory64_binary.wast)
+ (deps memory64_binary.py)
+ (action
+  (with-stdout-to %{target}
+   (run python3 %{dep:memory64_binary.py}))))
+
+(rule
+ (alias runtest)
+ (deps memory64_binary.wast ../run_wast.sh)
+ (action
+  (setenv EXE %{exe:../src/wasm_coq_interpreter.exe}
+   (setenv JOBS 1
+    (run bash %{dep:../run_wast.sh} . memory64_binary)))))
+
+(rule
+ (target memory_capacity_binary.wast)
+ (deps memory_capacity_binary.py)
+ (action
+  (with-stdout-to %{target}
+   (run python3 %{dep:memory_capacity_binary.py}))))
+
+(rule
+ (alias runtest)
+ (deps memory_capacity_binary.wast ../run_wast.sh)
+ (action
+  (setenv EXE %{exe:../src/wasm_coq_interpreter.exe}
+   (setenv JOBS 1
+    (run bash %{dep:../run_wast.sh} . memory_capacity_binary)))))
+
+(rule
+ (alias runtest)
+ (deps run_wast_test.sh ../run_wast.sh)
+ (action (run bash %{dep:run_wast_test.sh} %{dep:../run_wast.sh})))
+
+(rule
+ (target multi_memory_binary.wast)
+ (deps multi_memory_binary.py)
+ (action
+  (with-stdout-to %{target}
+   (run python3 %{dep:multi_memory_binary.py}))))
+
+(rule
+ (alias runtest)
+ (deps multi_memory_binary.wast ../run_wast.sh)
+ (action
+  (setenv EXE %{exe:../src/wasm_coq_interpreter.exe}
+   (setenv JOBS 1
+    (run bash %{dep:../run_wast.sh} . multi_memory_binary)))))
+
+(rule
+ (alias runtest)
+ (deps wast_assertion_phases_test.sh ../run_wast.sh)
+ (action
+  (run bash %{dep:wast_assertion_phases_test.sh} %{dep:../run_wast.sh}
+   %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps run_wast_tests.sh ../run_wast.sh)
+ (action (run bash %{dep:run_wast_tests.sh} %{dep:../run_wast.sh})))
+
+(rule
+ (alias runtest)
+ (deps function_references_binary.py)
+ (action
+  (run python3 %{dep:function_references_binary.py}
+     %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps source_scope_binary.py)
+ (action
+  (run python3 %{dep:source_scope_binary.py}
+    %{exe:../src/wasm_coq_interpreter.exe})))
+
+; Explicit failing bridge gate, NOT counted as a green default regression.
+; The unchanged original official suite continues to assert these semantics.
+(rule
+ (alias closed-reference-handoff)
+ (deps table_reference_bridge.py)
+ (action
+  (run python3 %{dep:table_reference_bridge.py}
+    %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps gc_i31_binary.py)
+ (action
+  (run python3 %{dep:gc_i31_binary.py}
+   %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps gc_declarations_binary.py)
+ (action
+  (run python3 %{dep:gc_declarations_binary.py}
+   %{exe:../src/wasm_coq_interpreter.exe})))

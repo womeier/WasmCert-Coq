@@ -3,7 +3,8 @@
     and https://webassembly.github.io/spec/core/exec/index.html **)
 (* (C) J. Pichon, M. Bodin - see LICENSE.txt *)
 
-From Wasm Require Export common numerics bytes memory simd.
+From Wasm Require Export common numerics bytes memory simd address_types table_storage.
+From Wasm Require Export gc_storage_types.
 From compcert Require common.Memdata.
 From Stdlib Require Import ZArith.
 
@@ -28,6 +29,7 @@ Label indices reference structured control instructions inside an instruction se
 [https://www.w3.org/TR/wasm-core-2/syntax/modules.html#indices]
 *)
 Definition u32 : Set := N.
+Definition u64 : Set := N.
 Definition u8: Set := N.
 
 (* 2^32 *)
@@ -36,6 +38,13 @@ Definition u32_bound : N := 4294967296%N.
 Definition u8_bound : N := 256%N.
 
 Definition typeidx : Set := u32.
+
+(** Runtime defined-type identities are canonical registry entries, never
+    module-local HT_type indices. Group members retain their binder position. *)
+Record defined_type : Set := Def_type {
+  defined_group : N;
+  defined_member : N;
+}.
 Definition funcidx : Set := u32.
 Definition tableidx : Set := u32.
 Definition memidx : Set := u32.
@@ -132,10 +141,21 @@ Reference types are opaque, meaning that neither their size nor their bit patter
 
 [https://www.w3.org/TR/wasm-core-2/syntax/types.html#reference-types]
 *)
-Inductive reference_type : Set := 
-| T_funcref
-| T_externref
-.
+(* Shared source heap syntax. HT_type denotes a module-local type index, NOT a
+   runtime type identity. Closing recursive declared types is a separate step
+   at the module/store boundary. *)
+Inductive heap_type : Set :=
+| HT_func | HT_extern
+| HT_any | HT_eq | HT_i31 | HT_struct | HT_array
+| HT_none | HT_nofunc | HT_noextern
+| HT_exn | HT_noexn
+| HT_type : typeidx -> heap_type.
+
+Record reference_type : Set := Ref_type {
+  ref_nullable : bool;
+  ref_heap : heap_type
+}.
+
 
 (** std-doc:
 
@@ -150,6 +170,18 @@ Inductive value_type: Set := (* t *)
 | T_ref: reference_type -> value_type
 | T_bot: value_type
 .
+
+Definition non_nullable_type (t : value_type) : value_type :=
+  match t with
+  | T_ref r => T_ref (Ref_type false (ref_heap r))
+  | _ => t
+  end.
+
+Definition nullable_type (t : value_type) : value_type :=
+  match t with
+  | T_ref r => T_ref (Ref_type true (ref_heap r))
+  | _ => t
+  end.
 
 (** std-doc:
 Result types classify the result of executing instructions or functions, which is a sequence of values, written with brackets.
@@ -170,6 +202,59 @@ and outputs of instructions.
 Inductive function_type := (* tf *)
 | Tf : result_type -> result_type -> function_type
 .
+
+Inductive function_type_gen (V : Type) : Type :=
+| Closed_ft : list V -> list V -> function_type_gen V.
+
+Arguments Closed_ft {V} _ _.
+
+(** Source and canonical declaration phases share the same composite,
+    field/storage and function shapes. Only their reference leaves differ. *)
+Inductive composite_type (V F : Type) : Type :=
+| Comp_func : F -> composite_type V F
+| Comp_struct : list (field_type V) -> composite_type V F
+| Comp_array : field_type V -> composite_type V F.
+
+Arguments Comp_func {V F} _.
+Arguments Comp_struct {V F} _.
+Arguments Comp_array {V F} _.
+
+Record subtype (V I F : Type) : Type := Sub_type {
+  subtype_final : bool;
+  subtype_supers : list I;
+  subtype_composite : composite_type V F;
+}.
+
+Arguments Sub_type {V I F} _ _ _.
+Arguments subtype_final {V I F} _.
+Arguments subtype_supers {V I F} _.
+Arguments subtype_composite {V I F} _.
+
+Definition source_subtype := subtype value_type typeidx function_type.
+Definition recursive_type := list source_subtype.
+
+Inductive closed_type_use : Set :=
+| CT_rec : N -> closed_type_use
+| CT_def : defined_type -> closed_type_use.
+
+Inductive closed_heap_type : Set :=
+| CH_abstract : heap_type -> closed_heap_type
+| CH_defined : closed_type_use -> closed_heap_type.
+
+Inductive closed_value_type : Set :=
+| CV_num : number_type -> closed_value_type
+| CV_vec : vector_type -> closed_value_type
+| CV_ref : bool -> closed_heap_type -> closed_value_type.
+
+Definition closed_function_type := function_type_gen closed_value_type.
+Definition closed_subtype :=
+  subtype closed_value_type closed_type_use closed_function_type.
+Definition canonical_group := list closed_subtype.
+Definition canonical_registry := list canonical_group.
+
+(* Context entries retain composite kind and the source index space.
+   An inst_types entry is never a globally allocated runtime identity. *)
+Definition type_context := list source_subtype.
 
 (* This is a definition for future extensions, where instruction types are no longer
 the same as function types. *)
@@ -204,7 +289,15 @@ The limits constrain the minimum and optionally the maximum size of a memory. Th
 
 [https://www.w3.org/TR/wasm-core-2/syntax/types.html#memory-types]
 *)
-Definition memory_type := limits.
+Record memory_type : Set := {
+  mt_limits : limits;
+  mt_address_type : address_type;
+}.
+
+Coercion mt_limits : memory_type >-> limits.
+
+Definition memory_type32 (lim: limits) : memory_type :=
+  {| mt_limits := lim; mt_address_type := AT_i32 |}.
 
 
 (** std-doc:
@@ -218,6 +311,7 @@ optionally maximum size. The limits are given in numbers of entries.
 Record table_type : Set := {
   tt_limits : limits;
   tt_elem_type : reference_type;
+  tt_address_type : address_type;
 }.
 
 
@@ -225,10 +319,6 @@ Record table_type : Set := {
 
 [https://www.w3.org/TR/wasm-core-2/syntax/types.html#global-types]
 *)
-Inductive mutability : Set := (* mut *)
-  | MUT_const
-  | MUT_var
-  .
 
 
 (** std-doc:
@@ -267,26 +357,76 @@ Inductive block_type : Set :=
 Most types are universally valid. However, restrictions apply to limits, which must be checked during validation. Moreover, block types are converted to plain function types for ease of processing.
 **)
 
+(* Whether a signature is independent of any module's type-name map.
+   Retained for the legacy context-free import profile only; this predicate
+   is not a runtime identity and is not declaration well-formedness. *)
+Definition heap_type_closed (h : heap_type) : bool :=
+  match h with HT_type _ => false | _ => true end.
+
+Definition value_type_closed (t : value_type) : bool :=
+  match t with T_ref r => heap_type_closed (ref_heap r) | _ => true end.
+
+Definition function_type_closed (ft : function_type) : bool :=
+  let '(Tf args results) := ft in
+  List.forallb value_type_closed args && List.forallb value_type_closed results.
+
 Definition functype_valid (ft: function_type) : bool :=
+  (* Compatibility shape predicate only.  Source scope and declared-type
+     validity are checked by module_declarations_validb, while runtime
+     signatures are checked against the instance's canonical type names.
+     The old context-free flat-signature certificate cannot certify HT_type. *)
   true.
+
+Definition source_subtype_valid (t : source_subtype) : bool :=
+  match subtype_composite t with
+  | Comp_func f => functype_valid f
+  | Comp_struct _ | Comp_array _ => true
+  end.
+
+(** Like the pre-existing functype_valid predicate, this is only the
+    compatibility context-shape check. Actual source declaration validity is
+    checked by canonical closing, registry validation and identity agreement;
+    it must never be inferred from this universally true legacy predicate. *)
+Lemma source_subtype_valid_true t : source_subtype_valid t = true.
+Proof. destruct t as [final supers composite]; destruct composite; reflexivity. Qed.
 
 Definition table_limit_bound : N := (N.sub u32_bound 1%N).
 
+Definition table_limit_bound_for (a: address_type) : N :=
+  match a with
+  | AT_i32 => table_limit_bound
+  | AT_i64 => 18446744073709551615%N
+  end.
+
 Definition tabletype_valid (tt: table_type) : bool :=
-  limit_valid_range tt.(tt_limits) table_limit_bound.
+  limit_valid_range tt.(tt_limits) (table_limit_bound_for tt.(tt_address_type)).
 
 Definition mem_limit_bound : N := 65536%N.
 
+Definition memory_limit_bound_for (a: address_type) : N :=
+  match a with
+  | AT_i32 => mem_limit_bound
+  | AT_i64 => 281474976710656%N
+  end.
+
 Definition memtype_valid (mt: memory_type) : bool :=
-  limit_valid_range mt mem_limit_bound.
+  limit_valid_range mt.(mt_limits) (memory_limit_bound_for mt.(mt_address_type)).
 
 Definition globaltype_valid (gt: global_type) : bool :=
   true.
 
 End Types.
 
+Arguments Closed_ft {V} _ _.
+Arguments Comp_func {V F} _.
+Arguments Comp_struct {V F} _.
+Arguments Comp_array {V F} _.
 
-Definition static_offset := (* off *) u32. 
+Notation T_funcref := (Ref_type true HT_func).
+Notation T_externref := (Ref_type true HT_extern).
+
+
+Definition static_offset := (* off *) u64.
 
 Definition alignment_exponent := (* a *) u32.
 
@@ -476,8 +616,9 @@ Inductive load_vec_arg :=
   .
 
 Record memarg : Set :=
-  { memarg_offset : u32;
-    memarg_align: u32
+  { memarg_offset : u64;
+    memarg_align: u32;
+    memarg_memory: memidx
   }.
   
 Inductive basic_instruction : Type := (* be *)
@@ -516,7 +657,7 @@ Replace lanes: consume a v128 operand and a numeric value for a given lane, and 
 (** std-doc:
 Instructions in this group are concerned with accessing references.
 **)
-  | BI_ref_null : reference_type -> basic_instruction  
+  | BI_ref_null : heap_type -> basic_instruction
   | BI_ref_is_null
   | BI_ref_func : funcidx -> basic_instruction
 (** std-doc:
@@ -554,11 +695,11 @@ Instructions in this group are concerned with linear memory.
   (* v128.store *)
   | BI_store_vec : memarg -> basic_instruction
   | BI_store_vec_lane : vwidth -> memarg -> laneidx -> basic_instruction
-  | BI_memory_size
-  | BI_memory_grow
-  | BI_memory_fill
-  | BI_memory_copy
-  | BI_memory_init: dataidx -> basic_instruction
+  | BI_memory_size : memidx -> basic_instruction
+  | BI_memory_grow : memidx -> basic_instruction
+  | BI_memory_fill : memidx -> basic_instruction
+  | BI_memory_copy : memidx -> memidx -> basic_instruction
+  | BI_memory_init: memidx -> dataidx -> basic_instruction
   | BI_data_drop: dataidx -> basic_instruction
 (** std-doc:
 Instructions in this group affect the flow of control.
@@ -576,6 +717,13 @@ Instructions in this group affect the flow of control.
   | BI_call_indirect : tableidx -> typeidx -> basic_instruction
   | BI_return_call : funcidx -> basic_instruction                                          
   | BI_return_call_indirect : tableidx -> typeidx -> basic_instruction                                          
+  | BI_ref_as_non_null
+  | BI_call_ref : typeidx -> basic_instruction
+  | BI_return_call_ref : typeidx -> basic_instruction
+  | BI_br_on_non_null : labelidx -> basic_instruction
+  | BI_br_on_null : labelidx -> basic_instruction
+  | BI_ref_i31
+  | BI_i31_get : sx -> basic_instruction
   .
 
 
@@ -598,9 +746,10 @@ const instructions and ref.null producing them.
 References other than null are represented with additional administrative instructions. They either are function references, pointing to a specific function address, or external references pointing to an uninterpreted form of extern address that can be defined by the embedder to represent its own objects.
 *)
 Inductive value_ref : Set :=
-| VAL_ref_null: reference_type -> value_ref
+| VAL_ref_null: heap_type -> value_ref
 | VAL_ref_func: funcaddr -> value_ref
 | VAL_ref_extern: externaddr -> value_ref
+| VAL_ref_i31: i31bits -> value_ref
 .
 
 Inductive value : Type :=
@@ -642,9 +791,16 @@ Record module_func : Type := {
   modfunc_body : expr;
 }.
 
-Record module_table : Set := {
+Record module_table : Type := {
   modtab_type : table_type;
+  modtab_init : option expr;
 }.
+
+Definition module_table_init (mt : module_table) : expr :=
+  match modtab_init mt with
+  | Some es => es
+  | None => cons (BI_ref_null (ref_heap (tt_elem_type (modtab_type mt)))) nil
+  end.
 
 Record module_mem : Set := {
   modmem_type : memory_type;
@@ -738,7 +894,7 @@ WebAssembly programs are organized into modules, which are the unit of deploymen
 [https://webassembly.github.io/spec/core/syntax/modules.html]
 *)
 Record module : Type := {
-  mod_types : list function_type;
+  mod_types : list recursive_type;
   mod_funcs : list module_func;
   mod_tables : list module_table;
   mod_mems : list module_mem;
@@ -793,7 +949,7 @@ as validation of an instruction sequence proceeds.
 Definition ok: Set := unit.
 
 Record t_context : Set := {
-  tc_types : list function_type;
+  tc_types : type_context;
   tc_funcs : list function_type;
   tc_tables : list table_type;
   tc_mems : list memory_type;
@@ -832,7 +988,7 @@ never exceeds the maximum size of tabletype, if present.
 *)
 Record tableinst : Set := {
   tableinst_type : table_type;
-  tableinst_elem : list value_ref;
+  tableinst_elem : TableStorage.entries value_ref;
 }.
 
 
@@ -943,7 +1099,7 @@ instance have different names.
 [https://www.w3.org/TR/wasm-core-2/exec/runtime.html#module-instances]
 *)
 Record moduleinst : Type := (* inst *) {
-  inst_types : list function_type;
+  inst_types : type_context;
   inst_funcs : list funcaddr;
   inst_tables : list tableaddr;
   inst_mems : list memaddr;
@@ -951,9 +1107,11 @@ Record moduleinst : Type := (* inst *) {
   inst_elems : list elemaddr;
   inst_datas : list dataaddr;
   inst_exports: list exportinst;  
+  (* Source type index -> canonical closed identity in the shared store. *)
+  inst_defined_types : list defined_type;
   }.
 
-Definition empty_moduleinst := Build_moduleinst nil nil nil nil nil nil nil nil.
+Definition empty_moduleinst := Build_moduleinst nil nil nil nil nil nil nil nil nil.
 
 
 (** We assume a family of host functions. **)
@@ -1003,6 +1161,8 @@ Record store_record : Type := (* s *) {
   s_globals : list globalinst;
   s_elems: list eleminst;
   s_datas: list datainst;
+  (* Append-only canonical groups shared by instantiated modules. *)
+  s_types : canonical_registry;
 }.
 
                             
@@ -1045,6 +1205,7 @@ Inductive administrative_instruction : Type := (* e *)
 | AI_return_invoke : funcaddr -> administrative_instruction
 | AI_label : nat -> list administrative_instruction -> list administrative_instruction -> administrative_instruction
 | AI_frame : nat -> frame -> list administrative_instruction -> administrative_instruction
+| AI_ref_i31 : i31bits -> administrative_instruction
 .
 
 (** std-doc:

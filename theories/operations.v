@@ -3,7 +3,8 @@
 
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From compcert Require Floats.
-From Wasm Require Export common memory datatypes_properties list_extra simd_execute.
+From Wasm Require Export common memory datatypes_properties list_extra simd_execute addressing.
+From Wasm Require Import gc_type_context.
 From Stdlib Require Import ZArith.
 
 (* see common.v *)
@@ -15,12 +16,120 @@ Unset Printing Implicit Defensive.
 
 Definition v128_size: N := 16%N.
 
+Definition memarg_flags (marg: memarg) : N :=
+  if N.eqb marg.(memarg_memory) 0 then marg.(memarg_align)
+  else N.add marg.(memarg_align) 64.
+
+(* Bit 6 requests an explicit memory index; higher flag bits are reserved. *)
+Definition decode_memarg_flags (flags: N) : option (N * bool) :=
+  if N.ltb flags 64 then Some (flags, false)
+  else if N.ltb flags 128 then Some (N.sub flags 64, true)
+  else None.
+
+(* Shared by binary parsing and printing: bulk data instructions require a
+   data-count section, including when nested inside structured instructions. *)
+Fixpoint be_datacount_required (be: basic_instruction) :=
+  let bes_required bes :=
+    List.fold_left orb (List.map be_datacount_required bes) false in
+  match be with
+  | BI_memory_init _ _ | BI_data_drop _ => true
+  | BI_block _ bes | BI_loop _ bes => bes_required bes
+  | BI_if _ bes1 bes2 => orb (bes_required bes1) (bes_required bes2)
+  | _ => false
+  end.
+
+Fixpoint bes_datacount_required (bes: expr) :=
+  match bes with
+  | nil => false
+  | cons be bes' =>
+      if be_datacount_required be then true
+      else bes_datacount_required bes'
+  end.
+
 Section Operations.
   Context `{memory: BlockUpdateMemory} `{hfc: host_function_class}.
 
-(* Placeholder for better array lookup in the future. *)
+(* Traverse only the list, even when the binary index is much larger than a
+   host integer. No extraction override or unary index conversion is needed. *)
+Fixpoint lookup_N_bounded {T: Type} (l: list T) (n: N) : option T :=
+  match l with
+  | nil => None
+  | cons x xs =>
+      if N.eqb n 0 then Some x else lookup_N_bounded xs (N.pred n)
+  end.
+
 Definition lookup_N {T: Type} (l: list T) (n: N) : option T :=
-  List.nth_error l (N.to_nat n).
+  lookup_N_bounded l n.
+
+Lemma lookup_N_spec {T: Type} (l: list T) (n: N) :
+  lookup_N l n = List.nth_error l (N.to_nat n).
+Proof.
+  unfold lookup_N.
+  revert n; induction l as [|x xs IH]; intros n.
+  - destruct (N.to_nat n); reflexivity.
+  - simpl lookup_N_bounded.
+    destruct (N.eqb_spec n 0) as [->|Hnonzero]; first reflexivity.
+    rewrite IH Nnat.N2Nat.inj_pred.
+    destruct (N.to_nat n) eqn:Hnat.
+    + change (N.to_nat n = N.to_nat 0) in Hnat.
+      apply Nnat.N2Nat.inj in Hnat. contradiction.
+    + reflexivity.
+Qed.
+
+Definition lookup_function_type (types : type_context) (index : typeidx) :
+    option function_type :=
+  match lookup_N types index with
+  | Some source =>
+      match subtype_composite source with
+      | Comp_func f => Some f
+      | _ => None
+      end
+  | None => None
+  end.
+
+(** Runtime source-index resolution goes through the module's closed names,
+    never through a source HT_type reinterpreted as a canonical address. *)
+Definition resolve_inst_type (inst : moduleinst) (index : typeidx) : option defined_type :=
+  lookup_N inst.(inst_defined_types) index.
+
+Definition expand_inst_type (s : store_record) (inst : moduleinst) (index : typeidx) :
+    option closed_subtype :=
+  match resolve_inst_type inst index with
+  | Some t => expand_defined_type s.(s_types) t
+  | None => None
+  end.
+
+Definition expand_inst_function_type (s : store_record) (inst : moduleinst)
+    (index : typeidx) : option closed_function_type :=
+  match resolve_inst_type inst index with
+  | Some t => expand_function_type s.(s_types) t
+  | None => None
+  end.
+
+Definition native_func_defined_type (fi : funcinst) : option defined_type :=
+  match fi with
+  | FC_func_native _ inst code => resolve_inst_type inst code.(modfunc_type)
+  | FC_func_host _ _ => None
+  end.
+
+Definition funcinst_defined_type (s : store_record) (fi : funcinst) : option defined_type :=
+  match fi with
+  | FC_func_native _ inst code => resolve_inst_type inst code.(modfunc_type)
+  | FC_func_host signature _ => canonical_function_identity s.(s_types) signature
+  end.
+
+Definition funcinst_type_names (fi : funcinst) : list defined_type :=
+  match fi with
+  | FC_func_native _ inst _ => inst.(inst_defined_types)
+  | FC_func_host _ _ => nil
+  end.
+
+Definition lookup_func_defined_type (s : store_record) (address : funcaddr) :
+    option defined_type :=
+  match lookup_N s.(s_funcs) address with
+  | Some fi => funcinst_defined_type s fi
+  | None => None
+  end.
 
 Definition empty_t_context := Build_t_context nil nil nil nil nil nil nil nil nil None nil.
 
@@ -87,7 +196,7 @@ Definition mem_size (m : meminst) : N :=
 
 Definition mem_grow (m : meminst) (len_delta : N) : option meminst :=
   let new_size := N.add (mem_size m) len_delta in
-  if N.leb new_size mem_limit_bound then
+  if N.leb new_size (memory_limit_bound_for m.(meminst_type).(mt_address_type)) then
     match mem_grow (N.mul len_delta page_size) m.(meminst_data) with
     | Some new_mem_data =>
         match m.(meminst_type).(lim_max) with
@@ -96,13 +205,15 @@ Definition mem_grow (m : meminst) (len_delta : N) : option meminst :=
               Some {|
                   meminst_data := new_mem_data;
                   meminst_type :=
-                    Build_limits new_size m.(meminst_type).(lim_max);
+                    Build_memory_type (Build_limits new_size m.(meminst_type).(lim_max))
+                      m.(meminst_type).(mt_address_type);
                 |}
             else None
         | None =>
             Some {|
                 meminst_data := new_mem_data;
-                meminst_type := Build_limits new_size m.(meminst_type).(lim_max);
+                meminst_type := Build_memory_type (Build_limits new_size m.(meminst_type).(lim_max))
+                  m.(meminst_type).(mt_address_type);
               |}
         end
     | None => None
@@ -219,7 +330,8 @@ Definition default_val (t: value_type) : option value :=
   match t with
   | T_num t => Some (VAL_num (bitzero t))
   | T_vec t => Some (VAL_vec (VAL_vec128 SIMD.v128_default))
-  | T_ref t => Some (VAL_ref (VAL_ref_null t))
+  | T_ref t =>
+      if ref_nullable t then Some (VAL_ref (VAL_ref_null (ref_heap t))) else None
   | T_bot => None
   end.
 
@@ -231,10 +343,11 @@ Definition func_agree (t1 t2: function_type) : bool :=
   t1 == t2.
 
 Definition table_agree (t1 t2: table_type) : bool :=
-  (t1.(tt_elem_type) == t2.(tt_elem_type)).
+  (t1.(tt_elem_type) == t2.(tt_elem_type)) &&
+  (t1.(tt_address_type) == t2.(tt_address_type)).
 
 Definition mem_agree (t1 t2: memory_type) : bool :=
-  true.
+  t1.(mt_address_type) == t2.(mt_address_type).
   
 Definition global_agree (t1 t2: global_type) : bool :=
   t1 == t2.
@@ -792,6 +905,7 @@ Definition cl_type (cl : funcinst) : function_type :=
 
 Definition upd_s_func (s : store_record) (fs: list funcinst) : store_record :=
   {|
+    s_types := s.(s_types);
     s_funcs := fs;
     s_tables := s.(s_tables);
     s_mems := s.(s_mems);
@@ -800,8 +914,13 @@ Definition upd_s_func (s : store_record) (fs: list funcinst) : store_record :=
     s_datas := s.(s_datas);
   |}.
 
+Definition upd_s_types (s : store_record) (types : canonical_registry) : store_record :=
+  Build_store_record s.(s_funcs) s.(s_tables) s.(s_mems) s.(s_globals)
+    s.(s_elems) s.(s_datas) types.
+
 Definition upd_s_table (s : store_record) (ts: list tableinst) : store_record :=
   {|
+    s_types := s.(s_types);
     s_funcs := s.(s_funcs);
     s_tables := ts;
     s_mems := s.(s_mems);
@@ -812,6 +931,7 @@ Definition upd_s_table (s : store_record) (ts: list tableinst) : store_record :=
 
 Definition upd_s_mem (s : store_record) (ms : list meminst) : store_record :=
   {|
+    s_types := s.(s_types);
     s_funcs := s.(s_funcs);
     s_tables := s.(s_tables);
     s_mems := ms;
@@ -822,6 +942,7 @@ Definition upd_s_mem (s : store_record) (ms : list meminst) : store_record :=
 
 Definition upd_s_global (s : store_record) (gs : list globalinst) : store_record :=
   {|
+    s_types := s.(s_types);
     s_funcs := s.(s_funcs);
     s_tables := s.(s_tables);
     s_mems := s.(s_mems);
@@ -832,6 +953,7 @@ Definition upd_s_global (s : store_record) (gs : list globalinst) : store_record
 
 Definition upd_s_elem (s : store_record) (es : list eleminst) : store_record :=
   {|
+    s_types := s.(s_types);
     s_funcs := s.(s_funcs);
     s_tables := s.(s_tables);
     s_mems := s.(s_mems);
@@ -842,6 +964,7 @@ Definition upd_s_elem (s : store_record) (es : list eleminst) : store_record :=
 
 Definition upd_s_data (s : store_record) (ds : list datainst) : store_record :=
   {|
+    s_types := s.(s_types);
     s_funcs := s.(s_funcs);
     s_tables := s.(s_tables);
     s_mems := s.(s_mems);
@@ -854,7 +977,7 @@ Definition iota_N (offset: nat) (len: nat) : list N :=
   map N.of_nat (iota offset len).
 
 Definition stypes (s : store_record) (i : moduleinst) (j : typeidx) : option function_type :=
-  lookup_N (inst_types i) j.
+  lookup_function_type (inst_types i) j.
 
 
 Definition sfunc_ind (s : store_record) (i : moduleinst) (j : funcidx) : option funcaddr :=
@@ -878,17 +1001,17 @@ Definition sglob (s : store_record) (i : moduleinst) (j : globalidx) : option gl
 Definition sglob_val (s : store_record) (i : moduleinst) (j : globalidx) : option value :=
   option_map g_val (sglob s i j).
 
-Definition smem_ind (s : store_record) (i : moduleinst) : option memaddr :=
-  lookup_N i.(inst_mems) 0%N.
+Definition smem_ind (s : store_record) (i : moduleinst) (x: memidx) : option memaddr :=
+  lookup_N i.(inst_mems) x.
 
-Definition smem (s: store_record) (inst: moduleinst) : option meminst :=
-  match lookup_N inst.(inst_mems) 0%N with
+Definition smem (s: store_record) (inst: moduleinst) (x: memidx) : option meminst :=
+  match lookup_N inst.(inst_mems) x with
   | Some a => lookup_N s.(s_mems) a
   | None => None
   end.
 
 Definition tab_size (t: tableinst) : nat :=
-  length (tableinst_elem t).
+  TableStorage.size (tableinst_elem t).
 
 Definition stab_ind (s: store_record) (inst: moduleinst) (x: tableidx) : option tableaddr :=
   lookup_N inst.(inst_tables) x.
@@ -903,7 +1026,7 @@ Definition stab_elem (s: store_record) (inst: moduleinst) (x: tableidx) (i: elem
   match lookup_N inst.(inst_tables) x with
   | Some tabaddr =>
       match lookup_N s.(s_tables) tabaddr with
-      | Some tab => lookup_N tab.(tableinst_elem) i
+      | Some tab => TableStorage.get tab.(tableinst_elem) (N.to_nat i)
       | _ => None
       end
   | _ => None
@@ -916,9 +1039,9 @@ Definition stab_update (s: store_record) (inst: moduleinst) (x: tableidx) (i: el
       | Some tab =>
           if (N.ltb i (N.of_nat (tab_size tab))) then
             let: tab' := {| tableinst_type := tab.(tableinst_type);
-                           tableinst_elem := set_nth tabv tab.(tableinst_elem) (N.to_nat i) tabv |} in
+                            tableinst_elem := TableStorage.set tab.(tableinst_elem) (N.to_nat i) tabv |} in
             let: tabs' := set_nth tab' s.(s_tables) (N.to_nat tabaddr) tab' in
-            Some (Build_store_record (s_funcs s) tabs' (s_mems s) (s_globals s) (s_elems s) (s_datas s))
+            Some (Build_store_record (s_funcs s) tabs' (s_mems s) (s_globals s) (s_elems s) (s_datas s) (s_types s))
           else None
       | None => None
       end
@@ -991,8 +1114,8 @@ Definition load_vec_lane (m: meminst) (n: N) (v: value_vec) (width: vwidth) (mar
     end
   else None.
 
-Definition smem_store (s: store_record) (inst: moduleinst) (n: N) (off: static_offset) (v: value_num) (t: number_type) : option store_record :=
-  match lookup_N inst.(inst_mems) 0%N with
+Definition smem_store (s: store_record) (inst: moduleinst) (x: memidx) (n: N) (off: static_offset) (v: value_num) (t: number_type) : option store_record :=
+  match lookup_N inst.(inst_mems) x with
   | Some addr =>
       match lookup_N s.(s_mems) addr with
       | Some mem =>
@@ -1006,8 +1129,8 @@ Definition smem_store (s: store_record) (inst: moduleinst) (n: N) (off: static_o
   | None => None
   end.
 
-Definition smem_store_packed (s: store_record) (inst: moduleinst) (n: N) (off: static_offset) (v: value_num) (tp: packed_type) : option store_record :=
-  match lookup_N inst.(inst_mems) 0%N with
+Definition smem_store_packed (s: store_record) (inst: moduleinst) (x: memidx) (n: N) (off: static_offset) (v: value_num) (tp: packed_type) : option store_record :=
+  match lookup_N inst.(inst_mems) x with
   | Some addr =>
       match lookup_N s.(s_mems) addr with
       | Some mem =>
@@ -1041,7 +1164,7 @@ Definition store_vec_lane (m: meminst) (n: N) (v: value_vec) (width: vwidth) (ma
   else None.
 
 Definition smem_store_vec (s: store_record) (inst: moduleinst) (n: N) (v: value_vec) (marg: memarg) : option store_record :=
-  match lookup_N inst.(inst_mems) 0%N with
+  match lookup_N inst.(inst_mems) marg.(memarg_memory) with
   | Some addr =>
       match lookup_N s.(s_mems) addr with
       | Some mem =>
@@ -1056,7 +1179,7 @@ Definition smem_store_vec (s: store_record) (inst: moduleinst) (n: N) (v: value_
   end.
 
 Definition smem_store_vec_lane (s: store_record) (inst: moduleinst) (n: N) (v: value_vec) (width: vwidth) (marg: memarg) (x: laneidx) : option store_record :=
-  match lookup_N inst.(inst_mems) 0%N with
+  match lookup_N inst.(inst_mems) marg.(memarg_memory) with
   | Some addr =>
       match lookup_N s.(s_mems) addr with
       | Some mem =>
@@ -1070,8 +1193,8 @@ Definition smem_store_vec_lane (s: store_record) (inst: moduleinst) (n: N) (v: v
   | None => None
   end.
 
-Definition smem_grow (s: store_record) (inst: moduleinst) (n: N) : option (store_record * N) :=
-  match lookup_N inst.(inst_mems) 0%N with
+Definition smem_grow (s: store_record) (inst: moduleinst) (x: memidx) (n: N) : option (store_record * N) :=
+  match lookup_N inst.(inst_mems) x with
   | Some addr =>
       match lookup_N s.(s_mems) addr with
       | Some mem =>
@@ -1087,13 +1210,14 @@ Definition smem_grow (s: store_record) (inst: moduleinst) (n: N) : option (store
 
 Definition growtable (tab: tableinst) (n: N) (tabinit: value_ref) : option tableinst :=
   let len := (N.of_nat (tab_size tab) + n)%N in
-  if N.leb u32_bound len then None
+  if N.leb (address_bound tab.(tableinst_type).(tt_address_type)) len then None
   else
     let: {| tt_limits := lim; tt_elem_type := tabtype |} := tab.(tableinst_type) in
     let lim' := {| lim_min := len; lim_max := lim.(lim_max) |} in
-    if limit_valid_range lim' table_limit_bound then
-      let elem' := tab.(tableinst_elem) ++ (List.repeat tabinit (N.to_nat n)) in
-      let tab' := {| tableinst_type := {| tt_limits := lim'; tt_elem_type := tabtype |}; tableinst_elem := elem' |} in
+    if limit_valid_range lim' (table_limit_bound_for tab.(tableinst_type).(tt_address_type)) then
+      let elem' := TableStorage.append tab.(tableinst_elem) (TableStorage.repeat (N.to_nat n) tabinit) in
+      let tab' := {| tableinst_type := {| tt_limits := lim'; tt_elem_type := tabtype;
+                        tt_address_type := tab.(tableinst_type).(tt_address_type) |}; tableinst_elem := elem' |} in
       Some tab'
     else
       None.
@@ -1106,7 +1230,7 @@ Definition stab_grow (s: store_record) (inst: moduleinst) (x: tableidx) (n: N) (
           match growtable tab n tabinit with
           | Some tab' => 
               let tabs' := (set_nth tab' s.(s_tables) (N.to_nat tabaddr) tab') in
-              Some ((Build_store_record (s_funcs s) tabs' (s_mems s) (s_globals s) (s_elems s) (s_datas s)), tab_size tab)
+              Some ((Build_store_record (s_funcs s) tabs' (s_mems s) (s_globals s) (s_elems s) (s_datas s) (s_types s)), tab_size tab)
           | None => None
           end
       | None => None
@@ -1130,7 +1254,7 @@ Definition selem_drop (s: store_record) (inst: moduleinst) (x: elemidx) : option
       | Some elem =>
           let empty_elem := {| eleminst_type := elem.(eleminst_type); eleminst_elem := [::] |} in
           let: elems' := set_nth empty_elem s.(s_elems) (N.to_nat eaddr) empty_elem in
-          Some (Build_store_record (s_funcs s) (s_tables s) (s_mems s) (s_globals s) elems' (s_datas s))
+          Some (Build_store_record (s_funcs s) (s_tables s) (s_mems s) (s_globals s) elems' (s_datas s) (s_types s))
       | None => None
       end
   | None => None
@@ -1152,7 +1276,7 @@ Definition sdata_drop (s: store_record) (inst: moduleinst) (x: dataidx) : option
       | Some data =>
           let empty_data := {| datainst_data := [::] |} in
           let: datas' := set_nth empty_data s.(s_datas) (N.to_nat daddr) empty_data in
-          Some (Build_store_record (s_funcs s) (s_tables s) (s_mems s) (s_globals s) (s_elems s) datas')
+          Some (Build_store_record (s_funcs s) (s_tables s) (s_mems s) (s_globals s) (s_elems s) datas' (s_types s))
       | None => None
       end
   | None => None
@@ -1163,7 +1287,7 @@ Definition supdate_glob_s (s : store_record) (k : globaladdr) (v : value) : opti
     (fun g =>
       let: g' := Build_globalinst (g_type g) v in
       let: gs' := set_nth g' (s_globals s) (N.to_nat k) g' in
-      Build_store_record (s_funcs s) (s_tables s) (s_mems s) gs' (s_elems s) (s_datas s))
+      Build_store_record (s_funcs s) (s_tables s) (s_mems s) gs' (s_elems s) (s_datas s) (s_types s))
     (lookup_N (s_globals s) k).
 
 Definition supdate_glob (s : store_record) (i : moduleinst) (j : globalidx) (v : value) : option store_record :=
@@ -1179,7 +1303,12 @@ Definition limits_extension (l1 l2: limits) : bool :=
   (N.leb l1.(lim_min) l2.(lim_min)) &&
     (l1.(lim_max) == l2.(lim_max)).
 
+Definition memory_type_extension (t1 t2: memory_type) : bool :=
+  (t1.(mt_address_type) == t2.(mt_address_type)) &&
+  limits_extension t1 t2.
+
 Definition table_type_extension (t1 t2: table_type) : bool :=
+  (t1.(tt_address_type) == t2.(tt_address_type)) &&
   (t1.(tt_elem_type) == t2.(tt_elem_type)) &&
   (limits_extension t1.(tt_limits) t2.(tt_limits)).
 
@@ -1189,7 +1318,7 @@ Definition table_extension (t1 t2 : tableinst) : bool :=
   (tab_size t1 <= tab_size t2).
 
 Definition mem_extension (m1 m2 : meminst) : bool :=
-  (limits_extension m1.(meminst_type) m2.(meminst_type)) &&
+  (memory_type_extension m1.(meminst_type) m2.(meminst_type)) &&
   (N.leb (mem_length m1) (mem_length m2)).
 
 Definition global_extension (g1 g2: globalinst) : bool :=
@@ -1218,7 +1347,7 @@ Definition context_extension C C' : bool :=
   (C.(tc_types) == C'.(tc_types)) &&
   (C.(tc_funcs) == C'.(tc_funcs)) &&
   (all2 table_type_extension C.(tc_tables) C'.(tc_tables)) &&
-  (all2 limits_extension C.(tc_mems) C'.(tc_mems)) &&
+  (all2 memory_type_extension C.(tc_mems) C'.(tc_mems)) &&
   (C.(tc_globals) == C'.(tc_globals)) &&
   (C.(tc_elems) == C'.(tc_elems)) &&
   (C.(tc_datas) == C'.(tc_datas)) &&
@@ -1233,7 +1362,8 @@ Definition store_extension (s s' : store_record) : bool :=
   component_extension mem_extension s.(s_mems) s'.(s_mems) &&
   component_extension global_extension s.(s_globals) s'.(s_globals) &&
   component_extension elem_extension s.(s_elems) s'.(s_elems) &&
-  component_extension data_extension s.(s_datas) s'.(s_datas).
+  component_extension data_extension s.(s_datas) s'.(s_datas) &&
+  canonical_registry_prefixb s.(s_types) s'.(s_types).
 
 Definition to_e_list (bes : list basic_instruction) : seq administrative_instruction :=
   map AI_basic bes.
@@ -1271,6 +1401,7 @@ Definition vref_to_e (vref: value_ref) : administrative_instruction :=
   | VAL_ref_null t => AI_basic (BI_ref_null t)
   | VAL_ref_func addr => AI_ref addr
   | VAL_ref_extern eaddr => AI_ref_extern eaddr
+  | VAL_ref_i31 n => AI_ref_i31 n
   end.
 
 Definition v_to_e (v: value) : administrative_instruction :=
@@ -1290,7 +1421,8 @@ Definition e_to_vref (e: administrative_instruction) : value_ref :=
   | AI_basic (BI_ref_null t) => VAL_ref_null t
   | AI_ref addr => VAL_ref_func addr
   | AI_ref_extern eaddr => VAL_ref_extern eaddr
-  | _ => VAL_ref_null T_funcref
+  | AI_ref_i31 n => VAL_ref_i31 n
+  | _ => VAL_ref_null HT_func
   end.
 
 Definition e_to_vref_opt (e: administrative_instruction) : option value_ref :=
@@ -1298,6 +1430,7 @@ Definition e_to_vref_opt (e: administrative_instruction) : option value_ref :=
   | AI_basic (BI_ref_null t) => Some (VAL_ref_null t)
   | AI_ref addr => Some (VAL_ref_func addr)
   | AI_ref_extern eaddr => Some (VAL_ref_extern eaddr)
+  | AI_ref_i31 n => Some (VAL_ref_i31 n)
   | _ => None
   end.
 
@@ -1403,7 +1536,7 @@ Definition es_is_trap (es : seq administrative_instruction) : bool :=
 
 Definition expand (inst: moduleinst) (tb: block_type) : option function_type :=
   match tb with
-  | BT_id n => lookup_N inst.(inst_types) n
+  | BT_id n => lookup_function_type inst.(inst_types) n
   | BT_valtype (Some t) => Some (Tf [::] [::t])
   | BT_valtype None => Some (Tf [::] [::])
   end.
@@ -1609,6 +1742,18 @@ Definition cvtop_valid (t2: number_type) (op: cvtop) (t1: number_type) (s: optio
   ((op == CVO_reinterpret) && ((is_int_t t2 && is_float_t t1) || (is_float_t t2 && is_int_t t1)) && (s == None)).
 
 End Operations.
+
+Lemma lookup_N_nth_error {T: Type} (l: list T) n x :
+  lookup_N l n = Some x -> List.nth_error l (N.to_nat n) = Some x.
+Proof. rewrite lookup_N_spec. trivial. Qed.
+
+#[global] Hint Resolve lookup_N_nth_error : core.
+
+Ltac lookup_N_to_nth_error :=
+  repeat match goal with
+  | H: context [lookup_N _ _] |- _ => rewrite lookup_N_spec in H
+  | |- context [lookup_N _ _] => rewrite lookup_N_spec
+  end.
 
 #[export]
 Hint Unfold v_to_e: core.

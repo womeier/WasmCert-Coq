@@ -165,17 +165,19 @@ let set p n e =
 
 let set_gen p start_pos block_len generator =
   if block_len <= 0 then p else
-  let a = reroot p in
   let i = to_int start_pos in
   let len = to_int block_len in
-  let total_len = UArray.length a in
+  let total_len = length_int p in
   (* Check bounds and block size *)
-  if 0 <= start_pos && (start_pos + block_len) <= (total_len) then
+  if 0 <= start_pos && start_pos <= total_len &&
+     block_len <= total_len - start_pos then
+  (* The generator may read p (or another version sharing its backing
+     array).  Evaluate it before changing any destination element, then
+     reroot p again because those reads may have rerooted another version. *)
+  let new_vals = Array.init len generator in
+  let a = reroot p in
   let old_vals = uarray_get_range a i len in
-  for j = 0 to len - 1 do
-    let new_val = generator (j) in
-    UArray.unsafe_set a (i + j) new_val
-  done;
+  uarray_set_range a i new_vals;
   let t = ref !p in 
   p := BlockUpdated (i, old_vals, t); 
   t

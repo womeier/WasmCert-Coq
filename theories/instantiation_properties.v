@@ -239,7 +239,7 @@ Lemma alloc_table_iota_N modtables ws ws' l:
   alloc_tabs ws modtables = (ws', l) ->
   l = iota_N (length (s_tables ws)) (length modtables) /\
   ws.(s_funcs) = ws'.(s_funcs) /\
-  ws'.(s_tables) = ws.(s_tables) ++ map (fun mf => gen_table_instance mf (VAL_ref_null (mf.(tt_elem_type)))) modtables /\
+  ws'.(s_tables) = ws.(s_tables) ++ map (fun mf => gen_table_instance mf (VAL_ref_null (ref_heap mf.(tt_elem_type)))) modtables /\
   ws.(s_mems) = ws'.(s_mems) /\
   ws.(s_globals) = ws'.(s_globals) /\
   ws.(s_elems) = ws'.(s_elems) /\
@@ -263,6 +263,39 @@ Proof.
     + by rewrite List.length_app List.length_map => /=.
     + by rewrite catA => /=.
 Qed.
+
+Lemma alloc_table_inits_iota_N tables ws ws' l:
+  alloc_tabs_with_init ws tables = (ws', l) ->
+  l = iota_N (length (s_tables ws)) (length tables) /\
+  ws.(s_funcs) = ws'.(s_funcs) /\
+  ws'.(s_tables) = ws.(s_tables) ++
+    map (fun tr => gen_table_instance (fst tr) (snd tr)) tables /\
+  ws.(s_mems) = ws'.(s_mems) /\
+  ws.(s_globals) = ws'.(s_globals) /\
+  ws.(s_elems) = ws'.(s_elems) /\
+  ws.(s_datas) = ws'.(s_datas).
+Proof.
+  unfold alloc_tabs_with_init.
+  move => Halloc.
+  eapply alloc_Xs_IP with
+    (R := (fun s_i s_e xs ys => ys = iota_N _ (length xs) /\ _))
+    in Halloc; eauto => //=.
+  - unfold iota_N => /=.
+    repeat split. by rewrite cats0.
+  - move => s s0 [ty ref] xs' ys' s' y Hallocx [Hys [? [Hcomp [? [?[??]]]]]].
+    repeat rewrite -> iota_N_iota_N in *.
+    unfold alloc_tab_ref, add_table in Hallocx.
+    destruct ty, tt_limits.
+    injection Hallocx as ->; subst => /=.
+    rewrite List.length_app map_cat iota_N_extend Hcomp => /=.
+    repeat split => //=.
+    + by rewrite List.length_app List.length_map.
+    + by rewrite catA.
+Qed.
+
+Lemma gen_table_instance_type ty ref :
+  tableinst_type (gen_table_instance ty ref) = ty.
+Proof. by destruct ty as [[min max] rt]. Qed.
 
 Lemma alloc_mem_iota_N modmems ws ws' l:
   alloc_mems ws modmems = (ws', l) ->
@@ -608,6 +641,24 @@ Proof.
   destruct a, e; simpl in H2; remove_bools_options => //=; repeat split; try by f_equal.
 Qed.
 
+Lemma import_func_subtyping_eq t1 t2 :
+  import_func_subtyping t1 t2 -> t1 = t2.
+Proof.
+  unfold import_func_subtyping.
+  by move/andP => [_ /eqP].
+Qed.
+
+Lemma import_func_subtyping_correct t1 t2 :
+  import_func_subtyping t1 t2 = true <->
+    function_type_closed t1 = true /\ t1 = t2.
+Proof.
+  unfold import_func_subtyping.
+  rewrite Bool.andb_true_iff.
+  split; move => [Hclosed Heq]; split => //.
+  - by apply/eqP.
+  - by apply/eqP.
+Qed.
+
 Lemma import_subtyping_comp_len t_imps1 t_imps2:
   List.Forall2 import_subtyping t_imps1 t_imps2->
   (length (ext_t_funcs t_imps1) = length (ext_t_funcs t_imps2) /\
@@ -794,7 +845,7 @@ Proof.
     by simplify_subtyping.
   }
   (* ref_null *)
-  { replace (to_e_list [::BI_ref_null r]) with ([::$V (VAL_ref (VAL_ref_null r))]) in Hreduce; last done.
+  { replace (to_e_list [::BI_ref_null h]) with ([::$V (VAL_ref (VAL_ref_null h))]) in Hreduce; last done.
     apply reduce_trans_value in Hreduce; subst.
     unfold value_typing => /=.
     by simplify_subtyping.
@@ -805,9 +856,11 @@ Proof.
     invert_be_typing.
     apply instr_subtyping_empty1_impl' in Htisub; simpl in *; remove_bools_options.
     assert (exists x, lookup_N (s_funcs s) addr = Some x) as [? Hnth].
-    { apply Hsfunc in Hnthaddr.
+    { rewrite lookup_N_spec in Hnthaddr.
+      apply Hsfunc in Hnthaddr.
       destruct (lookup_N (s_funcs s) addr) eqn:Hnth; first by eexists.
       exfalso.
+      rewrite lookup_N_spec in Hnth.
       apply List.nth_error_None in Hnth.
       by lias.
     }

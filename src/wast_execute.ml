@@ -143,55 +143,63 @@ let wasm_assert_ret verbosity ret ret_exp =
   | RefResult refpat -> wasm_assert_refpat ret refpat
   | VecResult vecpat -> wasm_assert_vecpat verbosity ret vecpat
 
-let wasm_assert_rets verbosity rets ret_exps = 
-  let assert_results = List.map2 (fun x y -> wasm_assert_ret verbosity x y) rets ret_exps in
-  List.fold_left (fun a b -> a && b) true assert_results
+let wasm_assert_rets ?(any_null_positions=[]) verbosity rets ret_exps =
+  let rec matches position values expectations =
+    match values, expectations with
+    | [], [] -> true
+    | value :: values, expected :: expectations ->
+        let matched =
+          if List.mem position any_null_positions then
+            match value with Extract.VAL_ref (Extract.VAL_ref_null _) -> true | _ -> false
+          else wasm_assert_ret verbosity value expected in
+        matched && matches (position + 1) values expectations
+    | _ -> false in
+  matches 0 rets ret_exps
 
-let load_wast_module verbosity hs s ovar moddef mod_counter =
-  begin try
-  match moddef.it with 
-  | Textual ast_module ->
-    let bin_module = Wasm.Encode.encode ast_module in
-    let* m = Parse.parse_module verbosity false bin_module in
-    let modname = "default_module_" ^ (string_of_int mod_counter) in
-    let* varname = begin match ovar with
-    | Some v -> 
-      let (_, varmap) = hs in
-      begin match StringMap.find_opt v.it varmap with
-      | Some _ -> error ("Module variable name " ^ v.it ^ " already exists")
-      | None -> pure v.it
-      end
-    | None -> pure ""
-    end in
-    let* (hs', s', inst_res) = Execute.instantiate_host verbosity hs s modname m in
-    debug_info verbosity stage (fun _ -> "Successfully instantiated module " ^ modname ^ ".\n");
-    if varname != "" then
-      let (exts, varmap) = hs' in
-      let varmap' = StringMap.add varname modname varmap in
-        debug_info verbosity stage (fun _ -> "Module registered to module variable " ^ varname ^ ".\n");
-        pure ((exts, varmap'), s', inst_res, mod_counter+1, modname)
-    else 
-      pure (hs', s', inst_res, mod_counter+1, modname)
-  | Encoded (modnamestr, bin_module) -> 
-    let* m = Parse.parse_module verbosity false bin_module in
-    let modname = if modnamestr = "" then ("default_module_" ^ (string_of_int mod_counter)) else modnamestr in
-    let* (hs', s', inst_res) = Execute.instantiate_host verbosity hs s modname m in
-      debug_info verbosity stage (fun _ -> "Successfully instantiated module " ^ modname ^ ".\n");
-      pure (hs', s', inst_res, mod_counter+1, modname)
-  | Quoted (modnamestr, text_module) -> 
-    let* m = Parse.parse_module verbosity true text_module in
-    let modname = if modnamestr = "" then ("default_module_" ^ (string_of_int mod_counter)) else modnamestr in
-    let* (hs', s', inst_res) = Execute.instantiate_host verbosity hs s modname m in
-      debug_info verbosity stage (fun _ -> "Successfully instantiated module " ^ modname ^ ".\n");
-      pure (hs', s', inst_res, mod_counter+1, modname)
-  with
-  | _ -> error "Exception raised in loading module"
-  end
+(* Keep parsing separate from validation/linking. A failure in a later phase
+   must not satisfy assert_malformed (or a parse failure assert_invalid). *)
+let parse_wast_module verbosity moddef =
+  try
+    match moddef.it with
+    | Textual ast_module ->
+      Parse.parse_module verbosity false (Wasm.Encode.encode ast_module)
+    | Encoded (_, bin_module) ->
+      Parse.parse_module verbosity false bin_module
+    | Quoted (_, text_module) ->
+      Parse.parse_module verbosity true text_module
+  with Wasm.Parse_error.Syntax (_, message) -> error message
+
+let require_valid_module m =
+  match Extract.module_type_checker m with
+  | (Some _, _) -> pure ()
+  | (None, _) -> error "Expected a valid module before linking/instantiation"
+
+let instantiate_wast_module verbosity hs s ovar m mod_counter =
+  let modname = "default_module_" ^ string_of_int mod_counter in
+  let* varname = match ovar with
+    | None -> pure None
+    | Some v ->
+        let (_, varmap) = hs in
+        if StringMap.mem v.it varmap then
+          error ("Module variable name " ^ v.it ^ " already exists")
+        else pure (Some v.it) in
+  let* (hs', s', inst_res) = Execute.instantiate_host verbosity hs s modname m in
+  let hs' = match varname with
+    | None -> hs'
+    | Some name ->
+        let (exts, varmap) = hs' in
+        (exts, StringMap.add name modname varmap) in
+  pure (hs', s', inst_res, mod_counter + 1, modname)
 
 let print_wast_command cmd = 
-  let cmd_sexpr = Wasm.Arrange.script `Textual [cmd] in
-  let cmd_string = String.concat "" (List.map (Wasm.Sexpr.to_string 200) cmd_sexpr) in
-  cmd_string
+  (* Diagnostic rendering must not run the old reference binary decoder on
+     new core types, or malformed fixtures, and crash before our own parser. *)
+  try
+    let cmd_sexpr = Wasm.Arrange.script `Textual [cmd] in
+    String.concat "" (List.map (Wasm.Sexpr.to_string 200) cmd_sexpr)
+  with exn ->
+    Printf.sprintf "<WAST command at line %d; legacy diagnostic formatter failed: %s>"
+      cmd.at.left.line (Printexc.to_string exn)
 
 let wasm_name_to_raw_string n = 
   Wasm.Utf8.encode n
@@ -217,21 +225,67 @@ type verdict_detail =
   | Verdict_OK
   | Verdict_inst_trap
 
-let run_wast_command verbosity max_call_depth cmd hs s mod_counter default_module_name test_counter =
+type binary_definitions = {
+  mutable named_definitions : Extract.module0 StringMap.t;
+  mutable latest_definition : Extract.module0 option;
+}
+
+let remember_definition definitions name m =
+  definitions.latest_definition <- Some m;
+  match name with
+  | None -> ()
+  | Some name ->
+      definitions.named_definitions <- StringMap.add name m definitions.named_definitions
+
+let finish_instantiation (hs, s, inst_res, counter, name) =
+  match inst_res with
+  | Cfg_trap _ -> pure (hs, s, counter, name, Verdict_inst_trap)
+  | Cfg_res _ -> pure (hs, s, counter, name, Verdict_OK)
+  | _ -> error "Post instantiation execution resulted in unexpected error"
+
+let run_wast_command verbosity max_call_depth definitions (directive, cmd) hs s mod_counter default_module_name test_counter =
+  let any_null_positions = match directive with
+    | Wast_binary_script.Expect_null positions -> positions
+    | _ -> [] in
   debug_info verbosity stage 
   (fun _ -> 
-    "\n\n----------\nTest " ^ string_of_int test_counter ^ "\n----------\n" ^ print_wast_command cmd ^ "\n"
+    let null_note = if any_null_positions = [] then "" else
+      "\nOriginal any-null result positions: " ^
+      String.concat ", " (List.map string_of_int any_null_positions) ^
+      " (ref.func above is only the legacy parser carrier).\n" in
+    "\n\n----------\nTest " ^ string_of_int test_counter ^ "\n----------\n" ^
+    print_wast_command cmd ^ null_note ^ "\n"
     );
  begin try
+  begin match directive with
+  | Wast_binary_script.Define name ->
+      begin match cmd.it with
+      | Module (_, ({it = Encoded _; _} as moddef)) ->
+          let* m = parse_wast_module verbosity moddef in
+          let* () = require_valid_module m in
+          remember_definition definitions name m;
+          pure (hs, s, mod_counter, default_module_name, Verdict_OK)
+      | _ -> error "Expected a binary module definition"
+      end
+  | Wast_binary_script.Instantiate target ->
+      let found = match target with
+        | None -> definitions.latest_definition
+        | Some name -> StringMap.find_opt name definitions.named_definitions in
+      begin match cmd.it, found with
+      | Module (ovar, _), Some m ->
+          let* result = instantiate_wast_module verbosity hs s ovar m mod_counter in
+          finish_instantiation result
+      | _, None -> error "Unknown binary module definition"
+      | _ -> error "Expected a binary module instance directive"
+      end
+  | Wast_binary_script.Ordinary | Wast_binary_script.Expect_null _ ->
   begin match cmd.it with
   | Module (ovar, moddef) -> 
-    let* (hs', s', inst_res, modc, defname) = load_wast_module verbosity hs s ovar moddef mod_counter in
-    (* OK with Cfg_trap needs to be counted as an error, but also needs to update the store *)
-      begin match inst_res with
-      | Cfg_trap _ -> pure (hs', s', modc, defname, Verdict_inst_trap)
-      | Cfg_res _ -> pure (hs', s', modc, defname, Verdict_OK)
-      | _ -> error "Post instantiation execution resulted in unexpected error"
-    end
+    let* m = parse_wast_module verbosity moddef in
+    let* () = require_valid_module m in
+    remember_definition definitions (Option.map (fun v -> v.it) ovar) m;
+    let* result = instantiate_wast_module verbosity hs s ovar m mod_counter in
+    finish_instantiation result
   | Action act ->
     begin match act.it with
     | Invoke (ovar, funcname_utf8, val_args) ->
@@ -261,7 +315,7 @@ let run_wast_command verbosity max_call_depth cmd hs s mod_counter default_modul
           debug_info verbosity stage (fun _ -> "Returned: ");
           debug_info verbosity stage (fun _ -> Execute.print_invoke_result verbosity res; "");
           debug_info verbosity stage (fun _ -> "Expected: " ^ wasm_results_to_string expect_rets ^ "\n");
-          let assert_result = wasm_assert_rets verbosity vs expect_rets in
+          let assert_result = wasm_assert_rets ~any_null_positions verbosity vs expect_rets in
             if assert_result then
               (debug_info verbosity stage (fun _ -> "Test passed: result matches asserted value\n");
               pure (hs, s', mod_counter, default_module_name, Verdict_OK))
@@ -272,7 +326,7 @@ let run_wast_command verbosity max_call_depth cmd hs s mod_counter default_modul
         end
       | Get (ovar, extname_utf8) ->
         let* res_v = run_get (ovar, extname_utf8) hs s default_module_name in
-        let assert_result = wasm_assert_rets verbosity [res_v] expect_rets in
+        let assert_result = wasm_assert_rets ~any_null_positions verbosity [res_v] expect_rets in
           if assert_result then
             (debug_info verbosity stage (fun _ -> "Test passed: result matches asserted value\n");
               pure (hs, s, mod_counter, default_module_name, Verdict_OK))
@@ -313,40 +367,40 @@ let run_wast_command verbosity max_call_depth cmd hs s mod_counter default_modul
         error "Unsupported wast action: Get"
       end
     | AssertInvalid (moddef, _str) ->
-      (* very ugly... *)
-      let res = (load_wast_module verbosity hs s None moddef mod_counter) in
-      begin match to_out res with
-      (* AssertInvalid shouldn't enter execution stage, so any OK result is counted as a failure *)
-      | OK _ -> 
-        error "Unexpected successful instantiation of an invalid module"
-      (* Trap still needs to update the store*)
-      | Error _ -> 
+      let* m = parse_wast_module verbosity moddef in
+      begin match Extract.module_type_checker m with
+      | (Some _, _) ->
+        error "Unexpected successful validation of an invalid module"
+      | (None, _) ->
         debug_info verbosity stage (fun _ -> "Test passed: correctly rejected an invalid module\n");
         pure (hs, s, mod_counter, default_module_name, Verdict_OK)
       end
-    (* The following three assertiosn are grouped into one *)
-    | AssertMalformed (moddef, _str)
-    | AssertUnlinkable (moddef, _str)
-    | AssertUninstantiable (moddef, _str) ->
-      let res = (load_wast_module verbosity hs s None moddef mod_counter) in
-      begin match to_out res with
+    | AssertMalformed (moddef, _str) ->
+      begin match to_out (parse_wast_module verbosity moddef) with
       | OK _ ->
-        (* This is really stupid. Is there a better way to match on host_event? *)
-        let* res_result = res in 
-        begin match res_result with
-        (* Only an OK with Cfg_res represents a successful instantiation *)
-        | (_, _, Cfg_res _, _, _) -> 
-          error "Unexpected successful instantiation of a malformed module"
-        (* OK with a trap is a failure which passes the test, but the store needs to be updated *)
-        | (_, _, Cfg_trap (s', _), _, _) -> 
-          debug_info verbosity stage (fun _ -> "Test passed: post-instantiation initialisation trapped, leading to instantiation failure correctly\n");
-          pure (hs, s', mod_counter, default_module_name, Verdict_OK)
-        | _ ->
-          error "Unexpected post-instantiation initialisation error"
-        end
-      | _ -> 
-        debug_info verbosity stage (fun _ -> "Test passed: correctly rejected a malformed/unlinkable/uninstantiable module\n");
+        error "Unexpected successful parsing of a malformed module"
+      | Error _ ->
+        debug_info verbosity stage (fun _ -> "Test passed: correctly rejected a malformed module\n");
         pure (hs, s, mod_counter, default_module_name, Verdict_OK)
+      end
+    | AssertUnlinkable (moddef, _str) ->
+      let* m = parse_wast_module verbosity moddef in
+      let* () = require_valid_module m in
+      begin match to_out (Execute.instantiate verbosity hs s m) with
+      | Error _ ->
+        debug_info verbosity stage (fun _ -> "Test passed: correctly rejected an unlinkable module\n");
+        pure (hs, s, mod_counter, default_module_name, Verdict_OK)
+      | OK _ -> error "Unexpected successful linking of an unlinkable module"
+      end
+    | AssertUninstantiable (moddef, _str) ->
+      let* m = parse_wast_module verbosity moddef in
+      let* () = require_valid_module m in
+      let* res = Execute.instantiate verbosity hs s m in
+      begin match res with
+      | Cfg_trap (s', _) ->
+        debug_info verbosity stage (fun _ -> "Test passed: instantiation trapped as expected\n");
+        pure (hs, s', mod_counter, default_module_name, Verdict_OK)
+      | _ -> error "Expected an instantiation trap"
       end
     end
   | Register (newname_utf8, ovar) ->
@@ -378,18 +432,19 @@ let run_wast_command verbosity max_call_depth cmd hs s mod_counter default_modul
       pure ((exts', varmap'), s, mod_counter, newname, Verdict_OK)
   | _ -> error "Unsupported wast command"
   end
+  end
   with 
   | _ -> error "Unknown exception"
 end
 
-let rec run_wast_commands verbosity timeout max_call_depth cmds hs s mod_counter default_module_name assert_ok assert_total =
+let rec run_wast_commands verbosity timeout max_call_depth definitions cmds hs s mod_counter default_module_name assert_ok assert_total =
   match cmds with
   | [] -> 
     pure (assert_ok, assert_total)
   | cmd :: cmds' ->
       let verdict = 
         try
-          (with_timeout timeout (fun _ -> run_wast_command verbosity max_call_depth cmd hs s mod_counter default_module_name (assert_total+1))) with
+          (with_timeout timeout (fun _ -> run_wast_command verbosity max_call_depth definitions cmd hs s mod_counter default_module_name (assert_total+1))) with
           | Timeout -> error "Execution exceeded time limit"
          in
         begin match to_out verdict with
@@ -401,14 +456,14 @@ let rec run_wast_commands verbosity timeout max_call_depth cmds hs s mod_counter
             let new_total = assert_total + 1 in
               Printf.printf "\rTests passed: %d/%d (%.2f%%) " new_ok new_total (float_of_int new_ok *. 100.0 /. float_of_int new_total);
               flush stdout;
-              run_wast_commands verbosity timeout max_call_depth cmds' hs' s' mod_counter' default_module_name' new_ok new_total
+              run_wast_commands verbosity timeout max_call_depth definitions cmds' hs' s' mod_counter' default_module_name' new_ok new_total
           | Verdict_inst_trap ->
             let new_ok = assert_ok in
             let new_total = assert_total + 1 in
               debug_info verbosity stage (fun _ -> "Successfully loaded module, but post-instantiation initialisation trapped\n");
               Printf.printf "\rTests failed: %d/%d (%.2f%%) " new_ok new_total (float_of_int new_ok *. 100.0 /. float_of_int new_total);
               flush stdout;
-              run_wast_commands verbosity timeout max_call_depth cmds' hs' s' mod_counter' default_module_name' new_ok new_total
+              run_wast_commands verbosity timeout max_call_depth definitions cmds' hs' s' mod_counter' default_module_name' new_ok new_total
           end
         | Error msg ->
             debug_info verbosity stage ~style:red (fun _ -> "Test failed: " ^ msg ^ "\n");
@@ -416,7 +471,7 @@ let rec run_wast_commands verbosity timeout max_call_depth cmds hs s mod_counter
             let new_total = assert_total + 1 in
             Printf.printf "\rTests passed: %d/%d (%.2f%%) " new_ok new_total (float_of_int new_ok *. 100.0 /. float_of_int new_total);
             flush stdout;
-            run_wast_commands verbosity timeout max_call_depth cmds' hs s mod_counter default_module_name new_ok new_total
+            run_wast_commands verbosity timeout max_call_depth definitions cmds' hs s mod_counter default_module_name new_ok new_total
           end
 
 (* SpecTest host module for Wast test suite *)
@@ -442,6 +497,19 @@ let spectest_host_str =
 
 let register_spectest_host verbosity hs s = 
   let* m = Parse.parse_module verbosity true spectest_host_str in
+  (* Add the Wasm 3.0 host table in the core AST: the deferred text module
+     frontend is neither extended nor asked to understand an i64 table. *)
+  let table64 = Extract.{
+    tt_limits = {lim_min = Big_int_Z.big_int_of_int 10;
+                 lim_max = Some (Big_int_Z.big_int_of_int 20)};
+    tt_elem_type = {ref_nullable = true; ref_heap = HT_func};
+    tt_address_type = Addressing.AT_i64 } in
+  let table64_name = List.init 7 (String.get "table64") in
+  let table64_index = Big_int_Z.big_int_of_int (List.length m.Extract.mod_tables) in
+  let m = Extract.{ m with
+    mod_tables = m.mod_tables @ [{modtab_type = table64; modtab_init = None}];
+    mod_exports = m.mod_exports @
+      [{modexp_name = table64_name; modexp_desc = MED_table table64_index}] } in
   let modname = "spectest" in
   let* (hs', s') = Execute.instantiate_modules verbosity hs s [modname] [m] in
     debug_info verbosity stage (fun _ -> "Successfully instantiated module " ^ modname ^ ".\n");
@@ -451,7 +519,8 @@ let run_wast_script verbosity timeout max_call_depth script =
   let starting_host_store = (StringMap.empty, StringMap.empty) in
   let starting_store = empty_store_record in
   let* (hs, s) = register_spectest_host verbosity starting_host_store starting_store in
-  let* ret = run_wast_commands verbosity timeout max_call_depth script hs s 0 "" 0 0 in
+  let definitions = {named_definitions = StringMap.empty; latest_definition = None} in
+  let* ret = run_wast_commands verbosity timeout max_call_depth definitions script hs s 0 "" 0 0 in
   match ret with
     | (assert_ok, assert_total) -> 
       debug_info verbosity result (fun _ -> "\n");
@@ -461,5 +530,5 @@ let run_wast_script verbosity timeout max_call_depth script =
     
 
 let run_wast_string verbosity timeout max_call_depth scriptstr = 
-  let script = Parse.parse_wast scriptstr in
+  let script = Parse.parse_wast_dispatch scriptstr in
   run_wast_script verbosity timeout max_call_depth script

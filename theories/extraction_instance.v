@@ -2,17 +2,21 @@
 From Stdlib Require Import String ZArith.
 From mathcomp Require Import ssreflect ssrnat ssrbool eqtype seq.
 From HB Require Import structures.
-From Wasm Require Import numerics memory_vec binary_format_parser text_format_parser host interpreter_ctx instantiation_func pp.
+From Wasm Require Import numerics memory_sparse binary_format_parser text_format_parser host interpreter_ctx instantiation_func pp.
 From ExtLib Require Import Structures.Monad IdentityMonad.
 
-From Wasm Require Import memory_vec binary_format_parser text_format_parser.
+From Wasm Require Import memory_sparse binary_format_parser text_format_parser.
+From Wasm Require Import gc_numerics gc_binary gc_types.
+From Wasm Require Import binary_format_printer.
+From Wasm Require Import gc_type_context.
+From Wasm Require Import gc_declaration_typing.
 
 (* see common.v *)
 Set SsrOldRewriteGoalsOrder.
 
 (* This determines the memory instance used in the extracted runtime *)
 #[export]
-Instance memory_instance : BlockUpdateMemory := Memory_vec.
+Instance memory_instance : BlockUpdateMemory := SparseBlockMemory.
 
   
 (* A more general extraction that allows non-trivial host functions, extracting the interpreter as a functor-like module. Not using the monadic design yet as that requires corresponding changes to the interpreter as well. *)
@@ -59,6 +63,41 @@ Module Monadic_host (PH: Parametric_host).
 End Monadic_host.
   
 Module Utility.
+
+  (** Reusable GC primitives.  These exports do not enable GC instructions
+      in the existing module validator or interpreter. *)
+  Module GC.
+    Module Types.
+      Definition validate := canonical_registry_validb.
+      Definition close_validated := close_and_validate_type_groups.
+      Definition close_functions registry types :=
+        close_and_validate_type_groups registry (function_type_groups types).
+      Definition composite_matches := closed_composite_matchesb.
+      Definition close := close_type_groups.
+      Definition expand := expand_defined_type.
+      Definition function_type := expand_function_type.
+      Definition struct_type := expand_struct_type.
+      Definition array_type := expand_array_type.
+      Definition matches := defined_type_matches.
+      Definition equivalent := defined_type_equiv.
+    End Types.
+    Definition ref_i31 := ref_i31.
+    Definition i31_get := i31_get.
+    Definition i31_get_nullable := i31_get_nullable.
+    Definition pack_field := pack_field.
+    Definition unpack_field := unpack_field.
+    Definition heap_subtyping := abstract_heap_subtyping.
+    Definition reference_subtyping := abstract_reference_subtyping.
+    Definition encode_reference := encode_abstract_reference.
+    Definition decode_reference := run_parse_gc_abstract_reference_type.
+    Definition encode_packed := encode_packed_type.
+    Definition decode_packed := decode_packed_type.
+    Definition decode_typeidx := run_parse_heap_typeidx.
+    Definition encode_typeidx := binary_of_heap_typeidx.
+    Definition encode_immediate_typeidx := binary_of_typeidx.
+    Definition decode_immediate_typeidx (bs : list Byte.byte) : option typeidx :=
+      run bs (fun _ => parse_typeidx).
+  End GC.
   
   Definition vali32_of_Z (z: Z) : value :=
     VAL_num (VAL_int32 (Wasm_int.int_of_Z i32m z)).
@@ -171,8 +210,16 @@ End PP.
 
 Section Instantiation_func_extract.
 
+Definition resolve_type := resolve_inst_type.
+Definition expand_type := expand_inst_type.
+Definition expand_function := expand_inst_function_type.
+Definition native_function_type := native_func_defined_type.
+Definition lookup_function_type := lookup_func_defined_type.
+Definition instance_context := inst_typing.
+
 Definition empty_store_record : store_record := {|
     s_funcs := nil;
+    s_types := nil;
     s_tables := nil;
     s_mems := nil;
     s_globals := nil;
@@ -202,13 +249,29 @@ Definition invoke_extern (s: store_record) (ext: extern_value) (args: list value
   | EV_func fi =>
       match lookup_N s.(s_funcs) fi with
       | Some (FC_func_native (Tf ts1 ts2) _ _) =>
-          if (those (map (typeof_value s) args) == Some ts1) then
+          if values_typing s args ts1 then
             Some (v_to_e_list args ++ [::AI_invoke fi])%list
           else None
       | _ => None
       end
   | _ => None
   end.
+
+Lemma invoke_extern_typing s ext args es C :
+  invoke_extern s ext args = Some es ->
+  exists results, e_typing s C es (Tf nil results).
+Proof.
+  unfold invoke_extern.
+  destruct ext as [fi|a|a|a] => //.
+  destruct (lookup_N (s_funcs s) fi) as [cl|] eqn:Hlookup => //.
+  destruct cl as [[params results] inst code|ft hf] => //.
+  destruct (@values_typing PH.hfc memory_instance s args params) eqn:Hargs => //.
+  move => [<-]. exists results.
+  eapply et_composition' with (t2s := params).
+  - by apply et_values_typing.
+  - apply ety_invoke.
+    by unfold ext_func_typing; rewrite Hlookup.
+Qed.
 
 Definition wasm_global_get (s: store_record) (ext: extern_value) : option value :=
   match ext with

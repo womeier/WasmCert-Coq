@@ -75,7 +75,7 @@ Ltac solve_progress :=
 Ltac inst_typing_lookup :=
   try multimatch goal with
   | H1: inst_typing ?s ?i = Some ?t,
-    H2: lookup_N (inst_types ?i) ?n = Some _ |- _ =>
+    H2: lookup_function_type (inst_types ?i) ?n = Some _ |- _ =>
       let Hteq := fresh "Hteq" in
       specialize (Logic.eq_sym (inst_typing_type_lookup n H1)) as Hteq;
       rewrite H2 in Hteq
@@ -248,8 +248,41 @@ Ltac simplify_multieq :=
      injection H as Hinj; try subst
     end.
 
+Ltac normalize_selected_addresses :=
+  repeat match goal with
+    | Hit: inst_typing ?s ?inst = Some ?C,
+      Hindex: lookup_N (inst_mems ?inst) ?x = Some ?a,
+      Hdata: lookup_N (s_mems ?s) ?a = Some ?mem,
+      Hcontext: lookup_N (tc_mems ?C) ?x = Some ?mt |-
+        context [mt_address_type (meminst_type ?mem)] =>
+        let Hmemory := fresh "Hmemory" in
+        let Hmemtype := fresh "Hmemtype" in
+        assert (Hmemory: smem s inst x = Some mem) by
+          (unfold smem; rewrite Hindex Hdata; reflexivity);
+        pose proof (smem_type_context Hit Hcontext Hmemory) as Hmemtype;
+        progress rewrite Hmemtype
+    | Hit: inst_typing ?s ?inst = Some ?C,
+      Hindex: lookup_N (inst_tables ?inst) ?x = Some ?a,
+      Hdata: lookup_N (s_tables ?s) ?a = Some ?tab,
+      Hcontext: lookup_N (tc_tables ?C) ?x = Some ?tt |-
+        context [tt_address_type (tableinst_type ?tab)] =>
+        let Htable := fresh "Htable" in
+        let Htabletype := fresh "Htabletype" in
+        assert (Htable: stab s inst x = Some tab) by
+          (unfold stab; rewrite Hindex Hdata; reflexivity);
+        pose proof (stab_type_context Hit Hcontext Htable) as Htabletype;
+        progress rewrite Htabletype
+    end.
+
 Ltac resolve_e_typing :=
-  repeat lazymatch goal with
+  repeat (normalize_selected_addresses; lazymatch goal with
+    | |- context [Addressing.grow_failure ?a] =>
+        unfold Addressing.grow_failure
+    | |- context [T_num (typeof_num (Addressing.value_of_address ?a ?n))] =>
+        rewrite value_of_address_type
+    | Hdecode: Addressing.address_of_value ?a ?v = Some ?n |-
+        context [T_num (typeof_num ?v)] =>
+        rewrite (decoded_address_type Hdecode)
     (* This is usually required and should be applied at highest priority *)
     | H: is_true (?ts1 <ts: ?ts2) |-
         e_typing _ _ _ (Tf ?ts1 ?ts2) =>
@@ -260,7 +293,9 @@ Ltac resolve_e_typing :=
     | |- e_typing _ _ nil _ =>
         try eapply ety_subtyping; first (by apply ety_a' => //; apply bet_empty; eauto; try apply instr_subtyping_eq); eauto => //
     | |- e_typing _ _ [::AI_basic _] _ =>
-        try eapply ety_subtyping; first (by apply ety_a' => //; econstructor; eauto; try apply instr_subtyping_eq); eauto => //
+         try eapply ety_subtyping; first (by apply ety_a' => //; econstructor; eauto; try apply instr_subtyping_eq); eauto => //
+    | |- e_typing _ _ [::AI_ref_i31 _] _ =>
+         try eapply ety_subtyping; first (by apply ety_ref_i31); eauto => //
     | |- e_typing _ _ (v_to_e_list _) _ =>
         try eapply ety_subtyping; first (by eapply et_values_typing; eauto); eauto => //
     | |- e_typing _ _ ((cons ($VN ?v) ?es)) _ =>
@@ -280,5 +315,6 @@ Ltac resolve_e_typing :=
     | H : is_true (const_list _) |- _ =>
         let vs := fresh "vs" in
         apply const_es_exists in H as [vs ->]; invert_e_typing
-    | _ => unfold_store_operations; resolve_subtyping => //; simplify_lists; simplify_multieq; simpl in * => //
-    end.
+    | _ => unfold_store_operations; normalize_selected_addresses;
+        resolve_subtyping => //; simplify_lists; simplify_multieq; simpl in * => //
+    end).
