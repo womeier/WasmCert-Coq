@@ -402,7 +402,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       | BI_load t tp_sx marg =>
           match lookup_N C.(tc_mems) marg.(memarg_memory) with
           | Some _ =>
-              if load_store_t_bounds marg.(memarg_align) (option_projl tp_sx) t
+              if load_store_memarg_bounds marg (option_projl tp_sx) t
               then type_update ts [::(T_num T_i32)] [::T_num t]
               else None
           | None => None
@@ -426,7 +426,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       | BI_store t tp marg =>
           match lookup_N C.(tc_mems) marg.(memarg_memory) with
           | Some _ =>
-              if load_store_t_bounds marg.(memarg_align) tp t
+              if load_store_memarg_bounds marg tp t
               then type_update ts [::T_num t; T_num T_i32] [::]
               else None
           | None => None

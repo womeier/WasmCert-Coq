@@ -214,6 +214,24 @@ Proof.
     reflexivity.
 Qed.
 
+Lemma parse_u64_as_N_prefix_correspondence {m n} (bound : m <= n)
+    (input : SizedList Byte.byte m) :
+  AddressingParseque.flatten
+    (runParser (parse_u64_as_N (M := option)) bound input) =
+  AddressingBinary.decode_address Addressing.AT_i64 (@Sized.value _ _ _ input).
+Proof.
+  destruct input as [bs L]; simpl in L; subst m.
+  rewrite AddressingParseque.sized_list_refl.
+  change (AddressingParseque.flatten
+    (runParser (parse_u64_as_N (M := option)) bound (mkSizedList bs)) =
+    AddressingBinary.decode_address Addressing.AT_i64 bs).
+  rewrite <- AddressingParseque.decode_address_tokens_correct.
+  unfold parse_u64_as_N, AddressingParseque.parse_address, AddressingParseque.flatten.
+  cbn [runParser].
+  destruct (AddressingParseque.decode_address_tokens Addressing.AT_i64 (mkSizedList bs));
+    reflexivity.
+Qed.
+
 Lemma parse_u32_as_N_guards {m n} (bound : m <= n)
     (input : SizedList Byte.byte m) s :
   runParser (parse_u32_as_N (M := option)) bound input = Some s ->

@@ -42,11 +42,11 @@ Example dataidx_complete n :
 Proof. exact (parse_u32_binary_complete n). Qed.
 
 Example offset_sound n :
-  parser_sound (parse_static_offset (n := n)) binary_u32.
-Proof. exact (parse_u32_binary_sound n). Qed.
+  parser_sound (parse_static_offset (n := n)) binary_u64.
+Proof. exact (parse_u64_binary_sound n). Qed.
 
 Example offset_complete n :
-  parser_complete (parse_static_offset (n := n)) binary_u32.
-Proof. exact (parse_u32_binary_complete n). Qed.
+  parser_complete (parse_static_offset (n := n)) binary_u64.
+Proof. exact (parse_u64_binary_complete n). Qed.
 
 End PinnedContractAudit.

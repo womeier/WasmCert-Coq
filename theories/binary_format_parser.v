@@ -331,7 +331,9 @@ Definition parse_alignment_exponent {n} : byte_parser N n :=
   parse_u32_as_N.
 
 Definition parse_static_offset {n} : byte_parser N n :=
-  parse_u32_as_N.
+  (* Final Bmemarg has an unsigned 64-bit static offset regardless of the
+     selected memory. Address-width restrictions belong to validation. *)
+  parse_u64_as_N.
 
 Definition parse_memarg_tail {n} (a : N) : byte_parser memarg n :=
     match decode_memarg_flags a with

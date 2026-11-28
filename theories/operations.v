@@ -139,7 +139,13 @@ Definition mem_grow (m : meminst) (len_delta : N) : option meminst :=
     end
   else None.
 
+(** All memories in this pre-address-width AST are memory32. Final binary
+    syntax accepts u64 offsets; validation retains the memory32 bound. *)
+Definition memarg_offset32_valid (m_arg : memarg) : bool :=
+  N.ltb m_arg.(memarg_offset) 4294967296%N.
+
 Definition load_vec_bounds (lv_arg: load_vec_arg) (m_arg: memarg) : bool :=
+  memarg_offset32_valid m_arg &&
   match lv_arg with
   | LVA_extend ptv sx =>
       let (n, m) := ptv in
@@ -153,10 +159,12 @@ Definition load_vec_bounds (lv_arg: load_vec_arg) (m_arg: memarg) : bool :=
   end.
 
 Definition load_store_vec_lane_bounds (width: vwidth) (m_arg: memarg) (x: laneidx) : bool :=
-   (N.leb (N.pow 2 (memarg_align m_arg)) (width / 8%N))%N &&
-     (N.ltb x (128%N / width)%N).
+   memarg_offset32_valid m_arg &&
+   ((N.leb (N.pow 2 (memarg_align m_arg)) (width / 8%N))%N &&
+      (N.ltb x (128%N / width)%N)).
 
 Definition store_vec_bounds (m_arg: memarg) : bool :=
+      memarg_offset32_valid m_arg &&
       N.leb (N.pow 2 m_arg.(memarg_align)) v128_size.
 
 (* TODO: We crucially need documentation here. *)
@@ -1450,6 +1458,11 @@ Definition load_store_t_bounds (a : alignment_exponent) (tp : option packed_type
   | None => N.leb (N.pow 2 a) (tnum_length t)
   | Some tp' => N.leb (N.pow 2 a) (tp_length tp') && (tp_length tp' < tnum_length t) && (is_int_t t)
   end.
+
+Definition load_store_memarg_bounds (m_arg : memarg)
+    (tp : option packed_type) (t : number_type) : bool :=
+  memarg_offset32_valid m_arg &&
+  load_store_t_bounds m_arg.(memarg_align) tp t.
 
 Definition cvt_wrap t v : option value_num :=
   match t with

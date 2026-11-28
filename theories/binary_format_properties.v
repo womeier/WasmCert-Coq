@@ -118,11 +118,72 @@ Lemma prefix_u32 :
     (decode_uint 32 5).
 Proof. intros n input Hbound. apply production_u32_reference_decoder. Qed.
 
+(** Final-offset adapter, selectively reusing the width-bounded production
+    interface of tail@724b72b and memory64@3bd1f1d. No address-width AST or
+    alternative production decoder is imported. *)
+Lemma production_u64_reference_decoder n input
+    (bound : (List.length input <= n)%nat) :
+  observe_prefix
+    (runParser (parse_u64_as_N (Toks := SizedList byte) (M := option) (n := n))
+      bound (mkSizedList input)) = decode_uint 64 10 input.
+Proof.
+  change (AddressingParseque.flatten
+    (runParser (parse_u64_as_N (M := option)) bound (mkSizedList input)) =
+    decode_uint 64 10 input).
+  rewrite parse_u64_as_N_prefix_correspondence.
+  change (AddressingBinary.decode_address Addressing.AT_i64 input =
+    decode_uint 64 10 input).
+  unfold AddressingBinary.decode_address, decode_uint.
+  cbn [AddressingBinary.address_bytes Addressing.address_bound Addressing.address_bits].
+  rewrite addressing_decode_uleb_codec; reflexivity.
+Qed.
+
+Lemma prefix_u64 :
+  prefix_semantics
+    (fun n => (parse_u64_as_N : Parser (SizedList byte) byte option N n))
+    (decode_uint 64 10).
+Proof. intros n input Hbound; apply production_u64_reference_decoder. Qed.
+
+Definition u64_bound : N := 18446744073709551616%N.
+
+Definition binary_u64 (bytes : list byte) (v : N) :=
+  (List.length bytes <= 10)%nat /\
+  binary_codec.unsigned_leb bytes v /\ (v < u64_bound)%N.
+
+Lemma decode_u64_spec input v suffix :
+  decode_uint 64 10 input = Some (v, suffix) <->
+  exists bytes, input = bytes ++ suffix /\ binary_u64 bytes v.
+Proof.
+  rewrite <- (parse_uint_correct 64 10 (length input) input (Nat.le_refl _)).
+  apply parse_uint_spec.
+Qed.
+
+Lemma decode_binary_u64_suffix v suffix :
+  (v < u64_bound)%N ->
+  decode_uint 64 10 (binary_of_u64 v ++ suffix) = Some (v, suffix).
+Proof.
+  intro Range.
+  assert (Width : (length (binary_of_u64 v) <= 10)%nat).
+  { apply (encode_unsigned_length_bound 9).
+    change (Z.of_N v < 1180591620717411303424)%Z.
+    change (v < 18446744073709551616)%N in Range; lia. }
+  assert (Decoded : AddressingBinary.decode_address Addressing.AT_i64
+    (binary_of_u64 v ++ suffix) = Some (v, suffix)).
+  { apply AddressingBinary.decode_address_spec.
+    split; [exact Range |]. exists (binary_of_u64 v).
+    split; [reflexivity |]. split; [exact Width |].
+    apply unsigned_leb_addressing; apply encode_unsigned_sound. }
+  unfold AddressingBinary.decode_address in Decoded.
+  cbn [AddressingBinary.address_bytes Addressing.address_bound Addressing.address_bits]
+    in Decoded.
+  rewrite addressing_decode_uleb_codec in Decoded; exact Decoded.
+Qed.
+
 Definition decode_memarg_tail (flags: N) (input: list byte) :=
   match decode_memarg_flags flags with
   | Some (align, false) =>
       option_map (fun '(off, rest) => (Build_memarg off align N0, rest))
-        (decode_uint 32 5 input)
+        (decode_uint 64 10 input)
   | Some (align, true) =>
       option_map
         (fun '(args, tail) =>
@@ -130,7 +191,7 @@ Definition decode_memarg_tail (flags: N) (input: list byte) :=
         (match decode_uint 32 5 input with
          | Some (x, rest) =>
              option_map (fun '(off, tail) => ((x, off), tail))
-               (decode_uint 32 5 rest)
+                (decode_uint 64 10 rest)
          | None => None
          end)
   | None => None
@@ -150,8 +211,8 @@ Lemma prefix_memarg_tail : forall flags,
 Proof.
   intros flags. unfold parse_memarg_tail, decode_memarg_tail.
   destruct (decode_memarg_flags flags) as [[align [|]]|].
-  - apply prefix_map. apply prefix_and; apply prefix_u32.
-  - apply prefix_map. apply prefix_u32.
+  - apply prefix_map. apply prefix_and; [apply prefix_u32 |apply prefix_u64].
+  - apply prefix_map. apply prefix_u64.
   - apply prefix_fail.
 Qed.
 
@@ -177,7 +238,7 @@ Qed.
 Theorem decode_binary_memarg_suffix : forall marg suffix,
   N.lt marg.(memarg_align) 64 ->
   N.lt marg.(memarg_memory) u32_bound ->
-  N.lt marg.(memarg_offset) u32_bound ->
+  N.lt marg.(memarg_offset) u64_bound ->
   decode_memarg (binary_of_memarg marg ++ suffix) = Some (marg, suffix).
 Proof.
   intros [off align x] suffix Halign Hx Hoff.
@@ -192,18 +253,18 @@ Proof.
   simpl.
   destruct (N.eqb x 0) eqn:Hzero.
   - apply N.eqb_eq in Hzero. subst x.
-    cbn -[binary_of_u32 decode_uint].
-    rewrite decode_binary_u32_suffix by assumption. reflexivity.
+    cbn -[binary_of_u64 decode_uint].
+    rewrite decode_binary_u64_suffix by assumption. reflexivity.
   - rewrite <- List.app_assoc.
     rewrite decode_binary_u32_suffix by assumption.
-    rewrite decode_binary_u32_suffix by assumption. reflexivity.
+    rewrite decode_binary_u64_suffix by assumption. reflexivity.
 Qed.
 
 Theorem binary_memarg_prefix_round_trip : forall marg suffix bound
   (Hbound: (List.length (binary_of_memarg marg ++ suffix) <= bound)%nat),
   N.lt marg.(memarg_align) 64 ->
   N.lt marg.(memarg_memory) u32_bound ->
-  N.lt marg.(memarg_offset) u32_bound ->
+  N.lt marg.(memarg_offset) u64_bound ->
   observe_prefix (runParser
     (parse_memarg: Parser (SizedList byte) byte option memarg bound)
     Hbound (mkSizedList (binary_of_memarg marg ++ suffix))) = Some (marg, suffix).
@@ -220,13 +281,13 @@ Inductive binary_memarg : list byte -> memarg -> Prop :=
 | binary_memarg_compact : forall aligns offsets align off,
     binary_u32 aligns align ->
     N.lt align 64 ->
-    binary_u32 offsets off ->
+    binary_u64 offsets off ->
     binary_memarg (aligns ++ offsets) (Build_memarg off align N0)
 | binary_memarg_indexed : forall flags indices offsets flag x off,
     binary_u32 flags flag ->
     N.le 64 flag -> N.lt flag 128 ->
     binary_u32 indices x ->
-    binary_u32 offsets off ->
+    binary_u64 offsets off ->
     binary_memarg (flags ++ indices ++ offsets)
       (Build_memarg off (N.sub flag 64) x).
 
@@ -258,11 +319,11 @@ Proof.
   destruct explicit.
   - destruct (decode_uint 32 5 rest) as [[x tail]|] eqn:Hindex;
       try discriminate.
-    destruct (decode_uint 32 5 tail) as [[off after]|] eqn:Hoffset;
+    destruct (decode_uint 64 10 tail) as [[off after]|] eqn:Hoffset;
       try discriminate.
     inversion H; subst marg after.
     apply decode_u32_spec in Hindex.
-    apply decode_u32_spec in Hoffset.
+    apply decode_u64_spec in Hoffset.
     destruct Hindex as [index_bytes [Hrest Hx]].
     destruct Hoffset as [offset_bytes [Htail Hoff]].
     exists (flag_bytes ++ index_bytes ++ offset_bytes).
@@ -270,10 +331,10 @@ Proof.
     + subst input rest tail. now repeat rewrite List.app_assoc.
     + replace align with (N.sub flags 64) by lia.
       eapply binary_memarg_indexed; try eassumption; lia.
-  - destruct (decode_uint 32 5 rest) as [[off after]|] eqn:Hoffset;
+  - destruct (decode_uint 64 10 rest) as [[off after]|] eqn:Hoffset;
       try discriminate.
     inversion H; subst marg after.
-    apply decode_u32_spec in Hoffset.
+    apply decode_u64_spec in Hoffset.
     destruct Hoffset as [offset_bytes [Hrest Hoff]].
     exists (flag_bytes ++ offset_bytes). split.
     + subst input rest. now rewrite List.app_assoc.
@@ -294,8 +355,8 @@ Proof.
     { apply decode_u32_spec. exists aligns. auto. }
     rewrite Ha'. unfold decode_memarg_tail, decode_memarg_flags.
     apply N.ltb_lt in Hlo. rewrite Hlo.
-    assert (Ho': decode_uint 32 5 (offsets ++ suffix) = Some (off, suffix)).
-    { apply decode_u32_spec. exists offsets. auto. }
+    assert (Ho': decode_uint 64 10 (offsets ++ suffix) = Some (off, suffix)).
+    { apply decode_u64_spec. exists offsets. auto. }
     rewrite Ho'. reflexivity.
   - unfold decode_memarg. repeat rewrite <- List.app_assoc.
     assert (Hf': decode_uint 32 5 (flags ++ indices ++ offsets ++ suffix) =
@@ -307,8 +368,8 @@ Proof.
       Some (x, offsets ++ suffix)).
     { apply decode_u32_spec. exists indices. auto. }
     rewrite Hx'.
-    assert (Ho': decode_uint 32 5 (offsets ++ suffix) = Some (off, suffix)).
-    { apply decode_u32_spec. exists offsets. auto. }
+    assert (Ho': decode_uint 64 10 (offsets ++ suffix) = Some (off, suffix)).
+    { apply decode_u64_spec. exists offsets. auto. }
     rewrite Ho'. reflexivity.
 Qed.
 
@@ -327,7 +388,7 @@ Qed.
 Theorem binary_memarg_run_round_trip : forall marg,
   N.lt marg.(memarg_align) 64 ->
   N.lt marg.(memarg_memory) u32_bound ->
-  N.lt marg.(memarg_offset) u32_bound ->
+  N.lt marg.(memarg_offset) u64_bound ->
   binary_format_parser.run (binary_of_memarg marg)
     (fun n => (parse_memarg: Parser (SizedList byte) byte option memarg n)) =
     Some marg.

@@ -67,6 +67,36 @@ print(f'(assert_invalid (module binary {escaped(bad_index)}) "unknown memory")')
 reserved_flags = module(b"\x41\x00\x28\x80\x01\x00")
 print(f'(assert_malformed (module binary {escaped(reserved_flags)}) "malformed memop flags")')
 
+# Final memargs decode u64 offsets, then memory32 validation rejects offsets
+# >= 2^32. These must be INVALID, not MALFORMED or silently narrowed.
+for flag, memory in ((0, None), (64, 0), (65, 1)):
+    immediate = uleb(flag) + (b"" if memory is None else uleb(memory)) + uleb(2**32)
+    oversized = module(b"\x41\x00\x28" + immediate, memories=(1, 1))
+    print(f'(assert_invalid (module binary {escaped(oversized)}) "offset outside memory32")')
+
+# All 22 ordinary SIMD memory forms retain the same final u64 offset rule.
+for opcode in list(range(12)) + [92, 93] + list(range(84, 92)):
+    lane = b"\x00" if 84 <= opcode <= 91 else b""
+    # Stores and lane forms consume a vector; loads without lanes do not.
+    vector_arg = b"\xfd\x0c" + bytes(16) if opcode == 11 or 84 <= opcode <= 91 else b""
+    prefix = b"\x41\x00" + vector_arg + b"\xfd" + uleb(opcode) + b"\x40\x00"
+    instruction = prefix + uleb(2**32) + lane
+    valid_instruction = prefix + b"\x00" + lane
+    # Drop the vector result of loads and return an i32 to keep type errors
+    # outside the memarg from providing a false-positive INVALID assertion.
+    if opcode != 11 and not 88 <= opcode <= 91:
+        instruction += b"\x1a"
+        valid_instruction += b"\x1a"
+    check(valid_instruction + b"\x41\x00", 0)
+    oversized = module(instruction + b"\x41\x00")
+    print(f'(assert_invalid (module binary {escaped(oversized)}) "SIMD offset outside memory32")')
+
+too_large_u64 = module(b"\x41\x00\x28\x00" + uleb(2**64))
+print(f'(assert_malformed (module binary {escaped(too_large_u64)}) "offset outside u64")')
+largest_memory32 = module(b"\x41\x00\x28\x00" + uleb(2**32 - 1))
+print(f"(module binary {escaped(largest_memory32)})")
+print('(assert_trap (invoke "run") "out of bounds memory access")')
+
 # Nonzero memory selection, including isolation of writes and growth.
 arg1 = b"\x40\x01\x00"
 check(b"\x3f\x01", 2, memories=(1, 2))

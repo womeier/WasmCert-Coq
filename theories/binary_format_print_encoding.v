@@ -208,7 +208,7 @@ Qed.
 
 (** Wire-encodability domain, deliberately distinct from validation:
     oversized but representable alignments may still be invalid Wasm.
-    The imported memory domain currently requires offset < 2^32, memory
+    The final memory wire domain requires offset < 2^64, memory
     index < 2^32, alignment < 64, and raw lane index < 256. *)
 Inductive atomic_binary_wf : basic_instruction -> Prop :=
 | ABW_fixed : forall opcode be,

@@ -252,7 +252,7 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       exists mt,
       tf = (Tf [::T_num T_i32] [::T_num t]) /\
         lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
-        load_store_t_bounds marg.(memarg_align) (option_projl tp_sx) t
+        load_store_memarg_bounds marg (option_projl tp_sx) t
   | BI_load_vec lvarg marg =>
       exists mt,
       tf = (Tf [::T_num T_i32] [::T_vec T_v128]) /\
@@ -267,7 +267,7 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       exists mt,
       tf = (Tf [::T_num T_i32; T_num t] [::]) /\
         lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
-        load_store_t_bounds marg.(memarg_align) tp t
+        load_store_memarg_bounds marg tp t
   | BI_store_vec marg =>
       exists mt,
       tf = (Tf [::T_num T_i32; T_vec T_v128] [::]) /\

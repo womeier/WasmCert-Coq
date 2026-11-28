@@ -41,6 +41,9 @@ Definition binary_of_N (n: N) : list byte :=
 Definition binary_of_u32 (n: u32) : list byte :=
   binary_of_N n.
 
+Definition binary_of_u64 (n : N) : list byte :=
+  binary_of_N n.
+
 Definition binary_of_u32_nat (n : nat) : list byte :=
   leb128.encode_unsigned (N.of_nat n).
 
@@ -76,7 +79,7 @@ Definition binary_of_memarg (marg: memarg) : list byte :=
   binary_of_u32 (memarg_flags marg) ++
     (if N.eqb marg.(memarg_memory) 0 then nil
      else binary_of_memidx marg.(memarg_memory)) ++
-    binary_of_u32 marg.(memarg_offset).
+    binary_of_u64 marg.(memarg_offset).
 
 Definition binary_of_i32 (x : i32) : list byte :=
   leb128.encode_signed (Wasm_int.Int32.signed x).
