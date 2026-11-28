@@ -291,12 +291,20 @@ Definition module_table_typing (c: t_context) (t : module_table) (tabt: table_ty
 Definition module_mem_typing (c: t_context) (m : module_mem) (mt: memory_type) : bool :=
   memtype_valid m.(modmem_type) && (m.(modmem_type) == mt).
 
+Definition const_binop (t : number_type) (op : binop) : bool :=
+  match t, op with
+  | T_i32, Binop_i BOI_add | T_i32, Binop_i BOI_sub | T_i32, Binop_i BOI_mul
+  | T_i64, Binop_i BOI_add | T_i64, Binop_i BOI_sub | T_i64, Binop_i BOI_mul => true
+  | _, _ => false
+  end.
+
 Definition const_expr (c : t_context) (b_e : basic_instruction) : bool :=
   match b_e with
   | BI_const_num _ => true
   | BI_const_vec _ => true
   | BI_ref_null _ => true
   | BI_ref_func _ => true
+  | BI_binop t op => const_binop t op
   | BI_global_get k =>
       match lookup_N c.(tc_globals) k with
       | None => false
@@ -307,6 +315,52 @@ Definition const_expr (c : t_context) (b_e : basic_instruction) : bool :=
 
 Definition const_exprs (c : t_context) (es : list basic_instruction) : bool :=
   seq.all (const_expr c) es.
+
+Definition extended_const_expr (c : t_context) (e : basic_instruction) : bool :=
+  const_expr c e.
+
+Definition extended_const_exprs (c : t_context) (es : list basic_instruction) : bool :=
+  seq.all (extended_const_expr c) es.
+
+Definition const_context_add_global (c : t_context) (gt : global_type) : t_context :=
+  {| tc_types := c.(tc_types);
+     tc_funcs := c.(tc_funcs);
+     tc_tables := c.(tc_tables);
+     tc_mems := c.(tc_mems);
+     tc_globals := c.(tc_globals) ++ [::gt];
+     tc_elems := c.(tc_elems);
+     tc_datas := c.(tc_datas);
+     tc_locals := c.(tc_locals);
+     tc_labels := c.(tc_labels);
+     tc_return := c.(tc_return);
+     tc_refs := c.(tc_refs) |}.
+
+Definition const_context_add_globals (c : t_context) (gts : list global_type) : t_context :=
+  {| tc_types := c.(tc_types);
+     tc_funcs := c.(tc_funcs);
+     tc_tables := c.(tc_tables);
+     tc_mems := c.(tc_mems);
+     tc_globals := c.(tc_globals) ++ gts;
+     tc_elems := c.(tc_elems);
+     tc_datas := c.(tc_datas);
+     tc_locals := c.(tc_locals);
+     tc_labels := c.(tc_labels);
+     tc_return := c.(tc_return);
+     tc_refs := c.(tc_refs) |}.
+
+Definition extended_global_typing (c : t_context) (g : module_global) : Prop :=
+  extended_const_exprs c g.(modglob_init) /\
+  be_typing c g.(modglob_init) (Tf nil [::g.(modglob_type).(tg_t)]).
+
+(* Check each initializer before exposing its own type.  Thus immutable
+   predecessors are visible, but self and forward references are not. *)
+Fixpoint extended_globals_typing (c : t_context) (gs : list module_global) : Prop :=
+  match gs with
+  | nil => True
+  | g :: gs' =>
+      extended_global_typing c g /\
+      extended_globals_typing (const_context_add_global c g.(modglob_type)) gs'
+  end.
 
 Definition module_global_typing (c : t_context) (g : module_global) (tg : global_type) : Prop :=
   let '{| modglob_type := tg'; modglob_init := es |} := g in
@@ -473,11 +527,7 @@ Definition module_filter_funcidx (m: module) : list funcidx :=
 Definition export_name_unique (exps: list module_export) : bool :=
   List.nodup name_eq_dec (map modexp_name exps) == (map modexp_name exps).
 
-(* Artificial restriction in and prior to Wasm 2.0 that only one memory is allowed. Drop this condition when a future update allows this. *)
-Definition wasm_2_memory_count_check (ms: list module_mem) (ims: list memory_type) : bool :=
-  (List.length ms) + (List.length ims) <= 1.
-                            
-(* We deliberately omit the artificial restriction on the length of memory here. *)
+(* Memory indices range over all imported and defined memories. *)
 Definition module_typing (m : module) (impts : list extern_type) (expts : list extern_type) : Prop :=
   exists fts tts mts gts rts dts,
   let '{|
@@ -527,10 +577,9 @@ Definition module_typing (m : module) (impts : list extern_type) (expts : list e
   List.Forall2 (module_func_typing c) fs fts /\
   List.Forall2 (module_table_typing c') ts tts /\
   List.Forall2 (module_mem_typing c') ms mts /\
-  wasm_2_memory_count_check ms ims /\
-  List.Forall2 (module_global_typing c') gs gts /\
-  List.Forall2 (module_elem_typing c') els rts /\
-  List.Forall2 (module_data_typing c') ds dts /\
+  (gts = map modglob_type gs /\ extended_globals_typing c' gs) /\
+  List.Forall2 (module_elem_typing (const_context_add_globals c' gts)) els rts /\
+  List.Forall2 (module_data_typing (const_context_add_globals c' gts)) ds dts /\
   pred_option (module_start_typing c) i_opt /\
   List.Forall2 (module_import_typing c) imps impts /\
   List.Forall2 (module_export_typing c) exps expts /\
@@ -547,6 +596,33 @@ Definition instantiate_globals f (hs : host_state) (s' : store_record) m (g_init
       opsem.reduce_trans (hs, s', f, to_e_list g.(modglob_init))
                          (hs, s', f, [::v_to_e v]))
     m.(mod_globals) g_inits.
+
+Definition const_frame_add_global (f : frame) (addr : globaladdr) : frame :=
+  let inst := f.(f_inst) in
+  Build_frame f.(f_locs)
+    {| inst_types := inst.(inst_types);
+       inst_funcs := inst.(inst_funcs);
+       inst_tables := inst.(inst_tables);
+       inst_mems := inst.(inst_mems);
+       inst_globals := inst.(inst_globals) ++ [::addr];
+       inst_elems := inst.(inst_elems);
+       inst_datas := inst.(inst_datas);
+       inst_exports := inst.(inst_exports) |}.
+
+(* Sequential allocation makes precisely the already initialized globals
+   available to the next initializer.  This relation is the execution-side
+   counterpart of [extended_globals_typing]. *)
+Inductive global_init_chain (hs : host_state) :
+    store_record -> frame -> list module_global ->
+    store_record -> frame -> list value -> Prop :=
+| global_init_chain_nil : forall s f,
+    global_init_chain hs s f nil s f nil
+| global_init_chain_cons : forall s f g gs v s1 addr s2 f2 vs,
+    reduce_trans (hs, s, f, to_e_list g.(modglob_init))
+                 (hs, s, f, [::v_to_e v]) ->
+    alloc_glob s (g, v) = (s1, addr) ->
+    global_init_chain hs s1 (const_frame_add_global f addr) gs s2 f2 vs ->
+    global_init_chain hs s f (g :: gs) s2 f2 (v :: vs).
 
 Definition instantiate_elems f (hs : host_state) (s' : store_record) m (r_inits: list (list value_ref)) : Prop :=
   List.Forall2
@@ -578,7 +654,7 @@ Definition get_init_expr_data (i: nat) (data: module_data) : list basic_instruct
   match data.(moddata_mode) with
   | MD_passive => nil
   | MD_active midx bes =>
-      bes ++ [::BI_const_num (VAL_int32 (Wasm_int.int_zero i32m)); BI_const_num (VAL_int32 (Wasm_int.int_of_Z i32m (Z.of_nat (length data.(moddata_init))))); BI_memory_init (N.of_nat i); BI_data_drop (N.of_nat i)]
+      bes ++ [::BI_const_num (VAL_int32 (Wasm_int.int_zero i32m)); BI_const_num (VAL_int32 (Wasm_int.int_of_Z i32m (Z.of_nat (length data.(moddata_init))))); BI_memory_init midx (N.of_nat i); BI_data_drop (N.of_nat i)]
   end.
 
 Definition get_init_expr_datas (datas: list module_data) : list basic_instruction :=
@@ -634,7 +710,7 @@ Definition instantiate (s : store_record) (m : module) (v_imps : list extern_val
     List.Forall2 (external_typing s) v_imps t_imps /\
     List.Forall2 import_subtyping t_imps t_imps_mod /\
     alloc_module s m v_imps g_inits r_inits (s_end, inst) /\
-    let inst_init := Build_moduleinst nil inst.(inst_funcs) nil nil (ext_globals v_imps) nil nil nil in
+    let inst_init := Build_moduleinst nil inst.(inst_funcs) nil nil inst.(inst_globals) nil nil nil in
     let f_init := Build_frame nil inst_init in
     (* Init values *)
     instantiate_globals f_init hs' s_end m g_inits /\

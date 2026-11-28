@@ -105,6 +105,18 @@ Definition module_global_type_checker (c : t_context) (mg : module_global) : boo
   const_exprs c es &&
   type_checker.b_e_type_checker c es (Tf nil [::tg.(tg_t)]).
 
+Definition extended_global_type_checker (c : t_context) (g : module_global) : bool :=
+  extended_const_exprs c g.(modglob_init) &&
+  type_checker.b_e_type_checker c g.(modglob_init) (Tf nil [::g.(modglob_type).(tg_t)]).
+
+Fixpoint extended_globals_type_checker (c : t_context) (gs : list module_global) : bool :=
+  match gs with
+  | nil => true
+  | g :: gs' =>
+      extended_global_type_checker c g &&
+      extended_globals_type_checker (const_context_add_global c g.(modglob_type)) gs'
+  end.
+
 Definition module_elem_mode_checker (c: t_context) (emode: module_elemmode) (reftype: reference_type) : bool :=
   match emode with
   | ME_passive => true
@@ -198,10 +210,9 @@ Definition module_type_checker (m : module) : option ((list extern_type) * (list
     if seq.all (module_func_type_checker c) fs &&
        seq.all (module_table_type_checker c) ts &&
        seq.all (module_mem_type_checker c) ms &&
-       wasm_2_memory_count_check ms ims &&  
-       seq.all (module_global_type_checker c') gs &&
-       seq.all (module_elem_type_checker c') els &&
-       seq.all (module_data_type_checker c') ds &&
+       extended_globals_type_checker c' gs &&
+       seq.all (module_elem_type_checker (const_context_add_globals c' gts)) els &&
+       seq.all (module_data_type_checker (const_context_add_globals c' gts)) ds &&
        pred_option (module_start_type_checker c) i_opt &&
        export_name_unique exps
       then
@@ -218,7 +229,53 @@ Definition module_type_checker (m : module) : option ((list extern_type) * (list
 Definition external_type_checker (s : store_record) (v : extern_value): option extern_type :=
   ext_typing s v.
 
-(* Auxiliary definition for evaluating constant expressios, instead of using the full interpreter. *)
+(* Stack head is the most recently produced value.  Unlike the full interpreter,
+   this evaluator needs no fuel: every recursive call consumes an instruction. *)
+Definition interp_const_step (s : store_record) (f : frame)
+    (e : basic_instruction) (vs : list value) : option (list value) :=
+      match e with
+      | BI_const_num v => Some (VAL_num v :: vs)
+      | BI_const_vec v => Some (VAL_vec v :: vs)
+      | BI_ref_null t => Some (VAL_ref (VAL_ref_null t) :: vs)
+      | BI_ref_func i =>
+          match lookup_N f.(f_inst).(inst_funcs) i with
+          | Some addr => Some (VAL_ref (VAL_ref_func addr) :: vs)
+          | None => None
+          end
+      | BI_global_get i =>
+          match sglob_val s f.(f_inst) i with
+          | Some v => Some (v :: vs)
+          | None => None
+          end
+      | BI_binop t op =>
+          if const_binop t op then
+            match vs with
+            | VAL_num v2 :: VAL_num v1 :: vs' =>
+                if binop_typecheck v1 v2 t op then
+                  match app_binop op v1 v2 with
+                  | Some v => Some (VAL_num v :: vs')
+                  | None => None
+                  end
+                else None
+            | _ => None
+            end
+          else None
+      | _ => None
+      end.
+
+Fixpoint interp_const_stack (s : store_record) (f : frame)
+    (es : list basic_instruction) (vs : list value) : option (list value) :=
+  match es with
+  | nil => Some vs
+  | e :: es' =>
+      match interp_const_step s f e vs with
+      | Some vs' => interp_const_stack s f es' vs'
+      | None => None
+      end
+  end.
+
+(* Auxiliary definition for evaluating constant expressions, instead of using
+   the full interpreter.  A complete initializer must produce exactly one value. *)
 Definition interp_get_const (s : store_record) (f : frame) (b_es : list basic_instruction) : option value :=
   match b_es with
   | [::BI_const_num v] => Some (VAL_num v)
@@ -229,9 +286,12 @@ Definition interp_get_const (s : store_record) (f : frame) (b_es : list basic_in
       | Some addr => Some (VAL_ref (VAL_ref_func addr))
       | None => None
       end
-  | [::BI_global_get i] =>
-      sglob_val s f.(f_inst) i
-  | _ => None
+  | [::BI_global_get i] => sglob_val s f.(f_inst) i
+  | _ =>
+      match interp_const_stack s f b_es nil with
+      | Some [::v] => Some v
+      | _ => None
+      end
   end.
 
 Definition interp_get_vref (s : store_record) (f: frame) (b_es : list basic_instruction) : option value_ref :=
@@ -248,6 +308,22 @@ Definition interp_get_i32 (s : store_record) (f: frame) (b_es : list basic_instr
 
 Definition get_global_inits (s: store_record) (f: frame) (gs: list module_global) : option (list value):=
   those (map (fun g => interp_get_const s f g.(modglob_init)) gs).
+
+Fixpoint interp_global_chain (s : store_record) (f : frame) (gs : list module_global)
+    : option (store_record * frame * list value) :=
+  match gs with
+  | nil => Some (s, f, nil)
+  | g :: gs' =>
+      match interp_get_const s f g.(modglob_init) with
+      | None => None
+      | Some v =>
+          let '(s1, addr) := alloc_glob s (g, v) in
+          match interp_global_chain s1 (const_frame_add_global f addr) gs' with
+          | None => None
+          | Some (s2, f2, vs) => Some (s2, f2, v :: vs)
+          end
+      end
+  end.
 
 Definition get_elem_inits (s: store_record) (f: frame) (els: list module_element) : option (list (list value_ref)):=
   those (map (fun el => those (map (fun e => interp_get_vref s f e) el.(modelem_init))) els).
@@ -277,6 +353,12 @@ Definition interp_alloc_module (s : store_record) (m : module) (imps : list exte
   let '(s', i_ds) := alloc_datas s5 m.(mod_datas) in
   (s', inst).
 
+Definition module_init_frame (s : store_record) (m : module) (v_imps : list extern_value) : frame :=
+  Build_frame nil
+    (Build_moduleinst nil
+      (ext_funcs v_imps ++ iota_N (length s.(s_funcs)) (length m.(mod_funcs)))
+      nil nil (ext_globals v_imps) nil nil nil).
+
 (* Use a monad for error reporting at some point? *)
 Definition interp_instantiate (hs: host_state) (s : store_record) (m : module) (v_imps : list extern_value) : option (host_state * store_record * frame * list basic_instruction) * string :=
   match module_type_checker m with
@@ -285,22 +367,11 @@ Definition interp_instantiate (hs: host_state) (s : store_record) (m : module) (
       match those (map (external_type_checker s) v_imps) with
       | Some t_imps =>
           if all2 import_subtyping t_imps t_imps_mod then
-            let inst_init :=
-              {|
-                inst_types := nil;
-                inst_funcs := (ext_funcs v_imps) ++ (map N.of_nat (iota (length (s_funcs s)) (length (mod_funcs m))));
-                inst_tables := nil;
-                inst_mems := nil;
-                inst_globals := ext_globals v_imps;
-                inst_elems := nil;
-                inst_datas := nil;
-                inst_exports := nil;
-              |} in
-            let f_init := Build_frame nil inst_init in
-            match get_global_inits s f_init m.(mod_globals) with
+            let f_init := module_init_frame s m v_imps in
+            match interp_global_chain s f_init m.(mod_globals) with
             | None => (None, "Error in evaluating global initialisers")
-            | Some g_inits =>
-                match get_elem_inits s f_init m.(mod_elems) with
+            | Some (s_init, f_init_final, g_inits) =>
+                match get_elem_inits s_init f_init_final m.(mod_elems) with
                 | Some r_inits =>
                     let '(s', inst_final) := interp_alloc_module s m v_imps g_inits r_inits in
                     let f_final := Build_frame nil inst_final in

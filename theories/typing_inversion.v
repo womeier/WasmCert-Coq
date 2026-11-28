@@ -251,54 +251,55 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
   | BI_load t tp_sx marg =>
       exists mt,
       tf = (Tf [::T_num T_i32] [::T_num t]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
-        load_store_t_bounds marg.(memarg_align) (option_projl tp_sx) t
+        lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
+        load_store_memarg_bounds marg (option_projl tp_sx) t
   | BI_load_vec lvarg marg =>
       exists mt,
       tf = (Tf [::T_num T_i32] [::T_vec T_v128]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
+        lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
         load_vec_bounds lvarg marg
   | BI_load_vec_lane width marg x =>
       exists mt,
       tf = (Tf [::T_num T_i32; T_vec T_v128] [::T_vec T_v128]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
+        lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
         load_store_vec_lane_bounds width marg x
   | BI_store t tp marg =>
       exists mt,
       tf = (Tf [::T_num T_i32; T_num t] [::]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
-        load_store_t_bounds marg.(memarg_align) tp t
+        lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
+        load_store_memarg_bounds marg tp t
   | BI_store_vec marg =>
       exists mt,
       tf = (Tf [::T_num T_i32; T_vec T_v128] [::]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
+        lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
         load_vec_bounds LVA_none marg
   | BI_store_vec_lane width marg x =>
       exists mt,
       tf = (Tf [::T_num T_i32; T_vec T_v128] [::]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
+        lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
         load_store_vec_lane_bounds width marg x
-  | BI_memory_size =>
+  | BI_memory_size x =>
       exists mt,
       tf = (Tf [::] [::T_num T_i32]) /\
-        lookup_N (tc_mems C) 0%N = Some mt
-  | BI_memory_grow =>
+        lookup_N (tc_mems C) x = Some mt
+  | BI_memory_grow x =>
       exists mt,
       tf = (Tf [::T_num T_i32] [::T_num T_i32]) /\
-        lookup_N (tc_mems C) 0%N = Some mt
-  | BI_memory_fill =>
+        lookup_N (tc_mems C) x = Some mt
+  | BI_memory_fill x =>
       exists mt,
       tf = (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::]) /\
-        lookup_N (tc_mems C) 0%N = Some mt
-  | BI_memory_copy =>
-      exists mt,
+        lookup_N (tc_mems C) x = Some mt
+  | BI_memory_copy x y =>
+      exists mt_dst mt,
       tf = (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::]) /\
-        lookup_N (tc_mems C) 0%N = Some mt
-  | BI_memory_init x =>
+        lookup_N (tc_mems C) x = Some mt_dst /\
+        lookup_N (tc_mems C) y = Some mt
+  | BI_memory_init x y =>
       exists mt dt,
       tf = (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::]) /\
-        lookup_N (tc_mems C) 0%N = Some mt /\
-        lookup_N (tc_datas C) x = Some dt
+        lookup_N (tc_mems C) x = Some mt /\
+        lookup_N (tc_datas C) y = Some dt
   | BI_data_drop x =>
       exists dt,
       tf = (Tf nil nil) /\
@@ -977,22 +978,17 @@ Proof.
   by rewrite Hoption2.
 Qed.
 
-Lemma mem_context_store: forall s i C,
+Lemma mem_context_store: forall s i C x mt,
     inst_typing s i = Some C ->
-    tc_mems C <> [::] ->
-    exists (n: memaddr), smem_ind s i = Some n /\
+    lookup_N (tc_mems C) x = Some mt ->
+    exists (n: memaddr), smem_ind s i x = Some n /\
               lookup_N (s_mems s) n <> None.
 Proof.
-  move => s i C HIT HMemory.
-  unfold inst_typing, typing.inst_typing in HIT.
-  destruct i => //=. 
-  remove_bools_options; simpl in *.
-  destruct l1 => //.
-  eapply those_lookup_inv with (i := 0) in Hoption1; eauto; last by eauto.
-  rewrite List.nth_error_map in Hoption1.
-  unfold ext_mem_typing in Hoption1.
-  remove_bools_options; simpl in *.
-  exists m0; by rewrite Hoption1.
+  move => s i C x mt HIT HMemory.
+  eapply inst_typing_mem_lookup_inv in HMemory as [a [Hext Ha]]; eauto.
+  exists a; split; first by unfold smem_ind.
+  unfold ext_mem_typing in Hext.
+  by destruct (lookup_N (s_mems s) a).
 Qed.
 
 Lemma Lfilled_break_typing: forall n m k (lh: lholed n) vs LI ts s C t2s tss,

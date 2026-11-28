@@ -4,6 +4,7 @@ From mathcomp Require Import ssreflect eqtype seq ssrbool ssrfun ssrnat.
 From Stdlib Require Import Program.Equality NArith.
 Require Export instantiation_spec.
 Require Export type_preservation properties.
+From Wasm Require Import extended_const.
 
 (* see common.v *)
 Set SsrOldRewriteGoalsOrder.
@@ -419,54 +420,6 @@ Proof.
     + by rewrite catA => /=.
 Qed.
 
-Lemma bet_const_exprs_len tc es t1 t2:
-  const_exprs tc es ->
-  be_typing tc es (Tf t1 t2) ->
-  length t2 = length es + length t1.
-Proof.
-  move: t1 t2.
-  induction es; move => t1 t2 Hconst Hbet.
-  { invert_be_typing; subst.
-    apply values_subtyping_size in Hbet.
-    by repeat rewrite length_is_size.
-  }
-  { rewrite <- cat1s in Hbet.
-    invert_be_typing.
-    simpl in Hconst; remove_bools_options.
-    destruct tf_principal.
-    eapply IHes in H2_comp => //.
-    unfold const_expr in H.
-    rewrite H2_comp => /=.
-    destruct a => //; invert_be_typing; simpl in Hinvgoal.
-    all: try by
-      (injection Hinvgoal as -> ->;
-      apply instr_subtyping_size_exact in Htisub; simpl in *;
-      repeat rewrite length_is_size;
-         by lias).
-    all: by
-      (extract_premise;
-       injection Hconjl as -> ->;
-      apply instr_subtyping_size_exact in Htisub; simpl in *;
-      repeat rewrite length_is_size;
-         by lias).
-  }
-Qed.
-  
-Lemma const_exprs_impl tc es t:
-  const_exprs tc es ->
-  be_typing tc es (Tf [::] [::t]) ->
-  exists e, es = [:: e] /\ const_expr tc e.
-Proof.
-  move => Hconst Hbet.
-  eapply bet_const_exprs_len in Hbet => //.
-  do 2 destruct es => //=.
-  exists b; split => //.
-  unfold const_exprs in Hconst.
-  simpl in Hconst.
-  move/andP in Hconst.
-  by destruct Hconst.
-Qed.
-
 Lemma value_no_reduce (hs hs': host_state) s f v s' f' e':
   reduce hs s f [::$V v] hs' s' f' e' ->
   False.
@@ -779,49 +732,42 @@ Lemma init_value_typing: forall C hs s f bes v t,
   value_typing s v t.
 Proof.
   move => C hs s f bes v t Hreduce Hconst Hbet Hsfunc Hsglobtype.
-  eapply const_exprs_impl in Hconst as [be [-> Hconst]]; eauto.
-  destruct be => //; invert_be_typing.
-  (* VAL_num *)
-  { replace (to_e_list [::BI_const_num v0]) with ([::$V (VAL_num v0)]) in Hreduce; last done.
-    apply reduce_trans_value in Hreduce; subst.
-    unfold value_typing => /=.
-    by simplify_subtyping.
-  }
-  (* VAL_vec *)
-  { replace (to_e_list [::BI_const_vec v0]) with ([::$V (VAL_vec v0)]) in Hreduce; last done.
-    apply reduce_trans_value in Hreduce; subst.
-    unfold value_typing => /=.
-    by simplify_subtyping.
-  }
-  (* ref_null *)
-  { replace (to_e_list [::BI_ref_null r]) with ([::$V (VAL_ref (VAL_ref_null r))]) in Hreduce; last done.
-    apply reduce_trans_value in Hreduce; subst.
-    unfold value_typing => /=.
-    by simplify_subtyping.
-  }
-  (* ref_func *)
-  { apply reduce_trans_ref_func in Hreduce as [addr [Hnthaddr ->]].
-    unfold value_typing => /=; unfold ext_func_typing => /=.
-    invert_be_typing.
-    apply instr_subtyping_empty1_impl' in Htisub; simpl in *; remove_bools_options.
-    assert (exists x, lookup_N (s_funcs s) addr = Some x) as [? Hnth].
-    { apply Hsfunc in Hnthaddr.
-      destruct (lookup_N (s_funcs s) addr) eqn:Hnth; first by eexists.
-      exfalso.
-      apply List.nth_error_None in Hnth.
-      by lias.
-    }
-    rewrite Hnth => /=.
-    by resolve_subtyping.
-  }
-  (* global_get *)
-  { apply reduce_trans_global_get in Hreduce.
-    unfold value_typing => /=.
-    assert (tg_t extr <t: t) as Hsub; first by simplify_subtyping.
-    eapply Hsglobtype in Hreduce; eauto.
-    unfold value_typing in Hreduce; remove_bools_options.
-    by resolve_subtyping.
-  }
+  by eapply extended_init_value_typing; eauto.
+Qed.
+
+Lemma imported_global_value_typing s s' f v_imps t_imps t_imps_mod added_globals added_addrs :
+  store_typing s ->
+  store_extension s s' ->
+  List.Forall2 (external_typing s) v_imps t_imps ->
+  List.Forall2 import_subtyping t_imps t_imps_mod ->
+  s'.(s_globals) = s.(s_globals) ++ added_globals ->
+  f.(f_inst).(inst_globals) = ext_globals v_imps ++ added_addrs ->
+  forall idx v gt, sglob_val s' f.(f_inst) idx = Some v ->
+    lookup_N (ext_t_globals t_imps_mod) idx = Some gt ->
+    value_typing s' v gt.(tg_t).
+Proof.
+  move => HST Hext Himps Hsub Hgs Hinst idx v gt Hget Hlookup.
+  eapply import_subtyping_globs_impl' in Hsub as [gt' [Hnthsub Hsub]]; eauto.
+  move/eqP: Hsub => Hsub; subst gt'.
+  eapply vt_imps_globals_typing in Hnthsub as [addr [Haddr Htext]]; eauto.
+  unfold external_typing, ext_typing, ext_global_typing in Htext.
+  destruct (lookup_N (s_globals s) addr) as [gi|] eqn:Hgi => //.
+  injection Htext as <-.
+  unfold sglob_val, sglob, sglob_ind in Hget.
+  rewrite Hinst /lookup_N in Hget.
+  rewrite List.nth_error_app1 in Hget; last by apply nth_error_Some_length in Haddr.
+  rewrite Haddr Hgs in Hget.
+  unfold lookup_N in Hgi.
+  rewrite List.nth_error_app1 in Hget; last by apply nth_error_Some_length in Hgi.
+  rewrite Hgi /= in Hget.
+  injection Hget as <-.
+  destruct s; simpl in *.
+  destruct HST as [_ [_ [_ [Hglobals _]]]].
+  eapply Forall_lookup in Hglobals as [gtype Htyped]; eauto.
+  unfold globalinst_typing in Htyped.
+  destruct gi => /=.
+  remove_bools_options; subst.
+  by eapply value_typing_extension; eauto.
 Qed.
 
 End Host.
