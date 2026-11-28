@@ -863,11 +863,11 @@ Arguments MkLanguage {_}.
 Context
   {Tok : Type} {A B : Type} {n : nat}.
 
-Definition language : [ Language ] := Fix Language (fun k rec =>
-  let be_aux := Induction.map _be _ rec in
-  let bes_end_with_x0b_aux := Induction.map _bes_end_with_x0b _ rec in
-  let bes_end_with_x05_aux := Induction.map _bes_end_with_x05 _ rec in
-  let bes_end_with_x0b_or_x05_ctd_aux := Induction.map _bes_end_with_x0b_or_x05_ctd _ rec in
+Definition parse_be_layer {k}
+  (bes_end_with_x0b_aux: Box (byte_parser (list basic_instruction)) k)
+  (bes_end_with_x0b_or_x05_ctd_aux:
+    Box (byte_parser (list basic_instruction * list basic_instruction)) k)
+  : byte_parser basic_instruction k :=
   let parse_block :=
     exact_byte x02 &> ((BI_block <$> parse_block_type) <*> bes_end_with_x0b_aux) in
   let parse_loop :=
@@ -876,7 +876,6 @@ Definition language : [ Language ] := Fix Language (fun k rec =>
     (((fun x y => (x, y)) <$> parse_block_type) <*> bes_end_with_x0b_or_x05_ctd_aux) in
   let parse_if :=
     (fun '(x, (y, z)) => BI_if x y z) <$> (exact_byte x04 &> parse_if_body) in
-  let parse_be :=
     parse_unreachable <|>
     parse_nop <|>
     parse_block <|>
@@ -895,7 +894,14 @@ Definition language : [ Language ] := Fix Language (fun k rec =>
     parse_variable_instruction <|>
     parse_table_instruction <|>
     parse_memory_instruction <|>
-    parse_numeric_instruction in
+    parse_numeric_instruction.
+
+Definition language : [ Language ] := Fix Language (fun k rec =>
+  let be_aux := Induction.map _be _ rec in
+  let bes_end_with_x0b_aux := Induction.map _bes_end_with_x0b _ rec in
+  let bes_end_with_x05_aux := Induction.map _bes_end_with_x05 _ rec in
+  let bes_end_with_x0b_or_x05_ctd_aux := Induction.map _bes_end_with_x0b_or_x05_ctd _ rec in
+  let parse_be := parse_be_layer bes_end_with_x0b_aux bes_end_with_x0b_or_x05_ctd_aux in
   let parse_bes_end_with_x0b :=
     (exact_byte x0b $> nil) <|>
     ((cons <$> parse_be) <*> bes_end_with_x0b_aux) in

@@ -677,3 +677,307 @@ Proof.
   - now eapply vector_memarg_class_round_trip with (code := code).
   - now eapply vector_lane_class_round_trip with (code := code).
 Qed.
+
+Inductive memory_head : byte -> Prop :=
+| MH_scalar : forall op, memory_head (scalar_memop_tag op)
+| MH_size : memory_head x3f
+| MH_grow : memory_head x40
+| MH_vector : memory_head xfd.
+
+Local Opaque parse_memory_instruction parse_numeric_instruction.
+
+Lemma run_exact_byte_mismatch : forall tag b rest bound
+  (Hbound: (S (List.length rest) <= bound)%nat),
+  Byte.eqb b tag = false ->
+  @runParser (SizedList byte) byte option byte bound (exact_byte tag)
+    (S (List.length rest)) Hbound (mkSizedList (b :: rest)) = None.
+Proof.
+  intros tag b rest bound Hbound Hneq.
+  pose proof (prefix_exact_byte tag bound (b :: rest) Hbound) as H.
+  unfold decode_exact_byte in H. rewrite Hneq in H.
+  change (observe_prefix
+    (@runParser (SizedList byte) byte option byte bound (exact_byte tag)
+      (S (List.length rest)) Hbound (mkSizedList (b :: rest))) = None) in H.
+  destruct (@runParser (SizedList byte) byte option byte bound (exact_byte tag)
+    (S (List.length rest)) Hbound (mkSizedList (b :: rest)));
+    [discriminate|reflexivity].
+Qed.
+
+Lemma parse_be_layer_plain_memory_success : forall tag rest bound value suffix
+  (ends: Box (byte_parser (list basic_instruction)) bound)
+  (branches: Box (byte_parser (list basic_instruction * list basic_instruction)) bound)
+  (Hbound: (List.length (tag :: rest) <= bound)%nat),
+  memory_head tag ->
+  observe_prefix (runParser
+    (parse_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (tag :: rest))) = Some (value, suffix) ->
+  observe_prefix (runParser
+    (parse_be_layer ends branches:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (tag :: rest))) = Some (value, suffix).
+Proof.
+  intros tag rest bound value suffix ends branches Hbound Hhead Hmem.
+  unfold parse_be_layer.
+  remember (parse_memory_instruction:
+    byte_parser basic_instruction bound) as pm eqn:Hpm in *.
+  clear Hpm.
+  remember (parse_numeric_instruction:
+    byte_parser basic_instruction bound) as pn eqn:Hpn.
+  clear Hpn.
+  destruct Hhead; [destruct op| | |].
+  all: repeat (cbn -[exact_byte parse_block_type parse_labelidx parse_vec
+      parse_funcidx parse_typeidx parse_tableidx parse_reference_type parse_u32_as_N];
+    rewrite run_exact_byte_mismatch by reflexivity).
+  all: cbn -[exact_byte parse_block_type parse_labelidx parse_vec
+    parse_funcidx parse_typeidx parse_tableidx parse_reference_type parse_u32_as_N].
+  all: lazymatch goal with
+  | |- observe_prefix (option_rect _ _ _ ?result _) = _ =>
+      change (observe_prefix result = Some (value, suffix)) in Hmem;
+      destruct result; [exact Hmem|discriminate Hmem]
+  end.
+Qed.
+
+Lemma parse_be_plain_memory_success : forall tag rest bound value suffix
+  (Hbound: (List.length (tag :: rest) <= bound)%nat),
+  memory_head tag ->
+  observe_prefix (runParser
+    (parse_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (tag :: rest))) = Some (value, suffix) ->
+  observe_prefix (runParser
+    (parse_be bound:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (tag :: rest))) = Some (value, suffix).
+Proof.
+  intros tag rest bound value suffix Hbound Hhead Hmem.
+  destruct bound as [|bound]; [simpl in Hbound; lia|].
+  unfold parse_be, language, Induction.Fix, Induction.extract.
+  cbn [Induction.FixBox Induction.call _be].
+  now apply parse_be_layer_plain_memory_success.
+Qed.
+
+Inductive memory_fc_head : byte -> Prop :=
+| MFH_init : memory_fc_head x08
+| MFH_drop : memory_fc_head x09
+| MFH_copy : memory_fc_head x0a
+| MFH_fill : memory_fc_head x0b.
+
+Lemma run_exact_byte_mismatch2 : forall tag b c rest bound
+  (Hbound: (S (S (List.length rest)) <= bound)%nat),
+  Byte.eqb b tag = false ->
+  @runParser (SizedList byte) byte option byte bound (exact_byte tag)
+    (S (S (List.length rest))) Hbound (mkSizedList (b :: c :: rest)) = None.
+Proof.
+  intros tag b c rest bound Hbound H.
+  exact (run_exact_byte_mismatch tag b (c :: rest) bound Hbound H).
+Qed.
+
+Definition decode_table_instruction :=
+  decode_or (decode_sequence (decode_exact_byte x25)
+    (decode_map BI_table_get (decode_uint 32 5)))
+  (decode_or (decode_sequence (decode_exact_byte x26)
+    (decode_map BI_table_set (decode_uint 32 5)))
+  (decode_or (decode_sequence (decode_fc_prefix 12)
+    (decode_two_indices (fun elem table => BI_table_init table elem)))
+  (decode_or (decode_sequence (decode_fc_prefix 13)
+    (decode_map BI_elem_drop (decode_uint 32 5)))
+  (decode_or (decode_sequence (decode_fc_prefix 14)
+    (decode_two_indices BI_table_copy))
+  (decode_or (decode_sequence (decode_fc_prefix 15)
+    (decode_map BI_table_grow (decode_uint 32 5)))
+  (decode_or (decode_sequence (decode_fc_prefix 16)
+    (decode_map BI_table_size (decode_uint 32 5)))
+    (decode_sequence (decode_fc_prefix 17)
+      (decode_map BI_table_fill (decode_uint 32 5))))))))).
+
+Lemma table_instruction_prefix_correct :
+  prefix_semantics (fun n =>
+    (parse_table_instruction:
+      Parser (SizedList byte) byte option basic_instruction n))
+    decode_table_instruction.
+Proof.
+  unfold parse_table_instruction, decode_table_instruction, decode_or,
+    decode_sequence, decode_map.
+  apply prefix_alt.
+  { apply prefix_rand; [apply prefix_exact_byte|apply prefix_map; apply prefix_u32]. }
+  apply prefix_alt.
+  { apply prefix_rand; [apply prefix_exact_byte|apply prefix_map; apply prefix_u32]. }
+  apply prefix_alt.
+  { apply prefix_rand; [apply prefix_fc_prefix|apply prefix_two_indices]. }
+  apply prefix_alt.
+  { apply prefix_rand; [apply prefix_fc_prefix|apply prefix_map; apply prefix_u32]. }
+  apply prefix_alt.
+  { apply prefix_rand; [apply prefix_fc_prefix|apply prefix_two_indices]. }
+  apply prefix_alt.
+  { apply prefix_rand; [apply prefix_fc_prefix|apply prefix_map; apply prefix_u32]. }
+  apply prefix_alt.
+  { apply prefix_rand; [apply prefix_fc_prefix|apply prefix_map; apply prefix_u32]. }
+  apply prefix_rand; [apply prefix_fc_prefix|apply prefix_map; apply prefix_u32].
+Qed.
+
+Lemma run_table_memory_fc_reject : forall code rest bound
+  (Hbound: (S (S (List.length rest)) <= bound)%nat),
+  memory_fc_head code ->
+  @runParser (SizedList byte) byte option basic_instruction bound
+    parse_table_instruction (S (S (List.length rest))) Hbound
+    (mkSizedList (xfc :: code :: rest)) = None.
+Proof.
+  intros code rest bound Hbound Hcode.
+  pose proof (table_instruction_prefix_correct bound
+    (xfc :: code :: rest) Hbound) as H.
+  assert (Hdecode: decode_table_instruction (xfc :: code :: rest) = None).
+  { unfold decode_table_instruction, decode_or, decode_sequence, decode_fc_prefix,
+      decode_assert_u32, decode_exact_byte.
+    cbn -[decode_uint].
+    destruct Hcode;
+      rewrite decode_small_u32_byte by reflexivity; reflexivity. }
+  rewrite Hdecode in H.
+  change (observe_prefix
+    (@runParser (SizedList byte) byte option basic_instruction bound
+      parse_table_instruction (S (S (List.length rest))) Hbound
+      (mkSizedList (xfc :: code :: rest))) = None) in H.
+  destruct (@runParser (SizedList byte) byte option basic_instruction bound
+    parse_table_instruction (S (S (List.length rest))) Hbound
+    (mkSizedList (xfc :: code :: rest))); [discriminate|reflexivity].
+Qed.
+
+Lemma parse_be_layer_fc_memory_success : forall code rest bound value suffix
+  (ends: Box (byte_parser (list basic_instruction)) bound)
+  (branches: Box (byte_parser (list basic_instruction * list basic_instruction)) bound)
+  (Hbound: (List.length (xfc :: code :: rest) <= bound)%nat),
+  memory_fc_head code ->
+  observe_prefix (runParser
+    (parse_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (xfc :: code :: rest))) = Some (value, suffix) ->
+  observe_prefix (runParser
+    (parse_be_layer ends branches:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (xfc :: code :: rest))) = Some (value, suffix).
+Proof.
+  intros code rest bound value suffix ends branches Hbound Hhead Hmem.
+  unfold parse_be_layer.
+  remember (parse_memory_instruction:
+    byte_parser basic_instruction bound) as pm eqn:Hpm in *.
+  clear Hpm.
+  remember (parse_numeric_instruction:
+    byte_parser basic_instruction bound) as pn eqn:Hpn.
+  clear Hpn.
+  cbn -[exact_byte parse_table_instruction parse_block_type parse_labelidx parse_vec
+    parse_funcidx parse_typeidx parse_tableidx parse_reference_type parse_u32_as_N].
+  repeat (rewrite run_exact_byte_mismatch2 by reflexivity;
+    cbn -[exact_byte parse_table_instruction parse_block_type parse_labelidx parse_vec
+      parse_funcidx parse_typeidx parse_tableidx parse_reference_type parse_u32_as_N]).
+  rewrite run_table_memory_fc_reject by exact Hhead.
+  cbn -[exact_byte].
+  all: lazymatch goal with
+  | |- observe_prefix (option_rect _ _ _ ?result _) = _ =>
+      change (observe_prefix result = Some (value, suffix)) in Hmem;
+      destruct result; [exact Hmem|discriminate Hmem]
+  end.
+Qed.
+
+Lemma parse_be_fc_memory_success : forall code rest bound value suffix
+  (Hbound: (List.length (xfc :: code :: rest) <= bound)%nat),
+  memory_fc_head code ->
+  observe_prefix (runParser
+    (parse_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (xfc :: code :: rest))) = Some (value, suffix) ->
+  observe_prefix (runParser
+    (parse_be bound:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (xfc :: code :: rest))) = Some (value, suffix).
+Proof.
+  intros code rest bound value suffix Hbound Hhead Hmem.
+  destruct bound as [|bound]; [simpl in Hbound; lia|].
+  unfold parse_be, language, Induction.Fix, Induction.extract.
+  cbn [Induction.FixBox Induction.call _be].
+  now apply parse_be_layer_fc_memory_success.
+Qed.
+
+Inductive memory_binary_head : list byte -> Prop :=
+| MBH_plain : forall tag rest,
+    memory_head tag -> memory_binary_head (tag :: rest)
+| MBH_fc : forall code rest,
+    memory_fc_head code -> memory_binary_head (xfc :: code :: rest).
+
+Lemma encodable_memory_binary_head : forall be,
+  encodable_memory_instruction be ->
+  forall suffix, memory_binary_head (binary_of_be be ++ suffix).
+Proof.
+  intros be Henc suffix. destruct Henc.
+  - assert (Hbytes: binary_of_be (scalar_memop_build op marg) =
+      scalar_memop_tag op :: binary_of_memarg marg)
+      by (destruct op; reflexivity).
+    rewrite Hbytes. apply MBH_plain. constructor.
+  - destruct op; cbn -[binary_of_u32].
+    + apply MBH_plain. exact MH_size.
+    + apply MBH_plain. exact MH_grow.
+    + apply MBH_fc. exact MFH_fill.
+    + apply MBH_fc. exact MFH_copy.
+    + apply MBH_fc. exact MFH_init.
+    + apply MBH_fc. exact MFH_drop.
+  - rewrite (vector_memarg_print _ _ _ H).
+    apply MBH_plain. constructor.
+  - rewrite (vector_lane_print _ _ _ _ H).
+    apply MBH_plain. constructor.
+Qed.
+
+Lemma parse_be_memory_success : forall input bound value suffix
+  (Hbound: (List.length input <= bound)%nat),
+  memory_binary_head input ->
+  observe_prefix (runParser
+    (parse_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList input)) = Some (value, suffix) ->
+  observe_prefix (runParser
+    (parse_be bound:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList input)) = Some (value, suffix).
+Proof.
+  intros input bound value suffix Hbound Hhead Hmem.
+  destruct Hhead.
+  - now apply parse_be_plain_memory_success.
+  - now apply parse_be_fc_memory_success.
+Qed.
+
+Theorem memory_instruction_prefix_round_trip : forall be,
+  encodable_memory_instruction be ->
+  forall suffix bound
+    (Hbound: (List.length (binary_of_be be ++ suffix) <= bound)%nat),
+  observe_prefix (runParser
+    (parse_memory_instruction:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (binary_of_be be ++ suffix))) = Some (be, suffix).
+Proof.
+  intros be Henc suffix bound Hbound. destruct Henc.
+  - now apply scalar_memory_class_round_trip.
+  - now apply indexed_memory_class_round_trip.
+  - now eapply vector_memarg_class_round_trip with (code := code).
+  - now eapply vector_lane_class_round_trip with (code := code).
+Qed.
+
+Theorem parse_be_memory_prefix_round_trip : forall be,
+  encodable_memory_instruction be ->
+  forall suffix bound
+    (Hbound: (List.length (binary_of_be be ++ suffix) <= bound)%nat),
+  observe_prefix (runParser
+    (parse_be bound:
+      Parser (SizedList byte) byte option basic_instruction bound)
+    Hbound (mkSizedList (binary_of_be be ++ suffix))) = Some (be, suffix).
+Proof.
+  intros be Henc suffix bound Hbound.
+  apply parse_be_memory_success.
+  - now apply encodable_memory_binary_head.
+  - now apply memory_instruction_prefix_round_trip.
+Qed.
+
+Theorem parse_be_memory_run_round_trip : forall be,
+  encodable_memory_instruction be ->
+  binary_format_parser.run (binary_of_be be) parse_be = Some be.
+Proof.
+  intros be Henc. rewrite <- (List.app_nil_r (binary_of_be be)).
+  apply run_of_prefix. now apply parse_be_memory_prefix_round_trip.
+Qed.
