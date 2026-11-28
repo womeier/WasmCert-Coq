@@ -8,7 +8,7 @@ From Wasm Require Import datatypes binary_format_parser
   binary_format_numeric_complete binary_format_control_complete
   binary_memory_grammar_properties binary_memory_properties
   binary_parser_combinators binary_codec binary_format_simd_complete
-  binary_format_numeric_properties.
+  binary_format_numeric_properties binary_format_dispatch_properties.
 Local Notation byte := Byte.byte.
 
 Definition tail_initial b := b = x12 \/ b = x13.
@@ -837,4 +837,184 @@ Proof.
   { intros bytes be [first [second [x [y [Bytes _]]]]].
     now exists (first ++ second). }
   unfold parse_be_layer; normal_layer_dispatch x11 Complete Head.
+Qed.
+
+Lemma index_encoding_binary_u32 bytes index :
+  index_encoding bytes index ->
+  binary_format_properties.binary_u32 bytes index.
+Proof.
+  intro Encoding.
+  destruct (leb128_properties.parse_u32_prefix_complete
+    (length bytes) _ (Nat.le_refl _) (mkSizedList bytes) bytes nil index
+    ltac:(unfold input_bytes; simpl; now rewrite app_nil_r) Encoding)
+    as [s [Run [Value Rest]]].
+  destruct (parse_u32_binary_sound
+    (length bytes) _ (Nat.le_refl _) (mkSizedList bytes) s Run)
+    as [prefix [Bytes E]].
+  change (input_bytes (mkSizedList bytes) = prefix ++ output_bytes s) in Bytes.
+  change (output_bytes s = nil) in Rest.
+  rewrite Rest, app_nil_r in Bytes.
+  change (bytes = prefix) in Bytes; subst prefix.
+  rewrite Value in E; exact E.
+Qed.
+
+Theorem parse_be_layer_control_complete n
+    (ends : Box (Parser (SizedList byte) byte option (list basic_instruction)) n)
+    (branches : Box (Parser (SizedList byte) byte option
+      (list basic_instruction * list basic_instruction)) n) :
+  parser_complete
+    (parse_be_layer (Toks := SizedList byte) (M := option) ends branches)
+    control_atomic_encoding.
+Proof.
+  intros m bound input prefix suffix be Bytes Encoding.
+  destruct Encoding.
+  - { unfold fixed_control_opcodes in H; cbn [In] in H.
+    destruct H as [E|[E|[E|[E|[E|[E|E]]]]]]; try contradiction;
+      inversion E; subst opcode be.
+    all: first
+      [lazymatch type of E with (?tag, ?value) = _ =>
+       eapply (parse_be_layer_fixed_complete n ends branches tag value
+         ltac:(unfold basic_fixed_opcodes; simpl; tauto)
+         m bound input _ suffix _ Bytes); split; reflexivity end
+      |apply (parse_be_layer_parametric_complete n ends branches
+         m bound input _ suffix _ Bytes);
+       unfold parametric_instruction_encoding;
+       intuition reflexivity
+      |apply (parse_be_layer_reference_complete n ends branches
+         m bound input _ suffix _ Bytes);
+       unfold reference_instruction_encoding; intuition reflexivity]. }
+  - { unfold single_index_opcodes in H; cbn [In] in H.
+      destruct H as [E|[E|[E|[E|[E|[E|[E|[E|[E|[E|[E|[E|[E|[E|E]]]]]]]]]]]]]];
+        try contradiction; inversion E; subst opcode make.
+      all: first
+        [lazymatch type of E with (?tag, ?build) = _ =>
+         eapply (parse_be_layer_indexed_complete n ends branches tag build
+           ltac:(unfold basic_indexed_opcodes; simpl; tauto)
+           m bound input _ suffix _ Bytes);
+         exists bytes, x; split; [reflexivity |]; split; [exact H0 |reflexivity] end
+        |lazymatch type of E with (?tag, ?build) = _ =>
+         eapply (parse_be_layer_variable_complete n ends branches tag build
+           ltac:(unfold variable_opcodes; simpl; tauto)
+           m bound input _ suffix _ Bytes);
+         exists bytes, x; split; [reflexivity |]; split; [exact H0 |reflexivity] end
+        |apply (parse_be_layer_tail_complete n ends branches
+           m bound input _ suffix _ Bytes);
+         left; exists bytes, x; split; [reflexivity |];
+         split; [exact H0 |reflexivity]
+        |apply (parse_be_layer_table_complete n ends branches
+           m bound input _ suffix _ Bytes);
+         eapply table_single_encoding;
+         [unfold table_single_opcodes; simpl; tauto |exact H0]
+        |apply (parse_be_layer_memory_complete n ends branches
+           m bound input _ suffix _ Bytes);
+         apply BMI_indexed with (op := IM_size);
+         apply BIM_size; now apply index_encoding_binary_u32
+        |apply (parse_be_layer_memory_complete n ends branches
+           m bound input _ suffix _ Bytes);
+         apply BMI_indexed with (op := IM_grow);
+         apply BIM_grow; now apply index_encoding_binary_u32
+        |apply (parse_be_layer_reference_complete n ends branches
+           m bound input _ suffix _ Bytes);
+         right; right; exists bytes, x; split; [reflexivity |];
+         split; [exact H0 |reflexivity]]. }
+  - apply (parse_be_layer_call_indirect_complete n ends branches
+      m bound input _ suffix _ Bytes).
+    exists types, tables, y, x.
+    split; [reflexivity |]. split; [exact H |].
+    split; [exact H0 |reflexivity].
+  - apply (parse_be_layer_tail_complete n ends branches
+      m bound input _ suffix _ Bytes).
+    right; exists types, tables, y, x.
+    split; [reflexivity |]. split; [exact H |].
+    split; [exact H0 |reflexivity].
+  - apply (parse_be_layer_br_table_complete n ends branches
+      m bound input _ suffix _ Bytes).
+    exists targets, fallback, xs, x.
+    split; [reflexivity |]. split; [exact H |].
+    split; [exact H0 |reflexivity].
+  - apply (parse_be_layer_reference_complete n ends branches
+      m bound input _ suffix _ Bytes).
+    left; exists t; split; reflexivity.
+  - apply (parse_be_layer_parametric_complete n ends branches
+      m bound input _ suffix _ Bytes).
+    right; right; exists bytes, ts.
+    split; [reflexivity |]. split; [exact H |reflexivity].
+Qed.
+
+Theorem parse_be_layer_bulk_complete n
+    (ends : Box (Parser (SizedList byte) byte option (list basic_instruction)) n)
+    (branches : Box (Parser (SizedList byte) byte option
+      (list basic_instruction * list basic_instruction)) n) :
+  parser_complete
+    (parse_be_layer (Toks := SizedList byte) (M := option) ends branches)
+    bulk_atomic_encoding.
+Proof.
+  intros m bound input prefix suffix be Bytes Encoding.
+  destruct Encoding.
+  - { destruct H0 as [header [Parts Header]]; subst prefix.
+      unfold bulk_single_index_opcodes in H; cbn [In] in H.
+      destruct H as [E|[E|[E|[E|[E|[E|E]]]]]]; try contradiction;
+        inversion E; subst code make.
+      all: first
+        [apply (parse_be_layer_table_complete n ends branches
+           m bound input _ suffix _ Bytes);
+         eapply table_bulk_single_encoding;
+         [unfold table_bulk_single_opcodes; simpl; tauto |exact Header |exact H1]
+        |apply (parse_be_layer_memory_complete n ends branches
+           m bound input _ suffix _ Bytes);
+         apply BMI_indexed with (op := IM_drop); apply BIM_drop;
+         now apply index_encoding_binary_u32
+        |apply (parse_be_layer_memory_complete n ends branches
+           m bound input _ suffix _ Bytes);
+         apply BMI_indexed with (op := IM_fill); apply BIM_fill;
+         now apply index_encoding_binary_u32]. }
+  - { destruct H0 as [header [Parts Header]]; subst prefix.
+      unfold bulk_two_index_opcodes in H; cbn [In] in H.
+      destruct H as [E|[E|[E|[E|E]]]]; try contradiction;
+        inversion E; subst code make.
+      - apply (parse_be_layer_memory_complete n ends branches
+          m bound input _ suffix _ Bytes).
+        apply BMI_indexed with (op := IM_init).
+        apply (BIM_init header first second y x);
+          now apply index_encoding_binary_u32.
+      - apply (parse_be_layer_memory_complete n ends branches
+          m bound input _ suffix _ Bytes).
+        apply BMI_indexed with (op := IM_copy).
+        apply (BIM_copy header first second x y);
+          now apply index_encoding_binary_u32.
+      - apply (parse_be_layer_table_complete n ends branches
+          m bound input _ suffix _ Bytes).
+        apply (table_bulk_two_encoding 12%N
+          (fun elem table => BI_table_init table elem) header first second x y).
+        + unfold table_bulk_two_opcodes; simpl; tauto.
+        + exact Header.
+        + exact H1.
+        + exact H2.
+      - apply (parse_be_layer_table_complete n ends branches
+          m bound input _ suffix _ Bytes).
+        apply (table_bulk_two_encoding 14%N BI_table_copy header first second x y).
+        + unfold table_bulk_two_opcodes; simpl; tauto.
+        + exact Header.
+        + exact H1.
+        + exact H2. }
+Qed.
+
+Theorem wasm_parse_be_layer_atomic_complete n
+    (ends : Box (Parser (SizedList byte) byte option (list basic_instruction)) n)
+    (branches : Box (Parser (SizedList byte) byte option
+      (list basic_instruction * list basic_instruction)) n) :
+  parser_complete
+    (parse_be_layer (Toks := SizedList byte) (M := option) ends branches)
+    wasm_atomic_encoding.
+Proof.
+  intros m bound input prefix suffix be Bytes Encoding.
+  destruct Encoding as [Control|[Bulk|[Numeric|Memory]]].
+  - now apply (parse_be_layer_control_complete n ends branches
+      m bound input prefix suffix be Bytes).
+  - now apply (parse_be_layer_bulk_complete n ends branches
+      m bound input prefix suffix be Bytes).
+  - now apply (parse_be_layer_numeric_complete n ends branches
+      m bound input prefix suffix be Bytes).
+  - now apply (parse_be_layer_memory_complete n ends branches
+      m bound input prefix suffix be Bytes).
 Qed.
