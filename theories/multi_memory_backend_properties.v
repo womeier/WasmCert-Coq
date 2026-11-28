@@ -146,3 +146,117 @@ Proof.
   unfold mv_length, vector_length, native63_nonnegative, byte_limit, page_size, page_limit in *.
   repeat split; lia.
 Qed.
+
+(** Closed functional snapshot specification for the selected vector API.
+    The refinement proofs below expose the existing array laws in their
+    assumption audits. They specify the real update contract; they do NOT
+    prove that mutable Parray rerooting implements those laws. *)
+Definition snapshot_write (before: N -> option byte) dst count gen i :=
+  if andb (N.leb dst i) (N.ltb i (dst + count))
+  then Some (gen (i - dst)%N)
+  else before i.
+
+Theorem mv_block_update_snapshot : forall (v v': memory_vec) dst count gen,
+  mv_update_gen dst count gen v = Some v' ->
+  forall i, mv_lookup i v' = snapshot_write (fun j => mv_lookup j v) dst count gen i.
+Proof.
+  intros v v' dst count gen H i. unfold snapshot_write.
+  destruct (N.ltb i dst) eqn:Hleft.
+  - apply N.ltb_lt in Hleft.
+    assert (N.leb dst i = false) as Hb by (apply N.leb_gt; lia).
+    rewrite Hb. now apply mv_update_gen_lookup_lt with (n := dst) (len := count) (gen := gen).
+  - apply N.ltb_ge in Hleft.
+    assert (N.leb dst i = true) as Hb by (apply N.leb_le; lia).
+    rewrite Hb. cbn.
+    destruct (N.ltb i (dst + count)) eqn:Hinside.
+    + apply N.ltb_lt in Hinside.
+      replace i with (dst + (i - dst))%N at 1 by lia.
+      eapply mv_update_gen_lookup; [exact H|lia].
+    + apply N.ltb_ge in Hinside.
+      apply mv_update_gen_lookup_ge with (n := dst) (len := count) (gen := gen);
+        [exact H|lia].
+Qed.
+
+Definition snapshot_source (source: memory_vec) src offset :=
+  match mv_lookup (src + offset)%N source with
+  | Some b => b
+  | None => wasm_memory_default_byte
+  end.
+
+Theorem mv_snapshot_copy_observation : forall source destination result src dst count,
+  (src + count <= mv_length source)%N ->
+  mv_update_gen dst count (snapshot_source source src) destination = Some result ->
+  forall i, mv_lookup i result =
+    if andb (N.leb dst i) (N.ltb i (dst + count))
+    then mv_lookup (src + (i - dst))%N source
+    else mv_lookup i destination.
+Proof.
+  intros source destination result src dst count Hsource Hupdate i.
+  rewrite (mv_block_update_snapshot Hupdate i). unfold snapshot_write.
+  destruct (andb (N.leb dst i) (N.ltb i (dst + count))) eqn:Hinside;
+    [|reflexivity].
+  apply Bool.andb_true_iff in Hinside. destruct Hinside as [Hlo Hhi].
+  apply N.leb_le in Hlo. apply N.ltb_lt in Hhi.
+  unfold snapshot_source.
+  destruct (mv_lookup (src + (i - dst)) source) eqn:Hread; [reflexivity|].
+  exfalso.
+  assert (Hvalid: mv_lookup (src + (i - dst)) source <> None).
+  { apply mv_lookup_ib. lia. }
+  exact (Hvalid Hread).
+Qed.
+
+Theorem mv_snapshot_copy_exists : forall source destination src dst count,
+  (src + count <= mv_length source)%N ->
+  (dst + count <= mv_length destination)%N ->
+  exists result,
+    mv_update_gen dst count (snapshot_source source src) destination = Some result.
+Proof.
+  intros source destination src dst count Hsource Hdestination.
+  destruct (mv_update_gen dst count (snapshot_source source src) destination)
+    as [result|] eqn:Hupdate; [now exists result|].
+  exfalso.
+  assert (Hvalid: mv_update_gen dst count (snapshot_source source src) destination <> None).
+  { apply mv_update_gen_ib. exact Hdestination. }
+  exact (Hvalid Hupdate).
+Qed.
+
+(** Array.init len generator in the staged native algorithm has precisely
+    these immutable values. This lemma is independent of the Parray axioms;
+    connecting mutable reroot/write code to it remains a separate obligation. *)
+Definition staged_generator_values {A} (len: nat) (gen: N -> A) :=
+  List.map (fun i => gen (N.of_nat i)) (List.seq 0 len).
+
+Theorem staged_generator_lookup : forall A len (gen: N -> A) i,
+  (i < len)%nat ->
+  List.nth_error (staged_generator_values len gen) i = Some (gen (N.of_nat i)).
+Proof.
+  intros A len gen i H.
+  move/ltP in H.
+  unfold staged_generator_values. rewrite List.nth_error_map List.nth_error_seq.
+  assert (Nat.ltb i len = true) as Hi by (now apply Nat.ltb_lt).
+  now rewrite Hi.
+Qed.
+
+Definition vector_copy_capacity (v: memory_vec) (delta: N) :=
+  N.min (N.max (v_size v + delta) (v_capacity v * 2)) byte_limit.
+
+Theorem vector_growth_copy_native_arguments : forall (v: memory_vec) delta,
+  (v_size v + delta <= byte_limit)%N ->
+  (v_capacity v < v_size v + delta)%N ->
+  (v_size v <= v_capacity v <= vector_copy_capacity v delta)%N /\
+  (vector_copy_capacity v delta <= byte_limit)%N /\
+  native63_nonnegative (v_size v) /\
+  native63_nonnegative (vector_copy_capacity v delta).
+Proof.
+  intros v delta Hsize Hcopy.
+  pose proof (vector_capacity_u32_bound (v := v)) as Hcap.
+  pose proof (@v_size_valid _ _ v) as Hvalid.
+  unfold vector_copy_capacity, native63_nonnegative.
+  pose proof (N.le_max_l (v_size v + delta) (v_capacity v * 2)) as Hmax.
+  pose proof (N.le_min_r (N.max (v_size v + delta) (v_capacity v * 2)) byte_limit) as Hmin.
+  assert (v_capacity v <=
+    N.min (N.max (v_size v + delta) (v_capacity v * 2)) byte_limit)%N.
+  { apply N.min_glb; lia. }
+  unfold byte_limit, page_size, page_limit in *.
+  repeat split; lia.
+Qed.
