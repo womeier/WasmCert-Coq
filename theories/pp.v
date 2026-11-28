@@ -376,6 +376,7 @@ Definition pp_extern_value (extv: extern_value) : string :=
   | EV_table a => "table " ++ pp_addr a
   | EV_mem a => "mem " ++ pp_addr a
   | EV_global a => "global " ++ pp_addr a
+  | EV_tag a => "tag " ++ pp_addr a
   end.
 
 Definition pp_value_num (v : value_num) : string :=

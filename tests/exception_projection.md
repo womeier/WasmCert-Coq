@@ -33,7 +33,7 @@ without moving the original module or changing the default instance.
 regressions without requiring an installed external encoder. **It does not
 replace the explicit full official projection run above** or bless its failures.
 
-## Measured baseline and diagnosis
+## Initial measured baseline and diagnosis
 
 With the EH implementation at `884aa80` and this harness, externally encoded by
 wasm-tools **1.263.0** (`7a2fa422c`, executable SHA-256
@@ -118,3 +118,56 @@ addresses in `inst_tags`; catches retain actual tag-address identity.
 The existing `validated_closing_portable` proof at authorized GC `a1b7949`
 addresses registry closing, not this runtime payload law. No duplicate
 portability proof, classifier, or raw-index transport is introduced here.
+
+## Main tag extern-kind integration: 445/489
+
+The next implementation increment adds main `MID_tag`, `MED_tag`, `EV_tag`
+and source/cache `ET_tag` descriptors. Binary imports use kind 4, attribute
+zero, then u32 type index; exports use kind 4 then u32 tag index. Source
+validation checks the referenced declaration is a function with no results.
+The tag context and allocation use imported tags before locally defined tags.
+Tag exports preserve their actual tag address and can be registered, aliased,
+and distinguished from function/table/memory/global exports.
+
+Full main checker soundness, instantiation soundness, preservation and progress
+continue to compile. Compiled examples exercise a module that imports one tag,
+throws local tag 1, exports that local tag, and round-trips through the actual
+module printer/parser. The actual import parser rejects every nonzero attribute;
+concrete descriptor round trips include multi-byte and maximum-u32 indices.
+
+The **unchanged 489-command projection now fails at 445/489**, zero
+infrastructure errors. The same 18 text-only malformed commands remain deferred.
+
+| Official source | Passed / retained commands |
+| --- | ---: |
+| binary.wast | 136 / 136 |
+| exports.wast | 97 / 97 |
+| imports.wast | 165 / 168 |
+| ref_null.wast | 4 / 4 |
+| tag.wast | 3 / 4 |
+| throw.wast | 13 / 13 |
+| throw_ref.wast | 15 / 15 |
+| try_table.wast | 12 / 52 |
+| **Total** | **445 / 489 (FAIL)** |
+
+All prior tag extern-kind parsing failures are resolved. The three remaining
+root failures are now **concrete tag import matching**, at `imports.wast:30`,
+`tag.wast:13`, and `try_table.wast:10`; these modules parse and validate. Their
+41 dependent action failures remain failures. The function-only imported
+`try_table` mismatch case at lines 315–337 now executes successfully, but the
+main imported-tag handler tests at lines 258–313 still do not.
+
+**No final tag linking claim:** `ET_tag ps` is expressly a source signature/cache,
+not a canonical identity. The current concrete `import_subtyping` does not
+accept such caches, even when equal. EH still needs the per-tag canonical
+`defined_type` store wiring and actual closed import-matching boundary, plus
+the shared GC payload/classifier law above for general indexed payloads.
+Scalar-only tag fixtures are not grounds for a payload-equality shortcut.
+The proved no-source-tag lemmas document the present executable boundary; they
+do not add premises to existing safety theorems or stand in for canonical linking.
+
+New extracted binary tests cover tag exports/aliases, duplicate and unknown tag
+exports, import attribute/truncation/overflow, invalid tag signatures and
+tag/function kind separation. CLI host loading validates before resolving host
+imports, so a missing provider cannot mask an invalid import declaration.
+Full official artifacts are in `/tmp/opencode/eh-tag-extern-official-binary/`.

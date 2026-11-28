@@ -422,7 +422,7 @@ Lemma alloc_module_tags_lookup s m imps gvs rvs s' inst n x ps :
   alloc_module s m imps gvs rvs (s', inst) ->
   List.nth_error m.(mod_tags) n = Some x ->
   lookup_function_type (List.concat m.(mod_types)) x = Some (Tf ps nil) ->
-  exists a, List.nth_error inst.(inst_tags) n = Some a /\
+  exists a, List.nth_error inst.(inst_tags) (length (ext_tags imps) + n) = Some a /\
             lookup_N s'.(s_tags) a = Some ps.
 Proof.
   unfold alloc_module.
@@ -438,6 +438,8 @@ Proof.
     [Helems [Hdatas [Hexports Htags]]]]]]]]].
   move => Hnth Htype.
   subst s'; rewrite Htags; simpl.
+  rewrite List.nth_error_app2; last by lias.
+  replace (length (ext_tags imps) + n - length (ext_tags imps))%coq_nat with n by lias.
   by eapply alloc_tags_lookup; eauto.
 Qed.
 

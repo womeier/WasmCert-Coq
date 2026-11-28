@@ -78,8 +78,13 @@ Proof.
   move => s m v_imps s' f exps HST Hinst.
   unfold instantiate in Hinst.
   destruct Hinst as [t_imps_mod [t_imps [t_exps [hs' [inst [g_inits [r_inits [Hmodtype [Himptype [Hsubtype [Hallocmodule [Hinstglob [Hinstelem [Heqf Heqexps]]]]]]]]]]]]]].
+  have [Hactualtags Hexpectedtags] :=
+    @import_subtyping_no_source_tags t_imps t_imps_mod Hsubtype.
+  have Htagimports: ext_tags v_imps = nil.
+  { by eapply external_typing_no_source_tags; eauto. }
 
   unfold alloc_module in Hallocmodule.
+  rewrite Htagimports /= in Hallocmodule.
   destruct Hallocmodule as [registry [typeids [Hclosed [Hidentity [Htypeids Hallocmodule]]]]].
   destruct (alloc_funcs _ _ _) as [s1 ifs] eqn:Hallocfuncs.
   destruct (alloc_tabs _ _) as [s2 its] eqn:Halloctabs.
@@ -140,7 +145,8 @@ Proof.
 
   destruct Hmodtype as [Hdecl Hmodtype].
   destruct m; unfold module_components_typing in Hmodtype; simpl in *.
-   destruct Hmodtype as [fts [tts [mts [gts [rts [dts [Hmtypes [Hmfunctype [Hmtabletype [Hmmemtype [Hmemcount [Hmglobaltype [Hmelemtype [Hmdatatype [Hstarttype [Hmimptype [Hmexptype [Hexpunique Htags]]]]]]]]]]]]]]]]]].
+  destruct Hmodtype as [fts [tts [mts [gts [rts [dts [Hmtypes [Hmfunctype [Hmtabletype [Hmmemtype [Hmemcount [Hmglobaltype [Hmelemtype [Hmdatatype [Hstarttype [Hmimptype [Hmexptype [Hexpunique Htags]]]]]]]]]]]]]]]]]].
+  rewrite Hexpectedtags /= in Hmfunctype Hstarttype Hmimptype Hmexptype.
 
   remember (Build_t_context (List.concat mod_types) (ext_t_funcs t_imps ++ fts) (ext_t_tables t_imps ++ tts) (ext_t_mems t_imps ++ mts) (ext_t_globals t_imps ++ gts) rts dts nil nil None (iota_N 0 (length inst.(inst_funcs))) (map (gen_tag_instance (List.concat mod_types)) mod_tags)) as C.
 

@@ -69,6 +69,26 @@ cases = [
      "Module type checking failure:invalid module components"),
     ("start-raises-exception", throw_function(b"", "0800", start=True),
      "module instantiation raised an exception"),
+    ("export-tag", types + tag + section(7, bytes.fromhex("0101740400")), None),
+    ("export-tag-aliases", types + tag
+     + section(7, bytes.fromhex("020161040001620400")), None),
+    ("export-unknown-tag", types + tag + section(7, bytes.fromhex("0101740401")),
+     "Module type checking failure:invalid module export type"),
+    ("duplicate-tag-export", types + tag
+     + section(7, bytes.fromhex("020174040001740400")),
+     "Module type checking failure:invalid module components"),
+    ("import-tag-nonzero-attribute", types
+     + section(2, bytes.fromhex("01016d0174040100")), "error in parsing module"),
+    ("import-tag-truncated", types
+     + section(2, bytes.fromhex("01016d01740400")), "error in parsing module"),
+    ("import-tag-overflow", types
+     + section(2, bytes.fromhex("01016d01740400ffffffff10")), "error in parsing module"),
+    ("import-tag-unknown-type", types
+     + section(2, bytes.fromhex("01016d0174040001")),
+     "Module type checking failure:invalid module function or import references"),
+    ("import-tag-result-bearing", section(1, bytes.fromhex("016000017f"))
+     + section(2, bytes.fromhex("01016d0174040000")),
+     "Module type checking failure:invalid module function or import references"),
 ]
 
 exe = str(pathlib.Path(sys.argv[1]).resolve())

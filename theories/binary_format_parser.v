@@ -1048,7 +1048,8 @@ Definition parse_import_desc {n} : byte_parser module_import_desc n :=
   exact_byte x00 &> (extract_typeidx MID_func <$> parse_typeidx) <|>
   exact_byte x01 &> (MID_table <$> parse_table_type) <|>
   exact_byte x02 &> (MID_mem <$> parse_memory_type) <|>
-  exact_byte x03 &> (MID_global <$> parse_global_type).
+  exact_byte x03 &> (MID_global <$> parse_global_type) <|>
+  exact_byte x04 &> (exact_byte x00 &> (MID_tag <$> parse_typeidx)).
 
 Definition parse_name {n} : byte_parser name n :=
   guardM (fun bs => if utf8_valid bs then Some bs
@@ -1066,7 +1067,8 @@ Definition parse_module_export_desc {n} : byte_parser module_export_desc n :=
   (exact_byte x00 &> (MED_func <$> parse_funcidx)) <|>
   (exact_byte x01 &> (MED_table <$> parse_tableidx)) <|>
   (exact_byte x02 &> (MED_mem <$> parse_memidx)) <|>
-  (exact_byte x03 &> (MED_global <$> parse_globalidx)).
+  (exact_byte x03 &> (MED_global <$> parse_globalidx)) <|>
+  (exact_byte x04 &> (MED_tag <$> parse_typeidx)).
 
 Definition parse_module_export {n} : byte_parser module_export n :=
   ((fun name desc => {| modexp_name := name; modexp_desc := desc |}) <$>

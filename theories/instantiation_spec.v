@@ -219,6 +219,7 @@ Definition export_get_v_ext (inst : moduleinst) (exp : module_export_desc) : ext
   | MED_table i => EV_table ( (List.nth i inst.(inst_tables) N0))
   | MED_mem i => EV_mem ( (List.nth i inst.(inst_mems) N0))
   | MED_global i => EV_global ( (List.nth i inst.(inst_globals) N0))
+  | MED_tag i => EV_tag (List.nth i inst.(inst_tags) N0)
   end.
 
 Definition ext_funcs :=
@@ -285,6 +286,12 @@ Definition ext_t_globals :=
       | _ => None
       end).
 
+Definition ext_tags :=
+  seq.pmap (fun x => match x with EV_tag a => Some a | _ => None end).
+
+Definition ext_t_tags :=
+  seq.pmap (fun x => match x with ET_tag ps => Some ps | _ => None end).
+
 Definition get_exportinst (inst: moduleinst) (m_exp: module_export) : exportinst :=
   let extern_value := export_get_v_ext inst m_exp.(modexp_desc) in
   Build_exportinst m_exp.(modexp_name) extern_value.
@@ -312,7 +319,7 @@ Definition alloc_module (s : store_record) (m : module) (imps : list extern_valu
   (inst.(inst_elems) = i_es) /\
   (inst.(inst_datas) = i_ds) /\
    (inst.(inst_exports) = (map (get_exportinst inst) m.(mod_exports))) /\
-   (inst.(inst_tags) = i_tags).
+   (inst.(inst_tags) = ext_tags imps ++ i_tags).
 
 Definition dummy_table : tableinst := {| tableinst_elem := nil; tableinst_type := Build_table_type (Build_limits N0 None) T_funcref |}.
 
@@ -403,6 +410,11 @@ Definition module_import_desc_typing (c : t_context) (imp_desc : module_import_d
   | MID_mem mt =>
       memtype_valid mt && (e == ET_mem mt)
   | MID_global gt => ET_global gt == e
+  | MID_tag i =>
+      match lookup_function_type c.(tc_types) i with
+      | Some (Tf ps nil) => e == ET_tag ps
+      | _ => false
+      end
   end.
 
 Definition module_import_typing (c: t_context) (imp: module_import) (e: extern_type) :=
@@ -429,6 +441,11 @@ Definition module_export_desc_typing (c : t_context) (d : module_export_desc) (e
     match lookup_N c.(tc_globals) i with
     | None => false
     | Some gt' => gt == gt'
+    end
+  | (MED_tag i, ET_tag ps) =>
+    match lookup_N c.(tc_tags) i with
+    | None => false
+    | Some ps' => ps == ps'
     end
   | (_, _) => false
   end.
@@ -552,7 +569,7 @@ Definition module_components_typing (m : module) (impts : list extern_type) (exp
     tc_labels := nil;
     tc_return := None;
     tc_refs := xs;
-    tc_tags := map (gen_tag_instance tfs) tags;
+    tc_tags := ext_t_tags impts ++ map (gen_tag_instance tfs) tags;
   |} in
   let c' := {|
     tc_types := nil;
@@ -675,8 +692,32 @@ Definition import_subtyping (t1 t2: extern_type) : bool :=
       import_mem_subtyping tm1 tm2
   | ET_global tg1, ET_global tg2 =>
       import_global_subtyping tg1 tg2
+  (* ET_tag is a source signature/cache, not a closed tag identity. Do not
+     match it here by payload equality. Final tag linking needs the shared
+     canonical boundary and its closed runtime payload preservation law. *)
   | _, _ => false
   end.
+
+Lemma import_subtyping_no_source_tags ts1 ts2 :
+  List.Forall2 import_subtyping ts1 ts2 ->
+  ext_t_tags ts1 = nil /\ ext_t_tags ts2 = nil.
+Proof.
+  move => H; induction H => /=; first by split.
+  destruct x, y; simpl in * => //.
+Qed.
+
+Lemma external_typing_no_source_tags s vs ts :
+  List.Forall2 (external_typing s) vs ts ->
+  ext_t_tags ts = nil -> ext_tags vs = nil.
+Proof.
+  move => H; induction H => /=; first done.
+  destruct x, y; simpl in * => //;
+    try by move => E; apply IHForall2.
+  all: unfold external_typing, ext_typing in H; simpl in H.
+  all: match type of H with
+       | option_map _ ?lookup = _ => destruct lookup; discriminate H
+       end.
+Qed.
 
 (* In Wasm 2.0, the module exports are now a part of the module instance. *)
 Definition instantiate (s : store_record) (m : module) (v_imps : list extern_value)

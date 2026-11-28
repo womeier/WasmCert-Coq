@@ -1,6 +1,7 @@
 (** Tests for tags in the main module-instance typing relation. *)
 From Stdlib Require Import List NArith.
-From Wasm Require Import instantiation_func type_checker.
+From Wasm Require Import instantiation_func type_checker binary_format_printer
+  binary_format_parser.
 Import ListNotations.
 
 Section Host.
@@ -69,3 +70,68 @@ Example catch_all_ref_produces_nonnull :
 Proof. vm_compute; reflexivity. Qed.
 
 End Host.
+
+(** Source validation uses the combined imported/local tag index space.
+    This is not an assertion that concrete tag import matching is enabled. *)
+Definition tag_import_export_module : module :=
+  {| mod_types :=
+       [[Sub_type true [] (Comp_func (Tf [T_num T_i32] []))];
+        [Sub_type true [] (Comp_func (Tf [] []))]];
+     mod_funcs := [{| modfunc_type := 1%N; modfunc_locals := [];
+                      modfunc_body := [BI_throw 1%N] |}];
+     mod_tables := []; mod_mems := []; mod_globals := [];
+     mod_elems := []; mod_datas := []; mod_start := None;
+     mod_imports := [{| imp_module := []; imp_name := [];
+                       imp_desc := MID_tag 0%N |}];
+     mod_exports := [{| modexp_name := []; modexp_desc := MED_tag 1%N |}];
+     mod_tags := [1%N] |}.
+
+Example tag_import_export_actual_module_roundtrip :
+  run_parse_module (binary_of_module tag_import_export_module) =
+    Some tag_import_export_module.
+Proof. vm_compute. reflexivity. Qed.
+
+Section SourceValidation.
+Context `{ho : host}.
+
+Example tag_import_export_source_validation :
+  fst (module_type_checker tag_import_export_module) =
+    Some ([ET_tag [T_num T_i32]], [ET_tag []]).
+Proof. vm_compute. reflexivity. Qed.
+
+Example tag_import_result_type_rejected :
+  module_import_desc_typer
+    [Sub_type true [] (Comp_func (Tf [] [T_num T_i32]))] (MID_tag 0%N) = None.
+Proof. reflexivity. Qed.
+
+Example tag_import_composite_kind_rejected :
+  module_import_desc_typer
+    [Sub_type true [] (Comp_struct [])] (MID_tag 0%N) = None.
+Proof. reflexivity. Qed.
+
+Example tag_import_unknown_type_rejected :
+  module_import_desc_typer [] (MID_tag 0%N) = None.
+Proof. reflexivity. Qed.
+
+Example source_tag_caches_are_not_link_identities ps :
+  import_subtyping (ET_tag ps) (ET_tag ps) = false.
+Proof. reflexivity. Qed.
+
+End SourceValidation.
+
+Example tag_import_attribute_must_be_zero attribute rest :
+  attribute <> Byte.x00 ->
+  run_parse_prefix (fun _ => parse_import_desc) (Byte.x04 :: attribute :: rest) = None.
+Proof. destruct attribute; intro H; try reflexivity; contradiction. Qed.
+
+Example tag_import_actual_descriptor_roundtrip :
+  run_parse_prefix (fun _ => parse_import_desc)
+    (binary_of_import_desc (MID_tag 128%N) ++ [Byte.x41; Byte.x00]) =
+  Some (MID_tag 128%N, [Byte.x41; Byte.x00]).
+Proof. vm_compute. reflexivity. Qed.
+
+Example tag_export_actual_descriptor_roundtrip :
+  run_parse_prefix (fun _ => parse_module_export_desc)
+    (binary_of_export_desc (MED_tag 4294967295%N) ++ [Byte.x41; Byte.x00]) =
+  Some (MED_tag 4294967295%N, [Byte.x41; Byte.x00]).
+Proof. vm_compute. reflexivity. Qed.

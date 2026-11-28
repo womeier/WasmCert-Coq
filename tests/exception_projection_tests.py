@@ -160,6 +160,9 @@ def main(exe):
         "null.wasm": module(b"\xd0\x69", result=b"\x69"),
         "import.wasm": module(b"\x10\0", imports=b"\x01\x01a\x04main\0\0"),
         "unknown.wasm": module(b"\x10\0", imports=b"\x01\x06absent\x04main\0\0"),
+        "tag-export.wasm": (
+            b"\0asm\x01\0\0\0" + sec(1, b"\x01\x60\0\0")
+            + sec(13, b"\x01\0\0") + sec(7, b"\x01\x04main\x04\0")),
     }
     positive = [
         load("seven.wasm", "A"), {"type": "register", "name": "A", "as": "a"},
@@ -174,6 +177,10 @@ def main(exe):
         {"type": "assert_invalid", "filename": "invalid.wasm"},
         {"type": "assert_malformed", "filename": "malformed.wasm"},
         {"type": "assert_unlinkable", "filename": "unknown.wasm"},
+        load("tag-export.wasm", "T"),
+        {"type": "register", "name": "T", "as": "a"},
+        # An exported tag is a distinct extern kind, not a same-number func.
+        {"type": "assert_unlinkable", "filename": "import.wasm"},
     ]
     check_driver(exe, files, positive, len(positive))
     negative = [

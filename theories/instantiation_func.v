@@ -29,6 +29,11 @@ Definition module_import_desc_typer (tfs: type_context) (imp_desc : module_impor
   | MID_mem mt =>
     if memtype_valid mt then Some (ET_mem mt) else None
   | MID_global gt => Some (ET_global gt)
+  | MID_tag i =>
+      match lookup_function_type tfs i with
+      | Some (Tf ps nil) => Some (ET_tag ps)
+      | _ => None
+      end
   end.
 
 (* breaking circularity, therefore only taking the function types *)
@@ -68,6 +73,7 @@ Definition module_export_typer (C : t_context) (exp : module_export_desc) : opti
   | MED_table i => option_map ET_table (lookup_N C.(tc_tables) i)
   | MED_mem i => option_map ET_mem (lookup_N C.(tc_mems) i)
   | MED_global i => option_map ET_global (lookup_N C.(tc_globals) i)
+  | MED_tag i => option_map ET_tag (lookup_N C.(tc_tags) i)
   end.
 
 Definition module_exports_typer (c : t_context) exps :=
@@ -191,7 +197,7 @@ Definition module_components_type_checker (m : module) : option ((list extern_ty
       tc_labels := nil;
       tc_return := None;
       tc_refs := xs;
-      tc_tags := map (gen_tag_instance tfs) tags
+      tc_tags := ext_t_tags impts ++ map (gen_tag_instance tfs) tags
             |} in
     let c' := {|
       tc_types := nil;
@@ -294,8 +300,8 @@ Definition interp_alloc_module (s : store_record) (m : module) (imps : list exte
     inst_globals := (ext_globals imps ++ i_gs);
     inst_elems := (i_es);
     inst_datas := (i_ds);
-    inst_tags := i_tags;
-    inst_exports := (map (get_exportinst (Build_moduleinst nil (ext_funcs imps ++ i_fs) (ext_tables imps ++ i_ts) (ext_mems imps ++ i_ms) (ext_globals imps ++ i_gs) nil nil nil i_tags typeids)) m.(mod_exports))
+    inst_tags := ext_tags imps ++ i_tags;
+    inst_exports := (map (get_exportinst (Build_moduleinst nil (ext_funcs imps ++ i_fs) (ext_tables imps ++ i_ts) (ext_mems imps ++ i_ms) (ext_globals imps ++ i_gs) nil nil nil (ext_tags imps ++ i_tags) typeids)) m.(mod_exports))
   |} in
   let '(s1, _) := alloc_funcs s m.(mod_funcs) inst in
   let '(s2, _) := alloc_tabs s1 (map modtab_type m.(mod_tables)) in

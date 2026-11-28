@@ -179,7 +179,12 @@ Proof.
     destruct mi; simpl in *.
     unfold module_import_desc_typer in Hmap.
     unfold module_import_typing.
-    destruct imp_desc; apply/eqP => /=; remove_bools_options => //; by rewrite eq_refl.
+    destruct imp_desc; try (apply/eqP => /=; remove_bools_options => //; by rewrite eq_refl).
+    destruct (lookup_function_type (List.concat mod_types) t) as [[ps results]|]
+      eqn:Htag => //.
+    destruct results => //.
+    injection Hmap as <-.
+    by unfold module_import_desc_typing => /=; rewrite Htag eq_refl.
   }
   (* exports *)
   { clear - Hmexptypes.

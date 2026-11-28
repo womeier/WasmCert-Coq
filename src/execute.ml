@@ -191,6 +191,12 @@ let get_ext_import hs path =
   | None -> None
 
 let instantiate verbosity hs s m = 
+  (* Validation precedes host import lookup. Otherwise a malformed source
+     signature can be hidden by an unrelated missing host export. *)
+  match Extract.module_type_checker m with
+  | None, message ->
+      TopHost.error ("instantiation error: Module type checking failure:" ^ message)
+  | Some _, _ ->
   let import_paths = get_import_path m in
   let oext_vals = List.map (get_ext_import hs) import_paths in
   let ext_vals = List.filter_map (fun x -> x) oext_vals in

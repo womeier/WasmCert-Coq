@@ -324,6 +324,10 @@ Inductive extern_type : Set :=
 | ET_table : table_type -> extern_type
 | ET_mem : memory_type -> extern_type
 | ET_global : global_type -> extern_type
+(* Source-validation signature/cache only, NOT a canonical tag identity.
+   Concrete tag import matching must use defined_type_equiv at the closed
+   boundary; import_subtyping deliberately does not match these caches. *)
+| ET_tag : result_type -> extern_type
 .
 
 (** std-doc:
@@ -740,7 +744,8 @@ Inductive module_import_desc : Set :=
 | MID_func : typeidx -> module_import_desc
 | MID_table : table_type -> module_import_desc
 | MID_mem : memory_type -> module_import_desc
-| MID_global : global_type -> module_import_desc.
+| MID_global : global_type -> module_import_desc
+| MID_tag : typeidx -> module_import_desc.
 
 Record module_import : Set := {
   imp_module : name;
@@ -838,7 +843,8 @@ Inductive module_export_desc : Set :=
 | MED_func : funcidx -> module_export_desc
 | MED_table : tableidx -> module_export_desc
 | MED_mem : memidx -> module_export_desc
-| MED_global : globalidx -> module_export_desc.
+| MED_global : globalidx -> module_export_desc
+| MED_tag : tagidx -> module_export_desc.
 
 Record module_export : Set := {
   modexp_name : name;
@@ -1031,6 +1037,7 @@ Inductive extern_value: Set :=
 | EV_table: tableaddr -> extern_value
 | EV_mem: memaddr -> extern_value
 | EV_global: globaladdr -> extern_value
+| EV_tag: tagaddr -> extern_value
 .
 
 

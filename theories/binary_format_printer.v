@@ -605,6 +605,7 @@ Definition binary_of_import_desc (imp_desc : module_import_desc) : list byte :=
   | MID_table t_ty => x01 :: binary_of_table_type t_ty
   | MID_mem m_ty => x02 :: binary_of_memory_type m_ty
   | MID_global g_ty => x03 :: binary_of_global_type g_ty
+  | MID_tag n => x04 :: x00 :: binary_of_typeidx n
   end.
 
 Definition binary_of_module_import (imp : module_import) : list byte :=
@@ -649,6 +650,7 @@ Definition binary_of_export_desc (ed : module_export_desc) : list byte :=
   | MED_table n => x01 :: binary_of_tableidx n
   | MED_mem n => x02 :: binary_of_memidx n
   | MED_global n => x03 :: binary_of_globalidx n
+  | MED_tag n => x04 :: binary_of_typeidx n
   end.
 
 Definition binary_of_module_export (e : module_export) : list byte :=
