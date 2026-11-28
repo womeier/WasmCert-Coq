@@ -89,7 +89,7 @@ Definition binary_of_f64 (x : f64) : list byte :=
 
 Definition binary_of_block_type (tb : block_type) : list byte :=
   match tb with
-  | BT_id x => binary_of_idx x
+  | BT_id x => leb128.encode_signed (Z.of_N x)
   | BT_valtype None => x40 :: nil
   | BT_valtype (Some t) => binary_of_value_type t :: nil
   end.
@@ -118,10 +118,17 @@ https://webassembly.github.io/spec/core/binary/instructions.html#vector-instruct
 Definition binary_of_vunop (op: vunop) :=
   xfd :: binary_of_N op.
 
+Definition binary_of_laneidx (x : laneidx) : list byte :=
+  match Byte.of_N x with
+  | Some b => b :: nil
+  | None => x00 :: nil (* outside the byte range; not produced by the parser *)
+  end.
+
 Definition binary_of_vbinop (op: vbinop) :=
   let '(opcode, args) := op in
   if N.eqb opcode 13%N then (* shuffle *)
-    xfd :: x0d :: binary_of_vec (binary_of_N) args
+    (* Exactly 16 raw lane bytes, without a vector length prefix. *)
+    xfd :: x0d :: List.concat (List.map binary_of_laneidx args)
   else
     xfd :: binary_of_N opcode.
 
@@ -137,12 +144,12 @@ Definition binary_of_vshiftop (op: vshiftop) :=
 Definition binary_of_splat_vec (sh: vshape) :=
   xfd ::
   (match sh with
-   | VS_i VSI_8_16 => x0e
-   | VS_i VSI_16_8 => x0f
-   | VS_i VSI_32_4 => x10
-   | VS_i VSI_64_2 => x11
-   | VS_f VSF_32_4 => x12
-   | VS_f VSF_64_2 => x13
+    | VS_i VSI_8_16 => x0f
+    | VS_i VSI_16_8 => x10
+    | VS_i VSI_32_4 => x11
+    | VS_i VSI_64_2 => x12
+    | VS_f VSF_32_4 => x13
+    | VS_f VSF_64_2 => x14
    end
   ) :: nil.
 
@@ -159,7 +166,7 @@ Definition binary_of_extract_vec (sh: vshape) (s: option sx) (x: laneidx) :=
    | VS_f VSF_64_2, None => x21
    | _, _ => x00 (* will not happen due to well formedness *)
    end
-  ) :: binary_of_N x.
+  ) :: binary_of_laneidx x.
 
 Definition binary_of_replace_vec (sh: vshape) (x: laneidx) :=
   xfd ::
@@ -171,10 +178,26 @@ Definition binary_of_replace_vec (sh: vshape) (x: laneidx) :=
    | VS_f VSF_32_4 => x20
    | VS_f VSF_64_2 => x22
    end
-  ) :: binary_of_N x.
+  ) :: binary_of_laneidx x.
   
 Definition binary_of_load_vec (lvarg: load_vec_arg) (marg: memarg) :=
-  xfd :: x0c :: (List.repeat x00 16).
+  xfd ::
+  (match lvarg with
+   | LVA_none => x00
+   | LVA_extend (8%N, 8%N) SX_S => x01
+   | LVA_extend (8%N, 8%N) SX_U => x02
+   | LVA_extend (16%N, 4%N) SX_S => x03
+   | LVA_extend (16%N, 4%N) SX_U => x04
+   | LVA_extend (32%N, 2%N) SX_S => x05
+   | LVA_extend (32%N, 2%N) SX_U => x06
+   | LVA_splat 8%N => x07
+   | LVA_splat 16%N => x08
+   | LVA_splat 32%N => x09
+   | LVA_splat 64%N => x0a
+   | LVA_zero 32%N => x5c
+   | LVA_zero 64%N => x5d
+   | _ => x00 (* not produced by the parser *)
+   end) :: binary_of_memarg marg.
 
 Definition binary_of_load_vec_lane (w: vwidth) (marg: memarg) (x: laneidx) :=
   xfd :: 
@@ -185,7 +208,7 @@ Definition binary_of_load_vec_lane (w: vwidth) (marg: memarg) (x: laneidx) :=
   | 64%N => x57
   | _ => x00 (* will not happen due to wellformedness *)
   end
-  ) :: binary_of_memarg marg ++ binary_of_N x.
+  ) :: binary_of_memarg marg ++ binary_of_laneidx x.
 
 (* store_vec_lane and load_vec uses the same args. Maybe it's better to find a new name *)
 Definition binary_of_store_vec (marg: memarg) :=
@@ -200,7 +223,7 @@ Definition binary_of_store_vec_lane (w: vwidth) (marg: memarg) (x: laneidx) :=
   | 64%N => x5b
   | _ => x00 (* will not happen due to wellformedness *)
   end
-  ) :: binary_of_memarg marg ++ binary_of_N x.
+  ) :: binary_of_memarg marg ++ binary_of_laneidx x.
 
 Fixpoint binary_of_be (be : basic_instruction) : list byte :=
   let binary_of_instrs bes := List.concat (List.map binary_of_be bes) in
@@ -589,29 +612,55 @@ Definition to_ref_func (es: list basic_instruction): option funcidx :=
   | _ => None
   end.
 
+Definition elem_function_indices (e : module_element) : option (list funcidx) :=
+  if e.(modelem_type) == T_funcref then
+    those (map to_ref_func e.(modelem_init))
+  else None.
+
 Definition elem_of_wasm_1_0 (e: module_element): option (list byte) :=
   match e.(modelem_mode) with
   | ME_active N0 offset =>
-      if e.(modelem_type) == T_funcref then
-        match those (map to_ref_func e.(modelem_init)) with
-        | Some ys =>
-            Some (x00 :: binary_of_expr offset ++ binary_of_vec binary_of_funcidx ys)
-        | None => None
-        end
-      else None
+      option_map
+        (fun ys => x00 :: binary_of_expr offset ++ binary_of_vec binary_of_funcidx ys)
+        (elem_function_indices e)
   | _ => None
   end.
   
 Definition binary_of_module_elem (e : module_element) : list byte :=
   match e.(modelem_mode) with
   | ME_passive =>
-      x05 :: binary_of_reference_type e.(modelem_type) :: binary_of_vec binary_of_expr e.(modelem_init)
+      match elem_function_indices e with
+      | Some ys => x01 :: x00 :: binary_of_vec binary_of_funcidx ys
+      | None =>
+          x05 :: binary_of_reference_type e.(modelem_type) ::
+            binary_of_vec binary_of_expr e.(modelem_init)
+      end
   | ME_declarative =>
-      x07 :: binary_of_reference_type e.(modelem_type) :: binary_of_vec binary_of_expr e.(modelem_init)
+      match elem_function_indices e with
+      | Some ys => x03 :: x00 :: binary_of_vec binary_of_funcidx ys
+      | None =>
+          x07 :: binary_of_reference_type e.(modelem_type) ::
+            binary_of_vec binary_of_expr e.(modelem_init)
+      end
   | ME_active x offset =>
-      match elem_of_wasm_1_0 e with
-      | Some bs => bs
-      | None => x06 :: binary_of_tableidx x ++ binary_of_expr offset ++ binary_of_reference_type e.(modelem_type) :: binary_of_vec binary_of_expr e.(modelem_init)
+      match elem_function_indices e with
+      | Some ys =>
+          match x with
+          | N0 => x00 :: binary_of_expr offset ++ binary_of_vec binary_of_funcidx ys
+          | _ =>
+              x02 :: binary_of_tableidx x ++ binary_of_expr offset ++
+                x00 :: binary_of_vec binary_of_funcidx ys
+          end
+      | None =>
+          match x, e.(modelem_type) with
+          | N0, T_funcref =>
+              x04 :: binary_of_expr offset ++
+                binary_of_vec binary_of_expr e.(modelem_init)
+          | _, _ =>
+              x06 :: binary_of_tableidx x ++ binary_of_expr offset ++
+                binary_of_reference_type e.(modelem_type) ::
+                binary_of_vec binary_of_expr e.(modelem_init)
+          end
       end
   end.
 
@@ -656,12 +705,21 @@ Definition binary_of_data (d : module_data) : list byte :=
   | MD_passive =>
       x01 :: binary_of_vec (fun x => cons (byte_of_compcert_byte x) nil) d.(moddata_init)
   | MD_active x offset =>
-      x02 :: binary_of_memidx x ++ binary_of_expr offset ++
-        binary_of_vec (fun x => cons (byte_of_compcert_byte x) nil) d.(moddata_init)
+      match x with
+      | N0 =>
+          x00 :: binary_of_expr offset ++
+            binary_of_vec (fun x => cons (byte_of_compcert_byte x) nil) d.(moddata_init)
+      | _ =>
+          x02 :: binary_of_memidx x ++ binary_of_expr offset ++
+            binary_of_vec (fun x => cons (byte_of_compcert_byte x) nil) d.(moddata_init)
+      end
   end.
 
 Definition binary_of_datasec (ds : list module_data) : list byte :=
   x0b :: with_length (binary_of_vec binary_of_data ds).
+
+Definition binary_of_datacountsec (ds : list module_data) : list byte :=
+  x0c :: with_length (binary_of_u32_nat (List.length ds)).
 
 Definition only_if_non_nil {A} (f : list A -> list byte) (xs : list A) : list byte :=
   match xs with
@@ -686,5 +744,8 @@ Definition binary_of_module (m : module) : list byte :=
   only_if_non_nil binary_of_exportssec m.(mod_exports) ++
   only_if_non_none binary_of_startsec m.(mod_start) ++
   only_if_non_nil binary_of_elemsec m.(mod_elems) ++
+  (* The AST forgets the data-count section.  Emit it whenever there is code:
+     memory.init and data.drop require it, including inside nested blocks. *)
+  only_if_non_nil (fun _ => binary_of_datacountsec m.(mod_datas)) m.(mod_funcs) ++
   only_if_non_nil binary_of_codesec m.(mod_funcs) ++
   only_if_non_nil binary_of_datasec m.(mod_datas).
