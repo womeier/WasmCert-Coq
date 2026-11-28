@@ -1,7 +1,7 @@
 (** Correctness properties for canonical recursive-group closing and lookup.
-    Closing is not structural declaration validation. In particular the
-    bounded path characterization below states exactly what the executable
-    matcher proves; its full well-formed-registry completeness is separate. *)
+    Closing is not structural declaration validation. The bounded path
+    characterization and checked rank invariant establish full declared-path
+    matching completeness for registries returned by the public closer. *)
 From Wasm Require Import datatypes gc_type_context.
 From Stdlib Require Import List NArith Arith Bool Lia Relation_Operators.
 Import ListNotations.
@@ -287,4 +287,350 @@ Theorem defined_type_equiv_sound groups a b :
 Proof.
   unfold defined_type_equiv. rewrite andb_true_iff.
   intros [Forward Backward]. split; now apply defined_type_matches_sound.
+Qed.
+
+Definition canonical_registry_super_wf groups : Prop :=
+  forall a b, declared_type_step groups a b ->
+    (exists parent, lookup_defined_type groups b = Some parent) /\
+    defined_type_rank groups b < defined_type_rank groups a.
+
+Lemma nth_error_index_bound {A} (xs : list A) i x :
+  nth_error xs i = Some x -> i < length xs.
+Proof.
+  intro E.
+  destruct (lt_dec i (length xs)); [assumption |].
+  assert (nth_error xs i = None) by (apply nth_error_None; lia).
+  congruence.
+Qed.
+
+Theorem canonical_registry_super_orderedb_sound groups :
+  canonical_registry_super_orderedb groups = true ->
+  canonical_registry_super_wf groups.
+Proof.
+  intros Checked a b [expanded [Expand Member]].
+  unfold expand_defined_type in Expand.
+  destruct (lookup_defined_type groups a) as [raw|] eqn:Lookup; [|discriminate].
+  inversion Expand; subst expanded.
+  change (In (CT_def b)
+    (map (fun u => CT_def (resolve_type_use a u)) (subtype_supers raw))) in Member.
+  apply in_map_iff in Member.
+  destruct Member as [u [Resolved Member]].
+  injection Resolved as Resolved.
+  unfold lookup_defined_type in Lookup.
+  destruct (nth_error groups (N.to_nat (defined_group a))) as [group|] eqn:Group;
+    [|discriminate].
+  unfold canonical_registry_super_orderedb in Checked.
+  apply forallb_forall with (x := N.to_nat (defined_group a)) in Checked.
+  2: { apply in_seq. split; [lia | now apply nth_error_index_bound in Group]. }
+  rewrite Group in Checked.
+  apply forallb_forall with (x := N.to_nat (defined_member a)) in Checked.
+  2: { apply in_seq. split; [lia | now apply nth_error_index_bound in Lookup]. }
+  rewrite Lookup in Checked.
+  destruct a as [g i]. simpl in *.
+  rewrite !N2Nat.id in Checked.
+  apply forallb_forall with (x := u) in Checked; [|exact Member].
+  rewrite Resolved in Checked.
+  apply andb_true_iff in Checked. destruct Checked as [Valid Smaller].
+  split.
+  - unfold defined_type_validb in Valid.
+    destruct (lookup_defined_type groups b) as [parent|] eqn:Parent;
+      [now exists parent | discriminate].
+  - now apply Nat.ltb_lt.
+Qed.
+
+Theorem close_type_groups_super_wf groups source registry types :
+  close_type_groups groups source = Some (registry, types) ->
+  canonical_registry_super_wf registry.
+Proof.
+  unfold close_type_groups.
+  destruct (close_type_groups_from groups [] source) as [[output ids]|];
+    [|discriminate].
+  destruct (canonical_registry_super_orderedb output) eqn:Checked;
+    [|discriminate].
+  intro E; inversion E; subst.
+  now apply canonical_registry_super_orderedb_sound.
+Qed.
+
+Lemma registry_prefix_member_bound groups gi group :
+  nth_error groups gi = Some group ->
+  canonical_registry_size (firstn gi groups) + length group <=
+    canonical_registry_size groups.
+Proof.
+  revert gi group. induction groups as [|head groups IH]; intros gi group E.
+  - destruct gi; discriminate.
+  - destruct gi as [|gi].
+    + inversion E; subst. simpl. lia.
+    + simpl in E. specialize (IH _ _ E). simpl. lia.
+Qed.
+
+Lemma defined_type_rank_bound groups t raw :
+  lookup_defined_type groups t = Some raw ->
+  defined_type_rank groups t < canonical_registry_size groups.
+Proof.
+  unfold lookup_defined_type, defined_type_rank.
+  destruct (nth_error groups (N.to_nat (defined_group t))) as [group|] eqn:Group;
+    [|discriminate].
+  intro Member.
+  pose proof (registry_prefix_member_bound _ _ _ Group).
+  apply nth_error_index_bound in Member. lia.
+Qed.
+
+Lemma declared_type_step_source_valid groups a b :
+  declared_type_step groups a b ->
+  exists raw, lookup_defined_type groups a = Some raw.
+Proof.
+  intros [st [Expand Member]]. unfold expand_defined_type in Expand.
+  destruct (lookup_defined_type groups a) as [raw|] eqn:Raw;
+    [now exists raw | discriminate].
+Qed.
+
+Lemma declared_type_path_rank_bound groups n a b :
+  canonical_registry_super_wf groups ->
+  declared_type_path groups n a b ->
+  n <= defined_type_rank groups a.
+Proof.
+  intros WF Path. induction Path as [a|n a b c Step Path IH]; [lia |].
+  destruct (WF a b Step) as [_ Smaller]. lia.
+Qed.
+
+Theorem defined_type_matches_complete groups n a b :
+  canonical_registry_super_wf groups ->
+  declared_type_path groups n a b ->
+  defined_type_matches groups a b = true.
+Proof.
+  intros WF Path. unfold defined_type_matches.
+  destruct n as [|n].
+  - apply (defined_type_matches_fuel_complete _ _ _ _ Path). lia.
+  - assert (Start : exists raw, lookup_defined_type groups a = Some raw).
+    { inversion Path; subst. eapply declared_type_step_source_valid; eassumption. }
+    destruct Start as [raw Raw].
+    pose proof (defined_type_rank_bound _ _ _ Raw).
+    pose proof (declared_type_path_rank_bound _ _ _ _ WF Path).
+    apply (defined_type_matches_fuel_complete _ _ _ _ Path). lia.
+Qed.
+
+Theorem defined_type_matches_correct groups a b :
+  canonical_registry_super_wf groups ->
+  (defined_type_matches groups a b = true <->
+    exists n, declared_type_path groups n a b).
+Proof.
+  intro WF. split; [apply defined_type_matches_sound |].
+  intros [n Path]. now apply (defined_type_matches_complete groups n a b).
+Qed.
+
+Theorem closed_groups_matching_complete initial source groups types a b :
+  close_type_groups initial source = Some (groups, types) ->
+  (defined_type_matches groups a b = true <->
+    exists n, declared_type_path groups n a b).
+Proof.
+  intro Closed. apply defined_type_matches_correct.
+  now apply close_type_groups_super_wf in Closed.
+Qed.
+
+Lemma declared_type_path_append groups n a b m c :
+  declared_type_path groups n a b ->
+  declared_type_path groups m b c ->
+  declared_type_path groups (n + m) a c.
+Proof.
+  intros First. revert m c.
+  induction First as [a|n a b c Step First IH]; intros m d Last.
+  - exact Last.
+  - simpl. eapply dtp_step; [exact Step | now apply IH].
+Qed.
+
+Theorem defined_type_matches_trans groups a b c :
+  canonical_registry_super_wf groups ->
+  defined_type_matches groups a b = true ->
+  defined_type_matches groups b c = true ->
+  defined_type_matches groups a c = true.
+Proof.
+  intros WF First Last.
+  apply defined_type_matches_sound in First.
+  apply defined_type_matches_sound in Last.
+  destruct First as [n First], Last as [m Last].
+  apply (defined_type_matches_complete groups (n + m) a c WF).
+  now apply declared_type_path_append with (b := b).
+Qed.
+
+Theorem defined_type_equiv_correct groups a b :
+  canonical_registry_super_wf groups ->
+  (defined_type_equiv groups a b = true <->
+    (exists n, declared_type_path groups n a b) /\
+    (exists n, declared_type_path groups n b a)).
+Proof.
+  intro WF. unfold defined_type_equiv.
+  rewrite andb_true_iff, !defined_type_matches_correct by exact WF.
+  reflexivity.
+Qed.
+
+Theorem close_type_groups_count_public initial source groups types :
+  close_type_groups initial source = Some (groups, types) ->
+  length types = fold_right (fun g n => length g + n) 0 source.
+Proof.
+  unfold close_type_groups.
+  destruct (close_type_groups_from initial [] source) as [[registry ids]|]
+    eqn:Closed; [|discriminate].
+  destruct (canonical_registry_super_orderedb registry); [|discriminate].
+  intro E; inversion E; subst.
+  apply close_type_groups_count in Closed. exact Closed.
+Qed.
+
+Theorem close_type_groups_extension_public initial source groups types :
+  close_type_groups initial source = Some (groups, types) ->
+  exists suffix, groups = initial ++ suffix.
+Proof.
+  unfold close_type_groups.
+  destruct (close_type_groups_from initial [] source) as [[registry ids]|]
+    eqn:Closed; [|discriminate].
+  destruct (canonical_registry_super_orderedb registry); [|discriminate].
+  intro E; inversion E; subst.
+  now apply close_type_groups_extension in Closed.
+Qed.
+
+Lemma lookup_defined_type_extension groups suffix t :
+  N.to_nat (defined_group t) < length groups ->
+  lookup_defined_type (groups ++ suffix) t = lookup_defined_type groups t.
+Proof.
+  intro Bound. unfold lookup_defined_type.
+  now rewrite nth_error_app1.
+Qed.
+
+Theorem expand_defined_type_extension groups suffix t :
+  N.to_nat (defined_group t) < length groups ->
+  expand_defined_type (groups ++ suffix) t = expand_defined_type groups t.
+Proof.
+  intro Bound. unfold expand_defined_type.
+  now rewrite lookup_defined_type_extension.
+Qed.
+
+Theorem expand_function_type_extension groups suffix t :
+  N.to_nat (defined_group t) < length groups ->
+  expand_function_type (groups ++ suffix) t = expand_function_type groups t.
+Proof.
+  intro Bound. unfold expand_function_type.
+  now rewrite expand_defined_type_extension.
+Qed.
+
+Lemma NoDup_append_single {A} (xs : list A) x :
+  NoDup xs -> ~ In x xs -> NoDup (xs ++ [x]).
+Proof.
+  intros Unique. induction Unique as [|head tail Notin Unique IH].
+  - intro Absent. simpl. constructor; [simpl; tauto | constructor].
+  - intro Absent. simpl. constructor.
+    + intro Member. apply in_app_iff in Member.
+      destruct Member as [Member|[E|False]]; [contradiction | |contradiction].
+      subst x. apply Absent. now left.
+    + apply IH. intro Member. apply Absent. now right.
+Qed.
+
+Theorem intern_group_nodup groups group :
+  NoDup groups -> NoDup (fst (intern_group groups group)).
+Proof.
+  intro Unique. unfold intern_group.
+  destruct (find_canonical_group groups group) eqn:Found; simpl; [exact Unique |].
+  apply NoDup_append_single; [exact Unique |].
+  now apply find_canonical_group_none.
+Qed.
+
+Lemma close_type_group_nodup groups prior source groups' ids :
+  NoDup groups ->
+  close_type_group groups prior source = Some (groups', ids) ->
+  NoDup groups'.
+Proof.
+  intro Unique. unfold close_type_group.
+  destruct (close_subtypes prior (N.of_nat (length source)) 0 source)
+    as [closed|]; [|discriminate].
+  pose proof (intern_group_nodup groups closed Unique) as Result.
+  destruct (intern_group groups closed) as [registry address]; simpl in Result.
+  intro E; inversion E; subst. exact Result.
+Qed.
+
+Lemma close_type_groups_nodup initial prior source groups types :
+  NoDup initial ->
+  close_type_groups_from initial prior source = Some (groups, types) ->
+  NoDup groups.
+Proof.
+  revert initial prior groups types.
+  induction source as [|group source IH]; intros initial prior groups types Unique Closed.
+  - inversion Closed; subst. exact Unique.
+  - simpl in Closed.
+    destruct (close_type_group initial prior group) as [[registry ids]|] eqn:Group;
+      [|discriminate].
+    eapply IH; [|exact Closed].
+    eapply close_type_group_nodup; eassumption.
+Qed.
+
+Theorem close_type_groups_nodup_public initial source groups types :
+  NoDup initial ->
+  close_type_groups initial source = Some (groups, types) ->
+  NoDup groups.
+Proof.
+  intro Unique. unfold close_type_groups.
+  destruct (close_type_groups_from initial [] source) as [[registry ids]|]
+    eqn:Closed; [|discriminate].
+  destruct (canonical_registry_super_orderedb registry); [|discriminate].
+  intro E; inversion E; subst.
+  now apply close_type_groups_nodup in Closed.
+Qed.
+
+Theorem canonical_group_identity_unique (groups : canonical_registry) i j group :
+  NoDup groups ->
+  nth_error groups i = Some group ->
+  nth_error groups j = Some group ->
+  i = j.
+Proof.
+  intro Unique. revert i j.
+  induction Unique as [|head tail Notin Unique IH]; intros i j First Last.
+  - destruct i; discriminate.
+  - destruct i as [|i], j as [|j]; simpl in *.
+    + reflexivity.
+    + inversion First; subst. apply nth_error_In in Last. contradiction.
+    + inversion Last; subst. apply nth_error_In in First. contradiction.
+    + f_equal. now apply IH.
+Qed.
+
+Theorem defined_type_matches_refl groups a :
+  defined_type_matches groups a a = true.
+Proof.
+  unfold defined_type_matches.
+  apply (defined_type_matches_fuel_complete groups 0 a a); [constructor | lia].
+Qed.
+
+Lemma declared_type_path_rank_mono groups n a b :
+  canonical_registry_super_wf groups ->
+  declared_type_path groups n a b ->
+  defined_type_rank groups b <= defined_type_rank groups a.
+Proof.
+  intros WF Path. induction Path as [a|n a b c Step Path IH]; [lia |].
+  destruct (WF a b Step) as [_ Smaller]. lia.
+Qed.
+
+Lemma declared_type_path_positive_rank groups n a b :
+  canonical_registry_super_wf groups ->
+  declared_type_path groups (S n) a b ->
+  defined_type_rank groups b < defined_type_rank groups a.
+Proof.
+  intros WF Path. inversion Path; subst.
+  match goal with
+  | Step : declared_type_step groups a ?middle,
+    Tail : declared_type_path groups n ?middle b |- _ =>
+      destruct (WF a middle Step) as [_ Smaller];
+      pose proof (declared_type_path_rank_mono groups n middle b WF Tail); lia
+  end.
+Qed.
+
+Theorem defined_type_equiv_eq groups a b :
+  canonical_registry_super_wf groups ->
+  (defined_type_equiv groups a b = true <-> a = b).
+Proof.
+  intro WF. split.
+  - intro Equivalent. apply defined_type_equiv_sound in Equivalent.
+    destruct Equivalent as [[n Forward] [m Backward]].
+    destruct n as [|n].
+    + now inversion Forward.
+    + pose proof (declared_type_path_positive_rank groups n a b WF Forward).
+      pose proof (declared_type_path_rank_mono groups m b a WF Backward).
+      lia.
+  - intro E; subst b. unfold defined_type_equiv.
+    now rewrite defined_type_matches_refl.
 Qed.

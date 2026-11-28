@@ -180,9 +180,6 @@ Fixpoint close_type_groups_from (groups : canonical_registry)
       end
   end.
 
-Definition close_type_groups groups source :=
-  close_type_groups_from groups [] source.
-
 Definition resolve_type_use (self : defined_type) (u : closed_type_use) : defined_type :=
   match u with
   | CT_rec i => Def_type (defined_group self) i
@@ -305,3 +302,47 @@ Definition defined_type_matches groups a b :=
 
 Definition defined_type_equiv groups a b :=
   andb (defined_type_matches groups a b) (defined_type_matches groups b a).
+
+Definition defined_type_rank (groups : canonical_registry) (t : defined_type) : nat :=
+  canonical_registry_size (firstn (N.to_nat (defined_group t)) groups) +
+    N.to_nat (defined_member t).
+
+Definition defined_type_validb groups t : bool :=
+  match lookup_defined_type groups t with Some _ => true | None => false end.
+
+(** Validate the finite declared-supertype graph independently of structural
+    compatibility/finality validation. Every parent must be present and have
+    a strictly smaller registry rank. This makes the public matcher's finite
+    bound complete, rather than merely a sound approximation. *)
+Definition canonical_registry_super_orderedb (groups : canonical_registry) : bool :=
+  forallb
+    (fun gi =>
+      match nth_error groups gi with
+      | None => false
+      | Some group =>
+          forallb
+            (fun mi =>
+              match nth_error group mi with
+              | None => false
+              | Some st =>
+                  let self := Def_type (N.of_nat gi) (N.of_nat mi) in
+                  forallb
+                    (fun u =>
+                      let parent := resolve_type_use self u in
+                      andb (defined_type_validb groups parent)
+                        (Nat.ltb (defined_type_rank groups parent)
+                          (defined_type_rank groups self)))
+                    (subtype_supers st)
+              end)
+            (seq 0 (length group))
+      end)
+    (seq 0 (length groups)).
+
+Definition close_type_groups groups source :
+    option (canonical_registry * list defined_type) :=
+  match close_type_groups_from groups [] source with
+  | None => None
+  | Some (registry, types) =>
+      if canonical_registry_super_orderedb registry
+      then Some (registry, types) else None
+  end.

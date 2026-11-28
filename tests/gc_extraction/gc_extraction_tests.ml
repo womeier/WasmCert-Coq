@@ -223,4 +223,25 @@ let () =
     (Types.close [] [[st true [] (Comp_func (Tf ([], [T_bot])))]] = None);
   check "invalid canonical group lookup" (Types.expand [] (id 0 0) = None);
   check "invalid canonical member lookup" (Types.expand registry (id 0 2) = None);
+  let invalid_parent p =
+    [{ subtype_final = false; subtype_supers = [CT_def p];
+       subtype_composite = Comp_func (Closed_ft ([], [])) }]
+  in
+  check "canonical closer rejects cyclic input registry"
+    (Types.close [invalid_parent (id 0 0)] [] = None);
+  check "canonical closer rejects dangling parent identity"
+    (Types.close [invalid_parent (id 1 0)] [] = None);
+  let chain =
+    List.init 64
+      (fun i -> [st false (if i = 0 then [] else [i - 1]) (Comp_func (Tf ([], [])))])
+  in
+  begin match Types.close [] chain with
+  | None -> check "long declared subtype chain closes" false
+  | Some (types, names) ->
+      check "long declared subtype chain identities" (List.length names = 64);
+      check "matching traverses the entire declared chain"
+        (Types.matches types (id 63 0) (id 0 0));
+      check "long declared subtype chain direction"
+        (not (Types.matches types (id 0 0) (id 63 0)))
+  end;
   Printf.printf "GC extraction: %d/%d checks passed\n" !checks !checks

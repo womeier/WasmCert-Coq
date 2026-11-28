@@ -69,3 +69,15 @@ Proof.
   apply defined_type_matches_sound.
   exact (proj1 declared_matching_direction).
 Qed.
+
+Example reject_cyclic_input_registry :
+  close_type_groups
+    [[Sub_type false [CT_def (Def_type 0 0)] (Comp_func (Closed_ft [] []))]]
+    [] = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Example reject_dangling_declared_parent_registry :
+  close_type_groups
+    [[Sub_type false [CT_def (Def_type 1 0)] (Comp_func (Closed_ft [] []))]]
+    [] = None.
+Proof. vm_compute. reflexivity. Qed.
