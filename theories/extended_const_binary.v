@@ -1,6 +1,8 @@
 (** Binary round trips for the entire extended-const arithmetic opcode fragment.
     This theorem uses the same parser and printer as extraction; it does not
-    assert correctness of the surrounding (currently unverified) module parser. *)
+    itself establish surrounding module correctness; the general whole-module
+    results are in [binary_format_module_complete] and the canonical printer
+    results in [binary_format_module_roundtrip]. *)
 From mathcomp Require Import ssreflect ssrbool ssrnat eqtype seq.
 From Wasm Require Import instantiation_func binary_format_parser binary_format_printer.
 From Stdlib Require Import ZArith.

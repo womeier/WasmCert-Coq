@@ -28,6 +28,23 @@
  (deps extended_const_final_binary.wast)
  (action
   (bash "set -o pipefail; %{exe:../src/wasm_coq_interpreter.exe} --wast %{dep:extended_const_final_binary.wast} | grep 'Result: 6/6 '")))
+
+(rule
+ (alias runtest)
+ (deps named_binary_module.wast)
+ (action
+  (bash "set -o pipefail; %{exe:../src/wasm_coq_interpreter.exe} --wast %{dep:named_binary_module.wast} | grep 'Result: 4/4 '")))
+
+(rule
+ (alias runtest)
+ (deps extended_const_projection_test.py extended_const_official_projection.py)
+ (action (run python3 %{dep:extended_const_projection_test.py})))
+
+(rule
+ (alias runtest)
+ (deps named_binary_module_test.sh)
+ (action
+  (run bash %{dep:named_binary_module_test.sh} %{exe:../src/wasm_coq_interpreter.exe})))
 (test
   (name addressing_extracted)
   (modules addressing_extracted)
