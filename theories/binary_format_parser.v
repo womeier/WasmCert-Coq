@@ -1279,10 +1279,16 @@ Definition datacount_presence_agree (codes: list module_func_without_type) (ocou
       else true
   end.
 
-Definition parse_module_sections_after {n} {A} (f: byte_parser A n) : byte_parser module n :=
-  guardM
-  (fun results =>
-     match results with
+Definition module_section_results (A : Type) : Type :=
+  A * option (list function_type) * option (list module_import) *
+  option (list typeidx) * option (list module_table) * option (list module_mem) *
+  option (list module_global) * option (list module_export) * option module_start *
+  option (list module_element) * option N *
+  option (list module_func_without_type) * option (list module_data).
+
+(* Named production postprocessor: all cross-section guards remain here. *)
+Definition finish_module_sections {A} (results : module_section_results A) : option module :=
+      match results with
      | (_, otypes, oimports, ofts, otables, omems, oglobals, oexports, ostart, oelems, odatacount, ocodes, odatas) =>
          let types := option_to_list otypes in
          let imports := option_to_list oimports in
@@ -1317,8 +1323,10 @@ Definition parse_module_sections_after {n} {A} (f: byte_parser A n) : byte_parse
              else None
            else None
          else None
-     end
-  )
+      end.
+
+Definition parse_module_section_sequence_after {n} {A} (f: byte_parser A n) :
+    byte_parser (module_section_results A) n :=
   (parse_with_customsec_star_after
   (* "<&?>" is right associative, but we want the other way round here *)
   (((((((((((((f <&?>
@@ -1333,7 +1341,10 @@ Definition parse_module_sections_after {n} {A} (f: byte_parser A n) : byte_parse
   parse_elemsec_wrapper) <&?>
   parse_datacountsec_wrapper) <&?>
   parse_codesec_wrapper) <&?>
-  parse_datasec_wrapper))).
+   parse_datasec_wrapper))).
+
+Definition parse_module_sections_after {n} {A} (f: byte_parser A n) : byte_parser module n :=
+  guardM finish_module_sections (parse_module_section_sequence_after f).
 
 Definition parse_module {n} : byte_parser module n :=
   parse_module_sections_after
