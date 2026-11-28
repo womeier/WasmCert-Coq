@@ -612,29 +612,55 @@ Definition to_ref_func (es: list basic_instruction): option funcidx :=
   | _ => None
   end.
 
+Definition elem_function_indices (e : module_element) : option (list funcidx) :=
+  if e.(modelem_type) == T_funcref then
+    those (map to_ref_func e.(modelem_init))
+  else None.
+
 Definition elem_of_wasm_1_0 (e: module_element): option (list byte) :=
   match e.(modelem_mode) with
   | ME_active N0 offset =>
-      if e.(modelem_type) == T_funcref then
-        match those (map to_ref_func e.(modelem_init)) with
-        | Some ys =>
-            Some (x00 :: binary_of_expr offset ++ binary_of_vec binary_of_funcidx ys)
-        | None => None
-        end
-      else None
+      option_map
+        (fun ys => x00 :: binary_of_expr offset ++ binary_of_vec binary_of_funcidx ys)
+        (elem_function_indices e)
   | _ => None
   end.
   
 Definition binary_of_module_elem (e : module_element) : list byte :=
   match e.(modelem_mode) with
   | ME_passive =>
-      x05 :: binary_of_reference_type e.(modelem_type) :: binary_of_vec binary_of_expr e.(modelem_init)
+      match elem_function_indices e with
+      | Some ys => x01 :: x00 :: binary_of_vec binary_of_funcidx ys
+      | None =>
+          x05 :: binary_of_reference_type e.(modelem_type) ::
+            binary_of_vec binary_of_expr e.(modelem_init)
+      end
   | ME_declarative =>
-      x07 :: binary_of_reference_type e.(modelem_type) :: binary_of_vec binary_of_expr e.(modelem_init)
+      match elem_function_indices e with
+      | Some ys => x03 :: x00 :: binary_of_vec binary_of_funcidx ys
+      | None =>
+          x07 :: binary_of_reference_type e.(modelem_type) ::
+            binary_of_vec binary_of_expr e.(modelem_init)
+      end
   | ME_active x offset =>
-      match elem_of_wasm_1_0 e with
-      | Some bs => bs
-      | None => x06 :: binary_of_tableidx x ++ binary_of_expr offset ++ binary_of_reference_type e.(modelem_type) :: binary_of_vec binary_of_expr e.(modelem_init)
+      match elem_function_indices e with
+      | Some ys =>
+          match x with
+          | N0 => x00 :: binary_of_expr offset ++ binary_of_vec binary_of_funcidx ys
+          | _ =>
+              x02 :: binary_of_tableidx x ++ binary_of_expr offset ++
+                x00 :: binary_of_vec binary_of_funcidx ys
+          end
+      | None =>
+          match x, e.(modelem_type) with
+          | N0, T_funcref =>
+              x04 :: binary_of_expr offset ++
+                binary_of_vec binary_of_expr e.(modelem_init)
+          | _, _ =>
+              x06 :: binary_of_tableidx x ++ binary_of_expr offset ++
+                binary_of_reference_type e.(modelem_type) ::
+                binary_of_vec binary_of_expr e.(modelem_init)
+          end
       end
   end.
 
@@ -679,8 +705,14 @@ Definition binary_of_data (d : module_data) : list byte :=
   | MD_passive =>
       x01 :: binary_of_vec (fun x => cons (byte_of_compcert_byte x) nil) d.(moddata_init)
   | MD_active x offset =>
-      x02 :: binary_of_memidx x ++ binary_of_expr offset ++
-        binary_of_vec (fun x => cons (byte_of_compcert_byte x) nil) d.(moddata_init)
+      match x with
+      | N0 =>
+          x00 :: binary_of_expr offset ++
+            binary_of_vec (fun x => cons (byte_of_compcert_byte x) nil) d.(moddata_init)
+      | _ =>
+          x02 :: binary_of_memidx x ++ binary_of_expr offset ++
+            binary_of_vec (fun x => cons (byte_of_compcert_byte x) nil) d.(moddata_init)
+      end
   end.
 
 Definition binary_of_datasec (ds : list module_data) : list byte :=

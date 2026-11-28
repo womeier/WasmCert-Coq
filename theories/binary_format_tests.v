@@ -430,3 +430,41 @@ Lemma shuffle_module_roundtrip :
       (xfd :: x0d :: shuffle_test_bytes ++ (x0b :: nil))) = Some m /\
   run_parse_module (binary_of_module m) = Some m.
 Proof. vm_compute. split; reflexivity. Qed.
+
+(** Compact segment forms matter for size preservation: expanding function
+    indices into expressions can overflow an otherwise u32-sized section. *)
+Definition element_encoding_cases : list (module_element * list Byte.byte) :=
+  let make mode init :=
+    {| modelem_type := T_funcref;
+       modelem_init := init;
+       modelem_mode := mode |} in
+  let refs := (BI_ref_func 127%N :: nil) :: nil in
+  let exprs := nil :: nil in
+  (make (ME_active 0%N nil) refs, x00 :: x0b :: x01 :: x7f :: nil) ::
+  (make ME_passive refs, x01 :: x00 :: x01 :: x7f :: nil) ::
+  (make (ME_active 1%N nil) refs, x02 :: x01 :: x0b :: x00 :: x01 :: x7f :: nil) ::
+  (make ME_declarative refs, x03 :: x00 :: x01 :: x7f :: nil) ::
+  (make (ME_active 0%N nil) exprs, x04 :: x0b :: x01 :: x0b :: nil) ::
+  (make ME_passive exprs, x05 :: x70 :: x01 :: x0b :: nil) ::
+  (make (ME_active 1%N nil) exprs, x06 :: x01 :: x0b :: x70 :: x01 :: x0b :: nil) ::
+  (make ME_declarative exprs, x07 :: x70 :: x01 :: x0b :: nil) :: nil.
+
+Lemma element_forms_roundtrip :
+  List.Forall
+    (fun '(e, expected) =>
+      binary_of_module_elem e = expected /\
+      @binary_format_parser.run option _ _ _ _ Byte.byte tokBytes module_element
+        expected (fun _ => parse_module_element) = Some e)
+    element_encoding_cases.
+Proof.
+  unfold element_encoding_cases.
+  repeat (apply List.Forall_cons; [split; vm_compute; reflexivity |]).
+  apply List.Forall_nil.
+Qed.
+
+Lemma active_data_zero_uses_compact_form :
+  let d := {| moddata_init := nil; moddata_mode := MD_active 0%N nil |} in
+  binary_of_data d = (x00 :: x0b :: x00 :: nil) /\
+  @binary_format_parser.run option _ _ _ _ Byte.byte tokBytes module_data
+    (binary_of_data d) (fun _ => parse_module_data) = Some d.
+Proof. vm_compute. split; reflexivity. Qed.

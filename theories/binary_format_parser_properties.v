@@ -10,8 +10,10 @@
     encoder roundtrips are proved in [leb128_properties]. *)
 From Wasm Require Import binary_format_parser binary_format_printer datatypes
                          leb128_properties.
-From Stdlib Require Import ZArith Lia Strings.Byte NArith.Nnat.
+From Stdlib Require Import ZArith Lia Strings.Byte NArith.Nnat Arith.Peano_dec.
 From parseque Require Import Parseque.
+
+Local Open Scope list_scope.
 
 Section OptionParsers.
   Context {Toks : nat -> Type}.
@@ -145,6 +147,60 @@ Section ObservedParsers.
   Variable bs : list Byte.byte.
   Variable bound : List.length bs <= n.
 
+  Lemma observe_map_option (f : A -> B)
+      (p : Parser (SizedList Byte.byte) Byte.byte option A n) :
+    observe_leb (runParser (Combinators.map f p) bound (mkSizedList bs)) =
+    option_map (fun '(a, rest) => (f a, rest))
+      (observe_leb (runParser p bound (mkSizedList bs))).
+  Proof.
+    rewrite run_map_option.
+    destruct (runParser p bound (mkSizedList bs)); reflexivity.
+  Qed.
+
+  Lemma observe_alt_option
+      (p q : Parser (SizedList Byte.byte) Byte.byte option A n) :
+    observe_leb (runParser (Combinators.alt p q) bound (mkSizedList bs)) =
+    match observe_leb (runParser p bound (mkSizedList bs)) with
+    | Some result => Some result
+    | None => observe_leb (runParser q bound (mkSizedList bs))
+    end.
+  Proof.
+    rewrite run_alt_option.
+    destruct (runParser p bound (mkSizedList bs)); reflexivity.
+  Qed.
+
+  Lemma observe_andbind_success
+      (p : Parser (SizedList Byte.byte) Byte.byte option A n)
+      (q : A -> Parser (SizedList Byte.byte) Byte.byte option B n)
+      a tail b rest :
+    observe_leb (runParser p bound (mkSizedList bs)) = Some (a, tail) ->
+    (forall tail_bound : List.length tail <= n,
+      observe_leb (runParser (q a) tail_bound (mkSizedList tail)) =
+        Some (b, rest)) ->
+    observe_leb
+      (runParser (Combinators.andbind p (fun a => q a))
+        bound (mkSizedList bs)) = Some ((a, b), rest).
+  Proof.
+    intros P Q. apply observe_leb_success in P.
+    destruct P as [s [P [V Left]]].
+    unfold Combinators.andbind. cbn [runParser]. rewrite P. simpl.
+    destruct s as [v k Hk [tail' Length]]. simpl in V, Left.
+    subst v tail'. subst k. simpl.
+    assert (Eta : forall p : List.length tail = List.length tail,
+      @Sized.MkSizedType (list byte) (@List.length byte)
+        (List.length tail) tail p = mkSizedList tail).
+    { intro equality. unfold mkSizedList. f_equal. apply UIP_nat. }
+    rewrite !Eta.
+    match goal with
+    | |- context [runParser (q a) ?tail_bound (mkSizedList tail)] =>
+        pose proof (Q tail_bound) as R;
+        destruct (runParser (q a) tail_bound (mkSizedList tail)) as [t|] eqn:T
+    end.
+    - unfold observe_leb in R |- *. simpl in R |- *.
+      inversion R. reflexivity.
+    - discriminate R.
+  Qed.
+
   Lemma observe_guardM_option (f : A -> option B)
       (p : Parser (SizedList Byte.byte) Byte.byte option A n) :
     observe_leb (runParser (Combinators.guardM f p) bound (mkSizedList bs)) =
@@ -177,6 +233,23 @@ Section ObservedParsers.
       reflexivity.
   Qed.
 End ObservedParsers.
+
+Lemma observe_map_andbind_success {A B C : Type} {n}
+    bs (bound : List.length bs <= n) (f : A * B -> C)
+    (p : Parser (SizedList Byte.byte) Byte.byte option A n)
+    (q : A -> Parser (SizedList Byte.byte) Byte.byte option B n)
+    a tail b rest :
+  observe_leb (runParser p bound (mkSizedList bs)) = Some (a, tail) ->
+  (forall tail_bound : List.length tail <= n,
+    observe_leb (runParser (q a) tail_bound (mkSizedList tail)) =
+      Some (b, rest)) ->
+  observe_leb
+    (runParser (Combinators.map f (Combinators.andbind p (fun a => q a)))
+      bound (mkSizedList bs)) = Some (f (a, b), rest).
+Proof.
+  intros P Q. rewrite observe_map_option.
+  erewrite observe_andbind_success; [reflexivity | exact P | exact Q].
+Qed.
 
 Lemma parse_u32_observe n bs (bound : List.length bs <= n) :
   observe_leb
@@ -498,6 +571,220 @@ Section IntegerGuards.
     - rewrite <- S. exact Width.
   Qed.
 End IntegerGuards.
+
+Definition encoded_list {A} (encode : A -> list byte) (values : list A) :=
+  List.concat (List.map encode values).
+
+Lemma encoded_list_cons {A} (encode : A -> list byte) a values :
+  encoded_list encode (a :: values) = encode a ++ encoded_list encode values.
+Proof. reflexivity. Qed.
+
+Lemma encoded_list_app {A} (encode : A -> list byte) left right :
+  encoded_list encode (left ++ right) =
+  encoded_list encode left ++ encoded_list encode right.
+Proof.
+  unfold encoded_list. now rewrite List.map_app, List.concat_app.
+Qed.
+
+Lemma split_list_twice {A} (values : list A) count :
+  List.length values = 2 * count ->
+  exists left right, values = left ++ right /\
+    List.length left = count /\ List.length right = count.
+Proof.
+  intro Length. exists (List.firstn count values), (List.skipn count values).
+  split; [symmetry; apply List.firstn_skipn |].
+  split.
+  - rewrite List.length_firstn, Nat.min_l; lia.
+  - rewrite List.length_skipn. lia.
+Qed.
+
+Section ConcreteVectors.
+  Context {A : Type} {n : nat}.
+  Variable p : Parser (SizedList byte) byte option A n.
+  Variable encode : A -> list byte.
+  Variable valid : A -> Prop.
+  Hypothesis Element :
+    forall a, valid a -> forall rest
+      (bound : List.length (encode a ++ rest) <= n),
+    observe_leb (runParser p bound (mkSizedList (encode a ++ rest))) =
+      Some (a, rest).
+
+  Lemma parse_vec_positive_encode count values rest
+      (Elements : List.Forall valid values)
+      (Count : List.length values = Pos.to_nat count)
+      (bound : List.length (encoded_list encode values ++ rest) <= n) :
+    observe_leb
+      (runParser (parse_vec_aux_positive p count)
+        bound (mkSizedList (encoded_list encode values ++ rest))) =
+    Some (values, rest).
+  Proof.
+    revert values rest Elements Count bound.
+    induction count as [count IH | count IH |];
+      intros values rest Elements Count bound.
+    - rewrite Pos2Nat.inj_xI in Count.
+      destruct values as [|a values]; [simpl in Count; lia |].
+      inversion Elements as [|? ? Head Tail]; subst.
+      destruct (split_list_twice values (Pos.to_nat count) ltac:(simpl in Count; lia))
+        as [left [right [Split [Left Right]]]].
+      subst values. apply List.Forall_app in Tail. destruct Tail as [VL VR].
+      revert bound.
+      rewrite encoded_list_cons, encoded_list_app, <- !List.app_assoc.
+      intro bound. cbn [parse_vec_aux_positive].
+      eapply observe_map_andbind_success with
+        (a := a) (b := (left, right))
+        (tail := encoded_list encode left ++ encoded_list encode right ++ rest).
+      + now apply Element.
+      + intro tail_bound.
+        eapply observe_andbind_success with (a := left) (b := right)
+          (tail := encoded_list encode right ++ rest).
+        * now apply IH.
+        * intro right_bound. now apply IH.
+    - rewrite Pos2Nat.inj_xO in Count.
+      destruct (split_list_twice values (Pos.to_nat count) Count)
+        as [left [right [Split [Left Right]]]].
+      subst values. apply List.Forall_app in Elements.
+      destruct Elements as [VL VR].
+      revert bound. rewrite encoded_list_app, <- List.app_assoc.
+      intro bound. cbn [parse_vec_aux_positive].
+      eapply observe_map_andbind_success with (a := left) (b := right)
+        (tail := encoded_list encode right ++ rest).
+      + now apply IH.
+      + intro right_bound. now apply IH.
+    - change (List.length values = 1) in Count.
+      destruct values as [|a values]; [discriminate |].
+      destruct values as [|extra values]; [|simpl in Count; lia].
+      inversion Elements as [|? ? Head Tail]; subst.
+      revert bound. cbn [encoded_list List.map List.concat].
+      rewrite List.app_nil_r. intro bound.
+      cbn [parse_vec_aux_positive]. rewrite observe_map_option.
+      now rewrite (Element a Head rest bound).
+  Qed.
+
+  Lemma parse_vec_encode values rest
+      (Elements : List.Forall valid values)
+      (Range : (N.of_nat (List.length values) <= 4294967295)%N)
+      (bound : List.length
+        (leb128.encode_unsigned (N.of_nat (List.length values)) ++
+          encoded_list encode values ++ rest) <= n) :
+    observe_leb
+      (runParser (parse_vec p) bound
+        (mkSizedList
+          (leb128.encode_unsigned (N.of_nat (List.length values)) ++
+            encoded_list encode values ++ rest))) =
+    Some (values, rest).
+  Proof.
+    assert (CountParse :
+      observe_leb
+        (runParser parse_vec_length bound
+          (mkSizedList
+            (leb128.encode_unsigned (N.of_nat (List.length values)) ++
+              encoded_list encode values ++ rest))) =
+      Some (N.of_nat (List.length values), encoded_list encode values ++ rest)).
+    { unfold parse_vec_length. now apply parse_u32_encode. }
+    unfold parse_vec.
+    rewrite observe_alt_option, observe_guardM_option, CountParse.
+    destruct values as [|a values]; [reflexivity |].
+    assert (Nonzero :
+      N.eqb (N.of_nat (List.length (a :: values))) 0 = false)
+      by (apply N.eqb_neq; simpl; discriminate).
+    rewrite Nonzero. cbn [option_map].
+    unfold Combinators.bind.
+    eapply observe_map_andbind_success with
+      (a := N.of_nat (List.length (a :: values))) (b := a :: values)
+      (tail := encoded_list encode (a :: values) ++ rest).
+    - exact CountParse.
+    - intro tail_bound. cbn [parse_vec_aux List.length N.of_nat].
+      apply parse_vec_positive_encode; [exact Elements |].
+      simpl. now rewrite SuccNat2Pos.id_succ.
+  Qed.
+End ConcreteVectors.
+
+Lemma parse_number_type_encode t rest n
+    (bound : List.length (binary_of_number_type t :: rest) <= n) :
+  observe_leb
+    (runParser
+      (@parse_number_type (SizedList byte) _ option _ _ _ _ _ _ n)
+      bound (mkSizedList (binary_of_number_type t :: rest))) =
+  Some (t, rest).
+Proof. destruct t; reflexivity. Qed.
+
+Lemma parse_vector_type_encode t rest n
+    (bound : List.length (binary_of_vector_type t :: rest) <= n) :
+  observe_leb
+    (runParser
+      (@parse_vector_type (SizedList byte) _ option _ _ _ _ _ _ n)
+      bound (mkSizedList (binary_of_vector_type t :: rest))) =
+  Some (t, rest).
+Proof. destruct t; reflexivity. Qed.
+
+Lemma parse_reference_type_encode t rest n
+    (bound : List.length (binary_of_reference_type t :: rest) <= n) :
+  observe_leb
+    (runParser
+      (@parse_reference_type (SizedList byte) _ option _ _ _ _ _ _ n)
+      bound (mkSizedList (binary_of_reference_type t :: rest))) =
+  Some (t, rest).
+Proof. destruct t; reflexivity. Qed.
+
+Lemma parse_value_type_encode t rest n
+    (bound : List.length (binary_of_value_type t :: rest) <= n) :
+  t <> T_bot ->
+  observe_leb
+    (runParser
+      (@parse_value_type (SizedList byte) _ option _ _ _ _ _ _ n)
+      bound (mkSizedList (binary_of_value_type t :: rest))) =
+  Some (t, rest).
+Proof.
+  intro Valid. destruct t as [i|v|r|]; [destruct i | destruct v | destruct r |];
+    try contradiction; reflexivity.
+Qed.
+
+Lemma parse_result_type_encode values rest n
+    (bound : List.length (binary_of_result_type values ++ rest) <= n) :
+  List.Forall (fun t => t <> T_bot) values ->
+  (N.of_nat (List.length values) <= 4294967295)%N ->
+  observe_leb
+    (runParser
+      (@parse_vec (SizedList byte) _ option _ _ _ _ _ _ value_type n parse_value_type)
+      bound (mkSizedList (binary_of_result_type values ++ rest))) =
+  Some (values, rest).
+Proof.
+  intros Elements Range.
+  unfold binary_of_result_type, binary_of_vec, binary_of_u32_nat in bound |- *.
+  revert bound. rewrite <- List.app_assoc. intro bound.
+  eapply parse_vec_encode with (valid := fun t => t <> T_bot).
+  - intros t Good suffix suffix_bound. now apply parse_value_type_encode.
+  - exact Elements.
+  - exact Range.
+Qed.
+
+Lemma parse_function_type_encode args results rest n
+    (bound : List.length (binary_of_functype (Tf args results) ++ rest) <= n) :
+  List.Forall (fun t => t <> T_bot) args ->
+  List.Forall (fun t => t <> T_bot) results ->
+  (N.of_nat (List.length args) <= 4294967295)%N ->
+  (N.of_nat (List.length results) <= 4294967295)%N ->
+  observe_leb
+    (runParser
+      (@parse_function_type (SizedList byte) _ option _ _ _ _ _ _ n)
+      bound (mkSizedList (binary_of_functype (Tf args results) ++ rest))) =
+  Some (Tf args results, rest).
+Proof.
+  intros Args Results ArgsLength ResultsLength.
+  unfold binary_of_functype in bound |- *.
+  revert bound. cbn [List.app]. rewrite <- List.app_assoc. intro bound.
+  unfold parse_function_type, Combinators.rand.
+  eapply observe_map_andbind_success with
+    (a := x60) (b := Tf args results)
+    (tail := binary_of_result_type args ++ binary_of_result_type results ++ rest).
+  - reflexivity.
+  - intro body_bound. unfold Combinators.and.
+    eapply observe_map_andbind_success with
+      (a := args) (b := results)
+      (tail := binary_of_result_type results ++ rest).
+    + now apply parse_result_type_encode.
+    + intro result_bound. now apply parse_result_type_encode.
+Qed.
 
 Section SectionSizes.
   Context {Toks : nat -> Type} `{Sized Toks Byte.byte}.
