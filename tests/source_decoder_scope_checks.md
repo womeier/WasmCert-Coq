@@ -95,9 +95,11 @@ discharged concrete full-expression iff or a whole-module theorem.
 
 **Follow-up:** those soundness parameters are now discharged by the concrete
 `wasm_primitive_parsers_sound` and `parse_block_type_sound` proofs.
-`wasm_production_parse_expr_sound` is unconditional. Expression completeness
-and whole-module iff/roundtrip are still open; see the exact ledger in
-`concrete_parser_proof_obligations.md`.
+`wasm_production_parse_expr_sound` is unconditional. Subsequent work also
+discharges actual expression and whole-module/string grammar iff and bounded
+printer roundtrips, including full source-indexed code/record/segment leaves.
+See `concrete_parser_proof_obligations.md`. These syntax results do not claim
+completion of indexed runtime payload transport.
 
 Still open: concrete full atomic grammar/recursive completeness, recursive
 declaration/record/segment composition and the final actual module round-trip/

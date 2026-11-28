@@ -8,8 +8,9 @@ whole-module proof obligations.
 
 The concrete recursive soundness hypotheses have subsequently been discharged
 for every actual primitive family, not assumed. Current proved/open contracts
-are listed explicitly in `concrete_parser_proof_obligations.md`; soundness is
-not described there as the still-open expression/module iff.
+are listed explicitly in `concrete_parser_proof_obligations.md`. The later
+unconditional actual expression/module/string iffs and bounded module printer
+roundtrips are now discharged separately from runtime indexed-payload transport.
 
 Pinned sources: `ea96c785ba6004c3994622b75b2d1312336c218f` and
 `bc7c1906d4dc86c783aa808c1bb33107013badc4`.

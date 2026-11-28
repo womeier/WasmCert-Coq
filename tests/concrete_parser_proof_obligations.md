@@ -1,7 +1,9 @@
 # Concrete parser contracts — current discharge ledger
 
-This ledger distinguishes soundness, completeness and printer membership.
-It is **not whole-module completion**.
+This ledger distinguishes binary syntax correctness, printer membership and
+runtime EH safety. Actual whole-module/string grammar iff and bounded printer
+roundtrips are now proved. This is **not completion of indexed runtime payload
+transport or of EH as a whole**.
 
 ## Conditional recursive soundness: discharged
 
@@ -92,7 +94,7 @@ The grammar remains independent of parser execution. Padded `fc` numeric and
 `fd` vector constants under an EH handler are regression-tested in both
 directions, including an exact trailing suffix.
 
-## Exact open module composition obligations
+## Actual module composition: discharged
 
 The pinned flat-function-type grammar cannot describe this tree's recursive
 declaration groups. That mismatch is now discharged by the concrete
@@ -111,27 +113,85 @@ The actual type-section framing codec is proved as well. Regressions combine
 packed and indexed-reference fields, subtype supers and final EH references
 inside a multi-member recursive declaration group.
 
-**Still open:** actual code/local expansion, all import/export tag branches,
-table/global/element/data records, and composition of all section framing and
-optional/custom sequences with these leaves and the complete expression grammar.
+All remaining concrete leaves and assembly contracts are now proved:
 
-Only after those concrete contracts are discharged can the independent
-`module_binary_encoding` / actual AST wire-bounds predicate be adapted and the
-actual module/string general iff and bounded printer round trips exported.
-The existing `finish_printed_module_sections` and tag/custom leaf results do not
-by themselves prove those statements.
+- Code locals use the full `source_local_encoding`, with exact repeated-local
+  expansion, u32 total guard and actual code-size framing. Printer packing
+  preserves full source types, not merely non-bottom or abstract function refs.
+- Import/export descriptors include tags; tables, globals and element segments
+  use full source references. Every one of the eight element and three data
+  wire forms has independent consumed-byte grammar soundness/completeness.
+- Actual recursive type sections and the tag slot **memory → tag (13) → global**
+  compose with every ordinary framed section, arbitrary custom prefixes and
+  trailing customs, optional absence, legal section order, EOF, function/code
+  counts, data counts and handler-recursive data-count requirements.
 
-No unfinished generic module theorem or parser-success domain is installed to
-conceal these gaps. GC's closed administrative-stack migration remains a
-separate runtime dependency and is not an explanation for these open proofs.
+Public final results in `binary_format_module_complete.v`:
+
+```coq
+run_parse_module_general_correct :
+  forall bytes modul,
+    run_parse_module bytes = Some modul <-> module_binary_encoding bytes modul
+
+run_parse_module_str_general_correct :
+  forall source modul,
+    run_parse_module_str source = Some modul <->
+    module_binary_encoding (String.list_byte_of_string source) modul
+```
+
+The independent grammar retains padded integer headers and custom bytes; it
+does not mention parser runs. No primitive, declaration, code, record, segment,
+section, framing, absence or finishing correctness hypotheses remain.
+
+`binary_of_module_roundtrip` and `binary_of_module_string_roundtrip` in
+`binary_format_module_roundtrip.v` apply to the actual AST-only `module_binary_wf`
+domain. Its explicit source-type/index/opcode/lane/memarg/vector/section bounds
+cover the existing memory-zero/u32-offset AST and final EH forms. It has no
+parser-success or printed-byte grammar membership premise. The concrete
+mixed-module regression inhabits this domain with recursive groups, indexed
+locals/globals/table/element types, imported/exported tags, all four catches,
+block index 64, a vector load and `data.drop` under a handler.
+
+The printer proof exposed and repaired existing ordinary-SIMD encodings:
+vector loads previously emitted a zero constant; shuffles emitted a spurious
+vector-length prefix; splat opcodes were shifted; lane immediates used LEB128
+instead of raw bytes. General membership proofs and exact regressions now
+cover these corrected semantics. No relaxed SIMD or new addressing model was
+added. GC's main closed-stack/runtime migration remains separate and untouched.
 
 ## Validation of this increment
+
+Final whole-module increment: full exact-tree `dune build -j 1`, forced
+`dune test -j 1 --force` and relevant `coqchk` pass. The audit prints both general
+iff types, both bounded whole-module/string printer roundtrip types and the
+actual AST wire-bound record. No concrete correctness hypotheses remain.
+They disclose the same inherited classical real-decision/dependent
+extensionality assumptions as the expression/numeric contracts. The local
+overflow arithmetic theorem is globally closed. No admission or new/masking
+axiom is introduced.
+
+Official EH remains **489/489 binary commands + 18 mapped text-only deferrals**,
+zero infrastructure errors. Indexed probes remain **7 PASS / 3 FAIL**, with
+transport not executed. Strict core remains **53,999/54,004**, 148 files, zero
+infrastructure errors and the same five stale alignment expectations. New Coq
+syntax regressions are not counted as official execution or runtime safety.
+
+Logs: `/tmp/opencode/eh-whole-module-final-build.log`,
+`/tmp/opencode/eh-whole-module-final-tests.log`,
+`/tmp/opencode/eh-whole-module-final-coqchk.log`,
+`/tmp/opencode/eh-whole-module-assumptions.log`,
+`/tmp/opencode/eh-whole-module-official.log`,
+`/tmp/opencode/eh-whole-module-indexed.log`,
+`/tmp/opencode/eh-whole-module-core.log`.
+
+Earlier validation notes are historical, not current open parser obligations.
+
+### Historical validation through `3401685`
 
 Recursive declarations/type-section follow-up: full exact-tree build, forced
 tests and relevant kernel checks pass. Recursive-group exact/prefix iffs and
 both general group/type-section printer roundtrips are **globally closed**.
-Whole-module and string contracts remain open; group/type-section roundtrips
-do not close the actual module assembly contracts. Official binaries remain
+At that increment, whole-module and string contracts remained open. Official binaries remained
 **489/489 + 18 mapped text deferrals**; indexed probes remain **7 PASS / 3 FAIL**.
 Strict core remains **53,999/54,004**, 148 files, zero infrastructure errors and
 the same five stale alignment expectations.
@@ -148,7 +208,7 @@ Follow-up combined dispatch and recursive expression iff: full exact-tree
 build, forced tests and relevant kernel checks pass. The audit prints the
 unconditional public theorem types and discloses the inherited classical
 real-decision/extensionality assumptions; no new axioms are added.
-The module composition obligations above remain open; expression iff does
+At that increment, module composition remained open; expression iff alone did
 not establish module/string iff or printer round trips. No runtime or test
 expectation changes: the preceding official **489/489 + 18 text deferrals**
 and indexed **7 PASS / 3 FAIL** accounting remains unchanged.

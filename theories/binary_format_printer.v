@@ -99,7 +99,7 @@ Definition binary_of_vec {A} (f : A -> list byte) (es : list A) : list byte :=
   (binary_of_u32_nat (List.length es)) ++ (List.concat (List.map f es)).
 
 Definition binary_of_memarg (marg: memarg) : list byte :=
-  binary_of_u32_nat marg.(memarg_align) ++ binary_of_u32_nat marg.(memarg_offset).
+  binary_of_u32 marg.(memarg_align) ++ binary_of_u32 marg.(memarg_offset).
 
 Definition binary_of_i32 (x : i32) : list byte :=
   leb128.encode_signed (Wasm_int.Int32.signed x).
@@ -130,7 +130,12 @@ Definition binary_of_result_type rt : list byte :=
 Definition dummy : list byte.
 Proof. exact (x00 :: x00 :: x00 :: nil). Qed.
 
-(* placeholder for vector values, not implemented *)
+Definition binary_of_laneidx (x : laneidx) : list byte :=
+  match Byte.of_N x with
+  | Some b => b :: nil
+  | None => dummy
+  end.
+
 Definition binary_of_valvec (v: value_vec) :=
   match v with
   | VAL_vec128 vv =>
@@ -147,7 +152,7 @@ Definition binary_of_vunop (op: vunop) :=
 Definition binary_of_vbinop (op: vbinop) :=
   let '(opcode, args) := op in
   if N.eqb opcode 13%N then (* shuffle *)
-    xfd :: x0d :: binary_of_vec (binary_of_N) args
+    xfd :: x0d :: List.concat (List.map binary_of_laneidx args)
   else
     xfd :: binary_of_N opcode.
 
@@ -163,12 +168,12 @@ Definition binary_of_vshiftop (op: vshiftop) :=
 Definition binary_of_splat_vec (sh: vshape) :=
   xfd ::
   (match sh with
-   | VS_i VSI_8_16 => x0e
-   | VS_i VSI_16_8 => x0f
-   | VS_i VSI_32_4 => x10
-   | VS_i VSI_64_2 => x11
-   | VS_f VSF_32_4 => x12
-   | VS_f VSF_64_2 => x13
+   | VS_i VSI_8_16 => x0f
+   | VS_i VSI_16_8 => x10
+   | VS_i VSI_32_4 => x11
+   | VS_i VSI_64_2 => x12
+   | VS_f VSF_32_4 => x13
+   | VS_f VSF_64_2 => x14
    end
   ) :: nil.
 
@@ -185,7 +190,7 @@ Definition binary_of_extract_vec (sh: vshape) (s: option sx) (x: laneidx) :=
    | VS_f VSF_64_2, None => x21
    | _, _ => x00 (* will not happen due to well formedness *)
    end
-  ) :: binary_of_N x.
+  ) :: binary_of_laneidx x.
 
 Definition binary_of_replace_vec (sh: vshape) (x: laneidx) :=
   xfd ::
@@ -197,10 +202,30 @@ Definition binary_of_replace_vec (sh: vshape) (x: laneidx) :=
    | VS_f VSF_32_4 => x20
    | VS_f VSF_64_2 => x22
    end
-  ) :: binary_of_N x.
+  ) :: binary_of_laneidx x.
   
 Definition binary_of_load_vec (lvarg: load_vec_arg) (marg: memarg) :=
-  xfd :: x0c :: (List.repeat x00 16).
+  let opcode :=
+    match lvarg with
+    | LVA_none => Some x00
+    | LVA_extend (8%N, 8%N) SX_S => Some x01
+    | LVA_extend (8%N, 8%N) SX_U => Some x02
+    | LVA_extend (16%N, 4%N) SX_S => Some x03
+    | LVA_extend (16%N, 4%N) SX_U => Some x04
+    | LVA_extend (32%N, 2%N) SX_S => Some x05
+    | LVA_extend (32%N, 2%N) SX_U => Some x06
+    | LVA_splat 8%N => Some x07
+    | LVA_splat 16%N => Some x08
+    | LVA_splat 32%N => Some x09
+    | LVA_splat 64%N => Some x0a
+    | LVA_zero 32%N => Some x5c
+    | LVA_zero 64%N => Some x5d
+    | _ => None
+    end in
+  match opcode with
+  | Some op => xfd :: op :: binary_of_memarg marg
+  | None => dummy
+  end.
 
 Definition binary_of_load_vec_lane (w: vwidth) (marg: memarg) (x: laneidx) :=
   xfd :: 
@@ -211,7 +236,7 @@ Definition binary_of_load_vec_lane (w: vwidth) (marg: memarg) (x: laneidx) :=
   | 64%N => x57
   | _ => x00 (* will not happen due to wellformedness *)
   end
-  ) :: binary_of_memarg marg ++ binary_of_N x.
+  ) :: binary_of_memarg marg ++ binary_of_laneidx x.
 
 (* store_vec_lane and load_vec uses the same args. Maybe it's better to find a new name *)
 Definition binary_of_store_vec (marg: memarg) :=
@@ -226,7 +251,7 @@ Definition binary_of_store_vec_lane (w: vwidth) (marg: memarg) (x: laneidx) :=
   | 64%N => x5b
   | _ => x00 (* will not happen due to wellformedness *)
   end
-  ) :: binary_of_memarg marg ++ binary_of_N x.
+  ) :: binary_of_memarg marg ++ binary_of_laneidx x.
 
 Definition binary_of_catch (c: catch_clause) : list byte :=
   match c with
