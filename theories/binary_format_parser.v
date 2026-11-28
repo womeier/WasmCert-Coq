@@ -233,6 +233,10 @@ Definition parse_return_call_indirect {n} : byte_parser basic_instruction n :=
   exact_byte x13 &>
   (((fun typ tab => BI_return_call_indirect tab typ) <$> parse_typeidx) <*> parse_tableidx).
 
+(* Shared grouped alternative used by the tail-call proof handoff (8d465bf). *)
+Definition parse_tail_call {n} : byte_parser basic_instruction n :=
+  parse_return_call <|> parse_return_call_indirect.
+
 (* Reference instructions *)
 Definition parse_ref_null {n}: byte_parser basic_instruction n :=
   exact_byte xd0 &> (BI_ref_null <$> parse_reference_type).
@@ -895,6 +899,7 @@ Definition parse_be_layer {k}
     (((fun x y => (x, y)) <$> parse_block_type) <*> bes_end_with_x0b_or_x05_ctd_aux) in
   let parse_if :=
     (fun '(x, (y, z)) => BI_if x y z) <$> (exact_byte x04 &> parse_if_body) in
+    parse_tail_call <|>
     parse_unreachable <|>
     parse_nop <|>
     parse_block <|>
@@ -906,8 +911,6 @@ Definition parse_be_layer {k}
     parse_return <|>
     parse_call <|>
     parse_call_indirect <|>
-    parse_return_call <|>
-    parse_return_call_indirect <|>
     parse_reference_instruction <|>
     parse_parametric_instruction <|>
     parse_variable_instruction <|>

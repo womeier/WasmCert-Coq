@@ -6,7 +6,8 @@ From parseque Require Import Parseque.
 From Wasm Require Import datatypes binary_format_parser
   binary_parser_combinator_properties binary_format_language_properties
   binary_format_block_properties binary_format_atomic_properties
-  binary_format_numeric_properties binary_memory_grammar_properties.
+  binary_format_numeric_properties binary_memory_grammar_properties
+  binary_format_tail_properties.
 Local Notation byte := Byte.byte.
 
 Definition atomic_encoding
@@ -33,8 +34,9 @@ Proof.
   unfold primitive_parsers in Member.
   destruct Member as [Member|[Member|[Member|[Member|[Member|[Member|
     [Member|[Member|[Member|[Member|[Member|[Member|[Member|[Member|
-    [Member|[Member|Member]]]]]]]]]]]]]]]];
+    [Member|Member]]]]]]]]]]]]]]];
     try contradiction; subst p.
+  - apply Control. apply parse_tail_call_control_sound.
   - apply Control. unfold parse_unreachable.
     apply fixed_control_instruction_sound.
     unfold fixed_control_opcodes; simpl; tauto.
@@ -56,11 +58,6 @@ Proof.
     unfold single_index_opcodes; simpl; tauto.
   - apply Control. unfold parse_call_indirect.
     apply parse_indirect_calls_sound. left; auto.
-  - apply Control. unfold parse_return_call, parse_funcidx, extract_funcidx.
-    apply single_index_instruction_sound.
-    unfold single_index_opcodes; simpl; tauto.
-  - apply Control. unfold parse_return_call_indirect.
-    apply parse_indirect_calls_sound. right; auto.
   - apply Control; apply parse_reference_instruction_sound.
   - apply Control; apply parse_parametric_instruction_sound.
   - apply Control; apply parse_variable_instruction_sound.

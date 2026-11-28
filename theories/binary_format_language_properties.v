@@ -78,9 +78,8 @@ Definition language_sound n
 
 Definition primitive_parsers n :
     list (Parser (SizedList byte) byte option basic_instruction n) :=
-  parse_unreachable :: parse_nop :: parse_br :: parse_br_if ::
+  parse_tail_call :: parse_unreachable :: parse_nop :: parse_br :: parse_br_if ::
   parse_br_table :: parse_return :: parse_call :: parse_call_indirect ::
-  parse_return_call :: parse_return_call_indirect ::
   parse_reference_instruction :: parse_parametric_instruction ::
   parse_variable_instruction :: parse_table_instruction ::
   parse_memory_instruction :: parse_numeric_instruction :: nil.
@@ -99,7 +98,7 @@ Proof.
   assert (Be : parser_sound (_be n (language_step n rec)) instruction_encoding).
   {
     unfold language_step, parse_be_layer; cbn [_be].
-    do 18 (apply parser_sound_alt; [shelve |]).
+    do 17 (apply parser_sound_alt; [shelve |]).
     Unshelve.
     all: try (eapply parser_sound_weaken;
       [apply PrimitiveSound; unfold primitive_parsers; simpl; tauto
