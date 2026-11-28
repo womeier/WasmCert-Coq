@@ -8,6 +8,7 @@
     Specification: WebAssembly Core 3.0, Types / Heap Types and
     Validation / Matching (https://www.w3.org/TR/wasm-core-3/). *)
 From Wasm Require Import datatypes subtyping.
+From Wasm Require Export gc_storage_types.
 From Stdlib Require Import Bool.
 
 Inductive abstract_heap_type : Set :=
@@ -190,23 +191,11 @@ Qed.
 (** Packed storage and fields are parameterized over the shared value-type
     representation, so they do not freeze the old Wasm 2.0 reference syntax.
     Mutable fields are invariant; immutable fields are covariant. *)
-Inductive packed_type : Set := PT_i8 | PT_i16.
-Scheme Equality for packed_type.
-
-Inductive storage_type (V : Type) : Type :=
-| ST_value : V -> storage_type V
-| ST_packed : packed_type -> storage_type V.
-
-Arguments ST_value {V} _.
-Arguments ST_packed {V} _.
-
-Record field_type (V : Type) : Type := {
-  field_mutability : mutability;
-  field_storage : storage_type V;
-}.
-
-Arguments field_mutability {V} _.
-Arguments field_storage {V} _.
+Definition packed_type := gc_packed_type.
+Definition packed_type_beq := gc_packed_type_beq.
+Definition packed_type_eq_dec := gc_packed_type_eq_dec.
+Definition storage_type := gc_storage_types.storage_type.
+Definition field_type := gc_storage_types.field_type.
 
 Section Fields.
   Context {V : Type}.

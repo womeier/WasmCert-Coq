@@ -8,6 +8,7 @@ From ExtLib Require Import Structures.Monad IdentityMonad.
 From Wasm Require Import memory_vec binary_format_parser text_format_parser.
 From Wasm Require Import gc_numerics gc_binary gc_types.
 From Wasm Require Import binary_format_printer.
+From Wasm Require Import gc_type_context.
 
 (* see common.v *)
 Set SsrOldRewriteGoalsOrder.
@@ -65,6 +66,15 @@ Module Utility.
   (** Reusable GC primitives.  These exports do not enable GC instructions
       in the existing module validator or interpreter. *)
   Module GC.
+    Module Types.
+      Definition close := close_type_groups.
+      Definition expand := expand_defined_type.
+      Definition function_type := expand_function_type.
+      Definition struct_type := expand_struct_type.
+      Definition array_type := expand_array_type.
+      Definition matches := defined_type_matches.
+      Definition equivalent := defined_type_equiv.
+    End Types.
     Definition ref_i31 := ref_i31.
     Definition i31_get := i31_get.
     Definition i31_get_nullable := i31_get_nullable.

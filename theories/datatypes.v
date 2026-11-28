@@ -4,6 +4,7 @@
 (* (C) J. Pichon, M. Bodin - see LICENSE.txt *)
 
 From Wasm Require Export common numerics bytes memory simd.
+From Wasm Require Export gc_storage_types.
 From compcert Require common.Memdata.
 From Stdlib Require Import ZArith.
 
@@ -36,6 +37,13 @@ Definition u32_bound : N := 4294967296%N.
 Definition u8_bound : N := 256%N.
 
 Definition typeidx : Set := u32.
+
+(** Runtime defined-type identities are canonical registry entries, never
+    module-local HT_type indices. Group members retain their binder position. *)
+Record defined_type : Set := Def_type {
+  defined_group : N;
+  defined_member : N;
+}.
 Definition funcidx : Set := u32.
 Definition tableidx : Set := u32.
 Definition memidx : Set := u32.
@@ -182,6 +190,55 @@ Inductive function_type := (* tf *)
 | Tf : result_type -> result_type -> function_type
 .
 
+Inductive function_type_gen (V : Type) : Type :=
+| Closed_ft : list V -> list V -> function_type_gen V.
+
+Arguments Closed_ft {V} _ _.
+
+(** Source and canonical declaration phases share the same composite,
+    field/storage and function shapes. Only their reference leaves differ. *)
+Inductive composite_type (V F : Type) : Type :=
+| Comp_func : F -> composite_type V F
+| Comp_struct : list (field_type V) -> composite_type V F
+| Comp_array : field_type V -> composite_type V F.
+
+Arguments Comp_func {V F} _.
+Arguments Comp_struct {V F} _.
+Arguments Comp_array {V F} _.
+
+Record subtype (V I F : Type) : Type := Sub_type {
+  subtype_final : bool;
+  subtype_supers : list I;
+  subtype_composite : composite_type V F;
+}.
+
+Arguments Sub_type {V I F} _ _ _.
+Arguments subtype_final {V I F} _.
+Arguments subtype_supers {V I F} _.
+Arguments subtype_composite {V I F} _.
+
+Definition source_subtype := subtype value_type typeidx function_type.
+Definition recursive_type := list source_subtype.
+
+Inductive closed_type_use : Set :=
+| CT_rec : N -> closed_type_use
+| CT_def : defined_type -> closed_type_use.
+
+Inductive closed_heap_type : Set :=
+| CH_abstract : heap_type -> closed_heap_type
+| CH_defined : closed_type_use -> closed_heap_type.
+
+Inductive closed_value_type : Set :=
+| CV_num : number_type -> closed_value_type
+| CV_vec : vector_type -> closed_value_type
+| CV_ref : bool -> closed_heap_type -> closed_value_type.
+
+Definition closed_function_type := function_type_gen closed_value_type.
+Definition closed_subtype :=
+  subtype closed_value_type closed_type_use closed_function_type.
+Definition canonical_group := list closed_subtype.
+Definition canonical_registry := list canonical_group.
+
 (* Source type declarations currently contain function signatures only.
    GC must extend this declaration layer with recursive subtype groups.
    An inst_types entry is not a globally allocated runtime identity. *)
@@ -241,10 +298,6 @@ Record table_type : Set := {
 
 [https://www.w3.org/TR/wasm-core-2/syntax/types.html#global-types]
 *)
-Inductive mutability : Set := (* mut *)
-  | MUT_const
-  | MUT_var
-  .
 
 
 (** std-doc:
@@ -301,6 +354,11 @@ Definition globaltype_valid (gt: global_type) : bool :=
   true.
 
 End Types.
+
+Arguments Closed_ft {V} _ _.
+Arguments Comp_func {V F} _.
+Arguments Comp_struct {V F} _.
+Arguments Comp_array {V F} _.
 
 Notation T_funcref := (Ref_type true HT_func).
 Notation T_externref := (Ref_type true HT_extern).

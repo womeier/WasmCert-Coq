@@ -154,4 +154,73 @@ let () =
   check "ordinary index encoding is not heap signed encoding"
     (encode_immediate_typeidx (BigZ.of_int 64) = ['\x40'] &&
       encode_typeidx (BigZ.of_int 64) = Some ['\xc0'; '\x00']);
+  let id group member =
+    { defined_group = BigZ.of_int group; defined_member = BigZ.of_int member }
+  in
+  let field index =
+    { field_mutability = MUT_const;
+      field_storage = ST_value
+        (T_ref { ref_nullable = true; ref_heap = HT_type (BigZ.of_int index) }) }
+  in
+  let st final supers composite =
+    { subtype_final = final; subtype_supers = List.map BigZ.of_int supers;
+      subtype_composite = composite }
+  in
+  let recursive_group base =
+    [st true [] (Comp_struct [field (base + 1)]);
+     st true [] (Comp_struct [field base])]
+  in
+  let registry, ids =
+    match Types.close [] [recursive_group 0] with
+    | Some result -> result
+    | None -> failwith "Closing a mutually recursive group failed"
+  in
+  check "recursive group member identities" (ids = [id 0 0; id 0 1]);
+  check "recursive group closes as one registry entry" (List.length registry = 1);
+  check "recursive expansion resolves member binder"
+    (Types.struct_type registry (id 0 0) =
+      Some [{ field_mutability = MUT_const;
+              field_storage = ST_value
+                (CV_ref (true, CH_defined (CT_def (id 0 1)))) }]);
+  check "recursive second member expansion"
+    (Types.struct_type registry (id 0 1) =
+      Some [{ field_mutability = MUT_const;
+              field_storage = ST_value
+                (CV_ref (true, CH_defined (CT_def (id 0 0)))) }]);
+  check "equal recursive groups reuse canonical identity"
+    (Types.close registry [recursive_group 0] = Some (registry, ids));
+  let function_group = [st false [] (Comp_func (Tf ([], [])))] in
+  begin match Types.close registry [function_group; recursive_group 1] with
+  | None -> check "shifted recursive group closes" false
+  | Some (registry', ids') ->
+      check "module source index shift preserves canonical identity"
+        (ids' = [id 1 0; id 0 0; id 0 1]);
+      check "index shift does not duplicate recursive group" (List.length registry' = 2);
+      check "function expansion"
+        (Types.function_type registry' (id 1 0) = Some (Closed_ft ([], [])));
+      check "struct type is not a function"
+        (Types.function_type registry' (id 0 0) = None)
+  end;
+  let parent = [st false [] (Comp_func (Tf ([], [])))] in
+  let child = [st true [0] (Comp_func (Tf ([], [])))] in
+  begin match Types.close [] [parent; child] with
+  | None -> check "declared subtype closing" false
+  | Some (types, names) ->
+      check "declared subtype identities" (names = [id 0 0; id 1 0]);
+      check "declared child matches parent" (Types.matches types (id 1 0) (id 0 0));
+      check "declared parent does not match child" (not (Types.matches types (id 0 0) (id 1 0)));
+      check "bidirectional matching excludes strict subtype"
+        (not (Types.equivalent types (id 0 0) (id 1 0)));
+      check "bidirectional reflexivity" (Types.equivalent types (id 1 0) (id 1 0))
+  end;
+  check "out-of-scope reference rejected"
+    (Types.close [] [[st true [] (Comp_struct [field 1])]] = None);
+  check "cyclic declared supertype rejected"
+    (Types.close [] [[st false [0] (Comp_func (Tf ([], [])))]] = None);
+  check "multiple declared supertypes rejected"
+    (Types.close [] [parent; [st true [0; 0] (Comp_func (Tf ([], [])))]] = None);
+  check "bottom type excluded from declaration"
+    (Types.close [] [[st true [] (Comp_func (Tf ([], [T_bot])))]] = None);
+  check "invalid canonical group lookup" (Types.expand [] (id 0 0) = None);
+  check "invalid canonical member lookup" (Types.expand registry (id 0 2) = None);
   Printf.printf "GC extraction: %d/%d checks passed\n" !checks !checks
