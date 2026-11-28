@@ -86,6 +86,18 @@ Definition initialized_funcref_table :=
     (Build_table_type (Build_limits 2%N None) T_funcref)
     (Some (BI_ref_func 0%N :: nil)).
 
+Lemma parse_nonnullable_funcref :
+  check_toks (x64 :: x70 :: nil)
+    (fun n => parse_reference_type (n := n)) =
+    Running.Singleton (Ref_type false HT_func).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma parse_explicit_nullable_externref :
+  check_toks (x63 :: x6f :: nil)
+    (fun n => parse_reference_type (n := n)) =
+    Running.Singleton T_externref.
+Proof. vm_compute. reflexivity. Qed.
+
 Lemma parse_table_initializer :
   check_toks (x40 :: x00 :: x70 :: x00 :: x02 :: xd2 :: x00 :: x0b :: nil)
     (fun n => parse_module_table (n := n)) = Running.Singleton initialized_funcref_table.

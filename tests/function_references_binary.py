@@ -60,6 +60,12 @@ cases = [
     ("branch_numeric_result", "027fd070d60041070b", 123, "instantiation error:"),
     ("branch_numeric_operand", "02704100d600d0700bd1", 123, "instantiation error:"),
     ("branch_invalid_label", "d070d6014107", 123, "instantiation error:"),
+    ("nonnull_ref_func_block", "026470d2000bd1", 0, "i32.const 0"),
+    ("nonnull_refinement_trap", "026470d070d40bd1", 0, "Execution returned a trap"),
+    ("nullable_cannot_satisfy_nonnull", "026470d0700bd1",
+     123, "Module type checking failure:"),
+    ("ref_null_requires_heap_not_reference_type", "d06370d1",
+     123, "error in parsing module"),
 ]
 
 table_cases = [
@@ -97,6 +103,18 @@ table_cases = [
      "014000700002d200", 123, "error in parsing module"),
     ("table_legacy_default", "41002500d141012500d16a",
      "01700002", 0, "i32.const 2"),
+    ("table_nonnull_function_initializer", "41002500d141012500d16a",
+     "01400064700002d2000b", 0, "i32.const 0"),
+    ("table_nonnull_default_rejected", "4107",
+     "0164700002", 123, "Module type checking failure:"),
+    ("table_nonnull_null_initializer_rejected", "4107",
+     "01400064700002d0700b", 123, "Module type checking failure:"),
+    ("table_explicit_nullable_default", "41002500d1",
+     "0163700001", 0, "i32.const 1"),
+    ("table_nullable_refined_nonnull_result", "02647041002500d40bd1",
+     "014000700001d2000b", 0, "i32.const 0"),
+    ("table_nullable_without_refinement_rejected", "026470410025000bd1",
+     "014000700001d2000b", 123, "Module type checking failure:"),
 ]
 
 exe = str(pathlib.Path(sys.argv[1]).resolve())

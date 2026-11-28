@@ -1322,7 +1322,11 @@ Proof.
     + by apply type_update_ref_is_null_bet with (cts' := cts').
     (* Ref_func *)
     + move/inP in Hif.
-      apply bet_weakening_empty_1, bet_ref_func with (t := (rev_tf f0)) => //.
+      apply bet_weakening_empty_1.
+      eapply bet_subtyping with
+        (t1s := nil) (t2s := [::T_ref (Ref_type false HT_func)]).
+      2: { by resolve_subtyping. }
+      apply bet_ref_func with (t := (rev_tf f0)) => //.
       apply nth_error_map in Hoption as [ft [? <-]].
       by destruct ft; unfold rev_tf; repeat rewrite revK.
     (* Drop *)
@@ -1347,7 +1351,10 @@ Proof.
     (* Global_get *)
     + by resolve_tc_be_typing.
     (* Table_get *)
-    + by resolve_tc_be_typing.
+    + apply bet_weakening.
+      unfold rev => /=.
+      eapply bet_subtyping; first by eapply bet_table_get; eauto.
+      by resolve_subtyping.
     (* Table_set *)
     + by resolve_tc_be_typing.
     (* Table_size *)
@@ -1520,7 +1527,8 @@ Proof.
       destruct Hupdate as [tn [Hagree' Hsub]].
       rewrite rev_cons revK -cats1 revK in Hsub.
       exists tn; split => //.
-      by resolve_tc_be_typing.
+      eapply bet_subtyping; last exact Hsub.
+      by eapply bet_call_indirect; eauto.
     (* Return_call *)
     + destruct f0 as [tn0 tm0].
       remove_bools_options.

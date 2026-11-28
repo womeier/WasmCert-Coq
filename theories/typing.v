@@ -66,10 +66,10 @@ Definition typeof_ref (s: store_record) (v: value_ref) : option reference_type :
   | VAL_ref_null t => Some (Ref_type true t)
   | VAL_ref_func addr =>
       match ext_func_typing s addr with
-      | Some ft => Some T_funcref
+      | Some ft => Some (Ref_type false HT_func)
       | _ => None
       end
-  | VAL_ref_extern eaddr => Some T_externref
+  | VAL_ref_extern eaddr => Some (Ref_type false HT_extern)
   end.
 
 Definition typeof_value (s: store_record) (v: value) : option value_type :=
@@ -204,7 +204,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 | bet_ref_func: forall C t x,
     lookup_N (tc_funcs C) x = Some t ->
     List.In x (tc_refs C) ->
-    be_typing C [::BI_ref_func x] (Tf [::] [::T_ref T_funcref])
+    be_typing C [::BI_ref_func x] (Tf [::] [::T_ref (Ref_type false HT_func)])
 | bet_unop : forall C t op,
     unop_type_agree t op -> be_typing C [::BI_unop t op] (Tf [::T_num t] [::T_num t])
 | bet_binop : forall C t op,
@@ -394,7 +394,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
    when the shared reference type representation is extended. *)
 | bet_ref_as_non_null : forall C t,
   is_ref_t t ->
-  be_typing C [::BI_ref_as_non_null] (Tf [::t] [::t])
+  be_typing C [::BI_ref_as_non_null] (Tf [::t] [::non_nullable_type t])
 | bet_br_on_non_null : forall C x ts t,
   lookup_N C.(tc_labels) x = Some (ts ++ [::t]) ->
   is_ref_t t ->
@@ -545,10 +545,10 @@ Inductive e_typing : store_record -> t_context -> seq administrative_instruction
 | ety_trap : forall s C tf,
   e_typing s C [::AI_trap] tf
 | ety_ref_extern : forall s C a,
-  e_typing s C [::AI_ref_extern a] (Tf [::] [::T_ref T_externref])
+  e_typing s C [::AI_ref_extern a] (Tf [::] [::T_ref (Ref_type false HT_extern)])
 | ety_ref : forall s C a tf,
   ext_func_typing s a = Some tf ->
-  e_typing s C [::AI_ref a] (Tf [::] [::T_ref T_funcref])
+  e_typing s C [::AI_ref a] (Tf [::] [::T_ref (Ref_type false HT_func)])
 | ety_invoke : forall s (a: funcaddr) C tf,
   ext_func_typing s a = Some tf ->
   e_typing s C [::AI_invoke a] tf

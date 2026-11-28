@@ -86,7 +86,13 @@ Theorem t_simple_preservation: forall s es es' C tf,
     e_typing s C es' tf.
 Proof.
   move => s es es' C [ts1 ts2] HType HReduce.
-  inversion HReduce; subst; (try by apply ety_trap); invert_e_typing; extract_premise => //; repeat (unify_principal => //; resolve_e_typing => //).
+  inversion HReduce; subst; (try by apply ety_trap); invert_e_typing; extract_premise => //;
+    try match goal with
+    | Hnn : forall h, ?r <> VAL_ref_null h,
+      Hvt : is_true (value_typing ?s (VAL_ref ?r) ?t) |- _ =>
+        apply (value_typing_ref_nonnull Hnn) in Hvt
+    end;
+    repeat (unify_principal => //; resolve_e_typing => //).
   - (* Unop *)
     replace (typeof_num (app_unop op v)) with (typeof_num v); last by destruct op, v.
     by resolve_subtyping.
@@ -145,8 +151,12 @@ Proof.
     instantiate (1 := nil) => /=.
     Transparent instr_subtyping.
     unfold instr_subtyping.
-    exists nil, nil, (extr ++ [::ts_value]), extr.
-    repeat split => //=; by resolve_subtyping.
+    exists nil, nil, (extr ++ [::non_nullable_type ts_value]), extr.
+    repeat split => //=; try by resolve_subtyping.
+    apply values_subtyping_cat'; first apply values_subtyping_eq.
+    simpl. move/andP: Hsub => [Hsub _].
+    rewrite andbT.
+    eapply value_subtyping_trans; [apply non_nullable_type_sub | exact Hsub].
   Unshelve.
   all: try by resolve_subtyping.
 Qed.

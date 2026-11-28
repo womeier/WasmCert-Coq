@@ -175,9 +175,9 @@ Proof.
     apply value_subtyping_eq.
   - destruct Hv as [ft [Ha Hheap]].
     unfold value_typing, typeof_value, typeof_ref. rewrite Ha.
-    destruct (heap t); simpl in *; try contradiction; apply value_subtyping_eq.
+    destruct (heap t); simpl in *; try contradiction; apply value_subtyping_nonnull.
   - unfold value_typing, typeof_value, typeof_ref.
-    rewrite Hv. simpl. apply value_subtyping_eq.
+    rewrite Hv. simpl. apply value_subtyping_nonnull.
 Qed.
 
 Lemma ref_has_type_weaken s types v t1 t2 :

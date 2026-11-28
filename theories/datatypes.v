@@ -162,6 +162,12 @@ Inductive value_type: Set := (* t *)
 | T_bot: value_type
 .
 
+Definition non_nullable_type (t : value_type) : value_type :=
+  match t with
+  | T_ref r => T_ref (Ref_type false (ref_heap r))
+  | _ => t
+  end.
+
 (** std-doc:
 Result types classify the result of executing instructions or functions, which is a sequence of values, written with brackets.
 

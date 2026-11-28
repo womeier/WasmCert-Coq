@@ -153,9 +153,15 @@ Definition parse_number_type {n} : byte_parser number_type n :=
 Definition parse_vector_type {n} : byte_parser vector_type n :=
   (exact_byte x7b $> T_v128).
 
+Definition parse_heap_type {n} : byte_parser heap_type n :=
+  (exact_byte x70 $> HT_func) <|>
+  (exact_byte x6f $> HT_extern).
+
 Definition parse_reference_type {n} : byte_parser reference_type n :=
   (exact_byte x70 $> T_funcref) <|>
-  (exact_byte x6f $> T_externref).
+  (exact_byte x6f $> T_externref) <|>
+  (exact_byte x63 &> (Ref_type true <$> parse_heap_type)) <|>
+  (exact_byte x64 &> (Ref_type false <$> parse_heap_type)).
 
 Definition parse_value_type {n} : byte_parser value_type n :=
   T_num <$> parse_number_type <|>
@@ -228,7 +234,7 @@ Definition parse_return_call_ref {n} : byte_parser basic_instruction n :=
 
 (* Reference instructions *)
 Definition parse_ref_null {n}: byte_parser basic_instruction n :=
-  exact_byte xd0 &> ((fun t => BI_ref_null (ref_heap t)) <$> parse_reference_type).
+  exact_byte xd0 &> (BI_ref_null <$> parse_heap_type).
 
 Definition parse_ref_is_null {n} : byte_parser basic_instruction n :=
   exact_byte xd1 $> BI_ref_is_null.

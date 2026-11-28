@@ -1734,7 +1734,7 @@ the condition that all values should live in the operand stack. *)
           eapply all_projection in Hif1; eauto.
           unfold value_typing in Hif1; simpl in *.
           simplify_multieq.
-          apply ref_subtyping in Hif1.
+          apply ref_subtyping_heap in Hif1.
           by rewrite Hconjl1 in Hif1.
       (* None *)
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_trap)), d>> => //.
@@ -1798,7 +1798,7 @@ the condition that all values should live in the operand stack. *)
           eapply all_projection in Hif1; eauto.
           unfold value_typing in Hif1; simpl in *.
           simplify_multieq.
-          apply ref_subtyping in Hif1.
+          apply ref_subtyping_heap in Hif1.
           by rewrite Hconjl1 in Hif1.
       (* None *)
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_trap)), d>> => //.

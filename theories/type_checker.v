@@ -117,7 +117,8 @@ Definition type_update_ref_as_non_null (ct : checker_type) : option checker_type
   match ct.(CT_type) with
   | nil =>
       if ct.(CT_unr) then Some <<[::T_bot], true>> else None
-  | t :: _ => if is_ref_t t then Some ct else None
+  | t :: ts => if is_ref_t t
+               then Some <<non_nullable_type t :: ts, ct.(CT_unr)>> else None
   end.
 
 (** With subtyping in Wasm 2.0, br_table now needs to find the common subtype to be consumed. **)
@@ -186,7 +187,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           match lookup_N C.(tc_funcs) x with
           | Some _ =>
               if x \in C.(tc_refs)
-              then type_update ts [::] [::T_ref T_funcref]
+               then type_update ts [::] [::T_ref (Ref_type false HT_func)]
               else None
           | _ => None
           end
@@ -293,7 +294,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       | BI_call_indirect x y =>
           match lookup_N C.(tc_tables) x with
           | Some tabt =>
-               if reference_type_match C.(tc_types) tabt.(tt_elem_type) T_funcref then
+                if tabt.(tt_elem_type) == T_funcref then
                 match lookup_N (tc_types C) y with
                 | Some (Tf tn tm) =>
                     type_update ts ((T_num T_i32 :: tn)) tm
@@ -319,7 +320,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           | Some t2s =>
               match lookup_N C.(tc_tables) x with
               | Some tabt =>
-                   if reference_type_match C.(tc_types) tabt.(tt_elem_type) T_funcref then
+                    if tabt.(tt_elem_type) == T_funcref then
                     match lookup_N (tc_types C) y with
                     | Some (Tf tn tm) =>
                         if (t2s == tm) then
