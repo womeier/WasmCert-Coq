@@ -11,14 +11,23 @@ import sys
 import tempfile
 
 
-def module(body, table=None, declare=True):
+def module(body, table=None, declare=True, imports=None, globals=None):
     prefix = bytes.fromhex(
-        "0061736d01000000 0105016000017f 0303020000"
+        "0061736d01000000 0105016000017f"
     )
+    if imports is not None:
+        payload = bytes.fromhex(imports)
+        assert len(payload) < 128
+        prefix += b"\x02" + bytes([len(payload)]) + payload
+    prefix += bytes.fromhex("0303020000")
     if table is not None:
         payload = bytes.fromhex(table)
         assert len(payload) < 128
         prefix += b"\x04" + bytes([len(payload)]) + payload
+    if globals is not None:
+        payload = bytes.fromhex(globals)
+        assert len(payload) < 128
+        prefix += b"\x06" + bytes([len(payload)]) + payload
     prefix += bytes.fromhex("070801046d61696e0001")
     if declare:
         prefix += bytes.fromhex("09050103000100")
@@ -106,11 +115,40 @@ def check_case(directory, name, body, status, expected, *, table=None, declare=T
         )
 
 
+def check_imported_initializer(directory):
+    # Binary modules bypass the deferred WAT frontend.
+    provider = bytes.fromhex(
+        "0061736d01000000 0606016f00d06f0b 07050101670300"
+    )
+    consumer = module(
+        bytes.fromhex("41002500d141012500d16a"),
+        table="0140006f000223000b",
+        declare=False,
+        imports="0103656e760167036f00",
+        globals="017f0041070b",
+    )
+
+    def binary_module(data):
+        return '(module binary "' + "".join(f"\\{b:02x}" for b in data) + '")'
+
+    path = pathlib.Path(directory) / "table_imported_immutable.wast"
+    script = binary_module(provider) + '\n(register "env")\n'
+    script += binary_module(consumer) + "\n"
+    script += '(assert_return (invoke "main") (i32.const 2))\n'
+    path.write_text(script)
+    result = subprocess.run([exe, "--wast", str(path)], capture_output=True, text=True)
+    output = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout + result.stderr)
+    ok = result.returncode == 0 and "Result: 4/4 (100.00%)" in output
+    if not ok:
+        raise AssertionError(f"table_imported_immutable: exit {result.returncode}; {output!r}")
+
+
 with tempfile.TemporaryDirectory() as directory:
     for name, body, status, expected in cases:
         check_case(directory, name, body, status, expected)
     for name, body, table, status, expected in table_cases:
         check_case(directory, name, body, status, expected, table=table, declare=False)
+    check_imported_initializer(directory)
 
-total = len(cases) + len(table_cases)
+total = len(cases) + len(table_cases) + 1
 print(f"function-reference binary runtime regressions: {total}/{total}")

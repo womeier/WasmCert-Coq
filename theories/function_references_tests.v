@@ -204,3 +204,35 @@ Example non_nullable_table_has_no_implicit_initializer :
 Proof. reflexivity. Qed.
 
 End HostMetadata.
+
+Definition table_global_context (gt : global_type) : t_context :=
+  Build_t_context [] [] [] [] [gt] [] [] [] [] None [].
+
+Definition table_from_global (i : globalidx) : module_table :=
+  Build_module_table
+    (Build_table_type (Build_limits 2%N None) T_externref)
+    (Some [BI_global_get i]).
+
+Example table_immutable_import_initializer :
+  module_table_type_checker
+    (table_global_context (Build_global_type MUT_const (T_ref T_externref)))
+    (table_from_global 0%N) = true.
+Proof. reflexivity. Qed.
+
+Example table_mutable_import_initializer_rejected :
+  module_table_type_checker
+    (table_global_context (Build_global_type MUT_var (T_ref T_externref)))
+    (table_from_global 0%N) = false.
+Proof. reflexivity. Qed.
+
+Example table_wrong_import_type_rejected :
+  module_table_type_checker
+    (table_global_context (Build_global_type MUT_const (T_num T_i32)))
+    (table_from_global 0%N) = false.
+Proof. reflexivity. Qed.
+
+Example table_global_outside_import_context_rejected :
+  module_table_type_checker
+    (table_global_context (Build_global_type MUT_const (T_ref T_externref)))
+    (table_from_global 1%N) = false.
+Proof. reflexivity. Qed.
