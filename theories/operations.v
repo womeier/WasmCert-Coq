@@ -1277,7 +1277,8 @@ Definition store_extension (s s' : store_record) : bool :=
   component_extension mem_extension s.(s_mems) s'.(s_mems) &&
   component_extension global_extension s.(s_globals) s'.(s_globals) &&
   component_extension elem_extension s.(s_elems) s'.(s_elems) &&
-  component_extension data_extension s.(s_datas) s'.(s_datas).
+  component_extension data_extension s.(s_datas) s'.(s_datas) &&
+  canonical_registry_prefixb s.(s_types) s'.(s_types).
 
 Definition to_e_list (bes : list basic_instruction) : seq administrative_instruction :=
   map AI_basic bes.

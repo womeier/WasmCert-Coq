@@ -174,6 +174,26 @@ Definition close_and_validate_type_groups groups source :
 Definition function_type_groups (types : list function_type) : list recursive_type :=
   map (fun f => [Sub_type true [] (Comp_func f)]) types.
 
+(** Source signatures are closed using the whole instance's identity map.
+    Checking the resulting expansion makes the legacy signature view and
+    the canonical runtime view agree; no source index is a runtime identity. *)
+Definition function_type_identityb registry names source id : bool :=
+  match close_function_type names 0 source, expand_function_type registry id with
+  | Some expected, Some actual =>
+      if closed_function_type_eq_dec expected actual then true else false
+  | _, _ => false
+  end.
+
+Fixpoint function_type_identitiesb registry names
+    (sources : list function_type) (ids : list defined_type) : bool :=
+  match sources, ids with
+  | [], [] => true
+  | f :: fs, id :: ids =>
+      function_type_identityb registry names f id &&
+      function_type_identitiesb registry names fs ids
+  | _, _ => false
+  end.
+
 (** Declarative matching reuses the independent abstract hierarchy. Exception
     heaps add their separate bottom edge; source indices have no abstract rule. *)
 Inductive shared_abstract_heap_matches : heap_type -> heap_type -> Prop :=

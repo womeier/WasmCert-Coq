@@ -54,6 +54,10 @@ Definition canonical_group_eq_dec (a b : canonical_group) : {a = b} + {a <> b} :
 Definition canonical_group_eqb (a b : canonical_group) : bool :=
   if canonical_group_eq_dec a b then true else false.
 
+Definition canonical_registry_prefixb (a b : canonical_registry) : bool :=
+  if List.list_eq_dec canonical_group_eq_dec a (firstn (length a) b)
+  then true else false.
+
 Definition defined_type_eqb (a b : defined_type) : bool :=
   if defined_type_eq_dec a b then true else false.
 

@@ -19,6 +19,8 @@ Proof.
   unfold module_type_checker.
   destruct (close_and_validate_type_groups [] (module_type_groups m))
     as [[registry ids]|] eqn:Closed; [|discriminate].
+  destruct (function_type_identitiesb registry ids (mod_types m) ids);
+    [|discriminate].
   intro Checked. exists registry, ids. split; [reflexivity |].
   now apply close_and_validate_type_groups_sound in Closed.
 Qed.
@@ -29,7 +31,7 @@ Theorem alloc_module_closed_types s m imports globals elements s' inst :
     Some (s'.(s_types), inst.(inst_defined_types)).
 Proof.
   unfold alloc_module. simpl.
-  intros [registry [ids [Closed [Names Rest]]]].
+  intros [registry [ids [Closed [Identity [Names Rest]]]]].
   destruct (alloc_funcs _ _ _) as [s1 fs].
   destruct (alloc_tabs _ _) as [s2 ts].
   destruct (alloc_mems _ _) as [s3 ms].

@@ -2,6 +2,7 @@
 (* (C) J. Pichon, M. Bodin - see LICENSE.txt *)
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From Wasm Require Export operations subtyping.
+From Wasm Require Import gc_declaration_typing.
 From Stdlib Require Import NArith.
 
 (* see common.v *)
@@ -478,7 +479,9 @@ This definition is currently computable -- hopefully it remains so in the future
  **)
 Definition inst_typing (s : store_record) (inst : moduleinst) : option t_context :=
   let '{| inst_types := ts; inst_funcs := fs; inst_tables := tbs; inst_mems := ms; inst_globals := gs; inst_elems := es; inst_datas := ds; inst_exports := exps |} := inst in
-  if (all functype_valid ts) then
+  if (all functype_valid ts &&
+      function_type_identitiesb s.(s_types) inst.(inst_defined_types)
+        ts inst.(inst_defined_types)) then
     match those (map (ext_func_typing s) fs) with
     | Some tfs =>
         match those (map (ext_table_typing s) tbs) with
@@ -594,6 +597,7 @@ Definition funcinst_typing (s: store_record) (fi: funcinst) (tf0: function_type)
   end.
 
 Definition store_typing (s : store_record) : Prop :=
+  canonical_registry_validb s.(s_types) = true /\
   match s with
   | Build_store_record fs tabs ms gs es ds types =>
     (List.Forall (fun x => exists t, funcinst_typing s x t) fs) /\

@@ -218,7 +218,10 @@ Definition module_components_type_checker (m : module) : option ((list extern_ty
 
 Definition module_type_checker (m : module) : option ((list extern_type) * (list extern_type)) * string :=
   match close_and_validate_type_groups nil (module_type_groups m) with
-  | Some _ => module_components_type_checker m
+  | Some (registry, ids) =>
+      if function_type_identitiesb registry ids m.(mod_types) ids
+      then module_components_type_checker m
+      else (None, "inconsistent closed module type signatures")
   | None => (None, "invalid module type declarations")
   end.
 
@@ -294,6 +297,7 @@ Definition interp_instantiate (hs: host_state) (s : store_record) (m : module) (
       match close_and_validate_type_groups s.(s_types) (module_type_groups m) with
       | None => (None, "Error in closing module types against store registry")
       | Some (registry, typeids) =>
+      if function_type_identitiesb registry typeids m.(mod_types) typeids then
       match those (map (external_type_checker s) v_imps) with
       | Some t_imps =>
           if all2 import_subtyping t_imps t_imps_mod then
@@ -324,6 +328,7 @@ Definition interp_instantiate (hs: host_state) (s : store_record) (m : module) (
           else (None, "Import type checking failure")
       | None => (None, "Bad external values for imports")
       end
+      else (None, "Error in resolving closed module signatures")
       end
   end.
 

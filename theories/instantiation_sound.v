@@ -5,6 +5,7 @@
 
 From mathcomp Require Import ssreflect ssrbool eqtype seq ssrnat.
 From Wasm Require Import instantiation_spec instantiation_properties type_preservation.
+From Wasm Require Import gc_type_context_properties gc_declaration_typing_properties.
 From Stdlib Require Import ZArith.
 
 (* see common.v *)
@@ -79,7 +80,7 @@ Proof.
   destruct Hinst as [t_imps_mod [t_imps [t_exps [hs' [inst [g_inits [r_inits [Hmodtype [Himptype [Hsubtype [Hallocmodule [Hinstglob [Hinstelem [Heqf Heqexps]]]]]]]]]]]]]].
 
   unfold alloc_module in Hallocmodule.
-  destruct Hallocmodule as [registry [typeids [Hclosed [Htypeids Hallocmodule]]]].
+  destruct Hallocmodule as [registry [typeids [Hclosed [Hidentity [Htypeids Hallocmodule]]]]].
   destruct (alloc_funcs _ _ _) as [s1 ifs] eqn:Hallocfuncs.
   destruct (alloc_tabs _ _) as [s2 its] eqn:Halloctabs.
   destruct (alloc_mems _ _) as [s3 ims] eqn:Hallocmems.
@@ -102,6 +103,11 @@ Proof.
     extract_premise.
     destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
     unfold store_extension => /=.
+    apply/andP; split; last first.
+    { apply gc_type_context_properties.canonical_registry_prefixb_correct.
+      apply gc_declaration_typing_properties.close_and_validate_type_groups_sound in Hclosed.
+      destruct Hclosed as [_ Hclosed].
+      by apply gc_type_context_properties.close_type_groups_extension_public in Hclosed. }
     erewrite component_extension_extend; eauto; last by apply all2_func_extension_same.
     erewrite component_extension_extend; eauto; last by apply all2_table_extension_same.
     erewrite component_extension_extend; eauto; last by apply all2_mem_extension_same.
@@ -373,7 +379,7 @@ Proof.
           unfold lookup_N in *; simplify_multieq.
           rewrite List.nth_error_app1 in Hoption; last by apply nth_error_Some_length in Hoption2.
           simplify_multieq.
-          destruct HST as [_ [_ [_ [Hglobtype _]]]].
+           destruct HST as [_ [_ [_ [_ [Hglobtype _]]]]].
           eapply Forall_lookup in Hglobtype as [gt Hginsttype]; eauto.
           unfold globalinst_typing in Hginsttype.
           destruct g => /=.
@@ -414,14 +420,21 @@ Proof.
 
     replace (all functype_valid inst_types) with true; last by symmetry; apply Forall_all.
     rewrite Hfit Htit Hmit Hgit Heit Hdit.
+    rewrite Hidentity.
     reflexivity.
   }
 
   assert (store_typing s') as HST'.
   {
     extract_premise.
+    split.
+    { apply gc_declaration_typing_properties.close_and_validate_type_groups_sound in Hclosed.
+      destruct Hclosed as [Valid _].
+      apply gc_declaration_typing_properties.canonical_registry_validb_correct.
+      by subst; simpl. }
+    extract_premise.
     destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
-    destruct HST as [Hsfunctype [Hstabletype [Hsmemtype [Hsglobaltype [Hselemtype Hsdatatype]]]]].
+    destruct HST as [Htypes [Hsfunctype [Hstabletype [Hsmemtype [Hsglobaltype [Hselemtype Hsdatatype]]]]]].
     repeat split => //.
     (* Functions *)
     {

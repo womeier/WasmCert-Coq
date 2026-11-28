@@ -6,6 +6,37 @@ From Wasm Require Import datatypes gc_type_context.
 From Stdlib Require Import List NArith Arith Bool Lia Relation_Operators.
 Import ListNotations.
 
+Lemma canonical_registry_prefixb_correct a b :
+  canonical_registry_prefixb a b = true <-> exists suffix, b = a ++ suffix.
+Proof.
+  unfold canonical_registry_prefixb.
+  destruct (List.list_eq_dec canonical_group_eq_dec a (firstn (length a) b))
+    as [Same|Different].
+  - split.
+    + intro E. exists (skipn (length a) b).
+      pose proof (firstn_skipn (length a) b) as Split.
+      rewrite <- Same in Split. now symmetry.
+    + intro E. reflexivity.
+  - split; [discriminate |].
+    intros [suffix E]. subst b. exfalso. apply Different.
+    rewrite firstn_app, firstn_all, Nat.sub_diag. simpl. now rewrite app_nil_r.
+Qed.
+
+Lemma canonical_registry_prefixb_refl groups :
+  canonical_registry_prefixb groups groups = true.
+Proof.
+  apply canonical_registry_prefixb_correct. exists []. now rewrite app_nil_r.
+Qed.
+
+Lemma canonical_registry_prefixb_trans a b c :
+  canonical_registry_prefixb a b = true ->
+  canonical_registry_prefixb b c = true ->
+  canonical_registry_prefixb a c = true.
+Proof.
+  rewrite !canonical_registry_prefixb_correct.
+  intros [xs E] [ys F]. exists (xs ++ ys). now rewrite F, E, app_assoc.
+Qed.
+
 Lemma canonical_group_eqb_correct a b :
   canonical_group_eqb a b = true <-> a = b.
 Proof.

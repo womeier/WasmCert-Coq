@@ -22,7 +22,9 @@ Proof.
   unfold module_type_checker in Hmodcheck.
   destruct (close_and_validate_type_groups nil (module_type_groups m))
     as [[registry ids]|] eqn:Hclosed => //.
-  split; first by exists registry, ids.
+  destruct (function_type_identitiesb registry ids (mod_types m) ids)
+    eqn:Hidentity => //.
+  split; first by exists registry, ids; split.
   unfold module_components_type_checker in Hmodcheck.
   destruct m.
   destruct (gather_m_f_types mod_types mod_funcs) as [fts | ] eqn:Hmftypes => //;
@@ -189,12 +191,13 @@ Qed.
 
 Lemma interp_alloc_sound: forall s m v_imps g_inits r_inits registry typeids s' inst,
   close_and_validate_type_groups s.(s_types) (module_type_groups m) = Some (registry, typeids) ->
+  function_type_identitiesb registry typeids m.(mod_types) typeids = true ->
   length g_inits = length m.(mod_globals) ->
   length r_inits = length m.(mod_elems) ->
   interp_alloc_module s m v_imps g_inits r_inits registry typeids = (s', inst) ->
   alloc_module s m v_imps g_inits r_inits (s', inst).
 Proof.
-  move => s m v_imps g_inits r_inits registry typeids s' inst Hclosed Hgvs_len Hrvs_len Halloc.
+  move => s m v_imps g_inits r_inits registry typeids s' inst Hclosed Hidentity Hgvs_len Hrvs_len Halloc.
   unfold interp_alloc_module in Halloc.
   unfold alloc_module; simpl in *.
   exists registry, typeids.
@@ -231,6 +234,9 @@ Proof.
   move => m t_imps t_exps str.
   unfold module_type_checker, module_components_type_checker.
   move => Hmodcheck.
+  destruct (close_and_validate_type_groups nil (module_type_groups m))
+    as [[registry typeids]|] => //.
+  destruct (function_type_identitiesb registry typeids (mod_types m) typeids) => //.
   destruct m.
   remove_bools_options.
   simpl in *.
@@ -244,6 +250,9 @@ Proof.
   move => m t_imps t_exps str.
   unfold module_type_checker, module_components_type_checker.
   move => Hmodcheck.
+  destruct (close_and_validate_type_groups nil (module_type_groups m))
+    as [[registry typeids]|] => //.
+  destruct (function_type_identitiesb registry typeids (mod_types m) typeids) => //.
   destruct m.
   remove_bools_options.
   simpl in *.
@@ -260,6 +269,8 @@ Proof.
   destruct (module_type_checker m) as [[[t_imps_mod t_exps]|] str'] eqn:Hmodcheck => //.
   destruct (close_and_validate_type_groups (s_types s) (module_type_groups m))
     as [[registry typeids]|] eqn:Hclosed => //.
+  destruct (function_type_identitiesb registry typeids (mod_types m) typeids)
+    eqn:Hidentity => //.
   destruct (those _) as [t_imps | ] eqn:Hextcheck => //.
   destruct (all2 import_subtyping _ _) eqn:Hextsubtyping => //.
   destruct (get_global_inits _ _ (mod_globals m)) as [g_inits |] eqn:Hglobinit => //.

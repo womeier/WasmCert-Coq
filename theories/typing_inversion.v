@@ -943,7 +943,7 @@ Proof.
   remove_bools_options; simpl in *.
   unfold store_typing in Hst.
   destruct s; remove_bools_options.
-  destruct Hst as [? [? [? [Hglobtype ?]]]].
+  destruct Hst as [_ [? [? [? [Hglobtype ?]]]]].
   eapply those_lookup_inv in Hoption5; eauto.
   eapply Forall_lookup with (n := (N.to_nat g1)) in Hglobtype as [gt Hglobtype]; eauto.
   {

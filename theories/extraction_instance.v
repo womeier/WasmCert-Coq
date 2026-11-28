@@ -213,6 +213,7 @@ Definition expand_type := expand_inst_type.
 Definition expand_function := expand_inst_function_type.
 Definition native_function_type := native_func_defined_type.
 Definition lookup_function_type := lookup_func_defined_type.
+Definition instance_context := inst_typing.
 
 Definition empty_store_record : store_record := {|
     s_funcs := nil;

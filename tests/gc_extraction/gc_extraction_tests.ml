@@ -391,4 +391,37 @@ let () =
   check "production instantiation rejects invalid store type registry"
     (match Runtime.interp_instantiate_wrapper (Obj.magic ()) corrupt blank [] with
      | None, _ -> true | Some _, _ -> false);
+  check "main instance typing accepts matching closed map"
+    (Runtime.instance_context s2 inst2 <> None);
+  check "main instance typing rejects forged closed signature"
+    (Runtime.instance_context s2
+      { inst2 with inst_defined_types = [id 0 0; id 0 0] } = None);
+  check "main instance typing rejects truncated closed map"
+    (Runtime.instance_context s2 { inst2 with inst_defined_types = [] } = None);
+  check "main instance typing rejects dangling closed identity"
+    (Runtime.instance_context s2
+      { inst2 with inst_defined_types = [id 12 0; id 0 0] } = None);
+  let typed_param index = Tf ([T_ref { ref_nullable = true;
+                                      ref_heap = HT_type (BigZ.of_int index) }], []) in
+  let typed_a = { blank with mod_types = [Tf ([], []); typed_param 0];
+                            mod_funcs = [func 1] } in
+  let sa, ia = instantiate Runtime.empty_store_record typed_a in
+  let typed_b = { blank with mod_types =
+                  [Tf ([T_num T_i32], []); Tf ([], []); typed_param 1];
+                            mod_funcs = [func 2] } in
+  let sb, ib = instantiate sa typed_b in
+  check "production closes typed function parameters through map"
+    (Runtime.expand_function sa ia BigZ.one =
+      Some (Closed_ft ([CV_ref (true, CH_defined (CT_def (id 0 0)))], [])));
+  check "source-index-shifted typed function signatures share canonical identity"
+    (Runtime.resolve_type ia BigZ.one = Runtime.resolve_type ib (BigZ.of_int 2));
+  check "earlier typed native expansion stays valid after store extension"
+    (Runtime.instance_context sb ia <> None &&
+     Runtime.expand_function sb ia BigZ.one = Runtime.expand_function sa ia BigZ.one);
+  let self = { blank with mod_types = [typed_param 0]; mod_funcs = [func 0] } in
+  let ss, iself = instantiate Runtime.empty_store_record self in
+  check "production self-reference source-resolution agrees with closed expansion"
+    (Runtime.instance_context ss iself <> None &&
+     Runtime.expand_function ss iself BigZ.zero =
+       Some (Closed_ft ([CV_ref (true, CH_defined (CT_def (id 0 0)))], [])));
   Printf.printf "GC extraction: %d/%d checks passed\n" !checks !checks

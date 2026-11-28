@@ -1,6 +1,7 @@
 (** Miscellaneous properties about Wasm operations **)
 
 From Wasm Require Export datatypes_properties operations typing opsem common.
+From Wasm Require Import gc_type_context gc_type_context_properties.
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From Stdlib Require Import Bool Program NArith ZArith Wf_nat.
 
@@ -2039,6 +2040,7 @@ Proof.
   move => Hext1 Hext2.
   unfold store_extension, operations.store_extension in *.
   remove_bools_options.
+  apply/andP; split; last by eapply gc_type_context_properties.canonical_registry_prefixb_trans; eauto.
   apply/andP; split; last by eapply component_extension_trans; eauto; apply data_extension_trans.
   apply/andP; split; last by eapply component_extension_trans; eauto; apply elem_extension_trans.
   apply/andP; split; last by eapply component_extension_trans; eauto; apply global_extension_trans.
@@ -2051,6 +2053,7 @@ Lemma store_extension_same: forall s,
     store_extension s s.
 Proof.
   move => s. unfold store_extension.
+  rewrite gc_type_context_properties.canonical_registry_prefixb_refl andbT.
   repeat (apply/andP; split => //); rewrite length_is_size take_size.
   + by apply all2_func_extension_same.
   + by apply all2_table_extension_same.
@@ -2074,6 +2077,32 @@ Proof.
   apply (nth_error_take (k := length l1)) in Hnth'; last by lias.
   specialize (all2_projection H0 Hnth Hnth') as Hproj.
   by exists y.
+Qed.
+
+Lemma store_extension_type_groups s s' :
+  store_extension s s' -> exists suffix, s'.(s_types) = s.(s_types) ++ suffix.
+Proof.
+  unfold store_extension. move/andP => [_ Prefix].
+  now apply canonical_registry_prefixb_correct.
+Qed.
+
+Lemma inst_typing_identities s inst C :
+  inst_typing s inst = Some C ->
+  gc_declaration_typing.function_type_identitiesb s.(s_types)
+    inst.(inst_defined_types) inst.(inst_types) inst.(inst_defined_types) = true.
+Proof.
+  unfold inst_typing. destruct inst. simpl.
+  destruct (all _ _ && _) eqn:Checked; [|discriminate].
+  move/andP in Checked. tauto.
+Qed.
+
+Lemma inst_typing_functypes_valid s inst C :
+  inst_typing s inst = Some C ->
+  all functype_valid inst.(inst_types) = true.
+Proof.
+  unfold inst_typing. destruct inst. simpl.
+  destruct (all _ _ && _) eqn:Checked; [|discriminate].
+  move/andP in Checked. tauto.
 Qed.
 
 Definition component_extension_extend {T: Type} (l1 l2 l3: list T) f:
@@ -2359,7 +2388,7 @@ Lemma store_typing_func_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [Hf _]; simpl in *.
+  destruct Hst as [_ [Hf _]]; simpl in *.
   by eapply Forall_lookup in Hf; eauto.
 Qed.
 
@@ -2370,7 +2399,7 @@ Lemma store_typing_table_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [Hf [Ht _]]; simpl in *.
+  destruct Hst as [_ [Hf [Ht _]]]; simpl in *.
   by eapply Forall_lookup in Ht; eauto.
 Qed.
 
@@ -2381,7 +2410,7 @@ Lemma store_typing_mem_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [Hf [Ht [Hm _]]]; simpl in *.
+  destruct Hst as [_ [Hf [Ht [Hm _]]]]; simpl in *.
   by eapply Forall_lookup in Hm; eauto.
 Qed.
 
@@ -2392,7 +2421,7 @@ Lemma store_typing_global_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [_ [_ [_ [Hg _]]]]; simpl in *.
+  destruct Hst as [_ [_ [_ [_ [Hg _]]]]]; simpl in *.
   by eapply Forall_lookup in Hg; eauto.
 Qed.
 
@@ -2403,7 +2432,7 @@ Lemma store_typing_elem_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [_ [_ [_ [_ [He _]]]]]; simpl in *.
+  destruct Hst as [_ [_ [_ [_ [_ [He _]]]]]]; simpl in *.
   by eapply Forall_lookup in He; eauto.
 Qed.
 
@@ -2414,7 +2443,7 @@ Lemma store_typing_data_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [_ [_ [_ [_ [_ Hd]]]]]; simpl in *.
+  destruct Hst as [_ [_ [_ [_ [_ [_ Hd]]]]]]; simpl in *.
   by eapply Forall_lookup in Hd; eauto.
 Qed.
 

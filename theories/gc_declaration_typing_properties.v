@@ -355,3 +355,48 @@ Proof.
     rewrite Closed, (proj2 (canonical_registry_validb_correct groups) Valid).
     reflexivity.
 Qed.
+
+Lemma function_type_identityb_correct registry names source id :
+  function_type_identityb registry names source id = true <->
+  exists signature,
+    close_function_type names 0 source = Some signature /\
+    expand_function_type registry id = Some signature.
+Proof.
+  unfold function_type_identityb.
+  destruct (close_function_type names 0 source) as [expected|] eqn:Expected,
+    (expand_function_type registry id) as [actual|] eqn:Actual;
+    try (split; [discriminate | intros [f [E F]]; congruence]).
+  destruct (closed_function_type_eq_dec expected actual) as [Same|Different].
+  - subst actual. split; [intro E; now exists expected | reflexivity].
+  - split; [discriminate | intros [f [E F]]; congruence].
+Qed.
+
+Lemma function_type_identitiesb_correct registry names sources ids :
+  function_type_identitiesb registry names sources ids = true <->
+  Forall2
+    (fun source id => exists signature,
+      close_function_type names 0 source = Some signature /\
+      expand_function_type registry id = Some signature) sources ids.
+Proof.
+  revert ids. induction sources as [|source sources IH]; intros [|id ids]; simpl.
+  - split; intro E; constructor.
+  - split; intro E; discriminate || inversion E.
+  - split; intro E; discriminate || inversion E.
+  - rewrite andb_true_iff, function_type_identityb_correct, IH.
+    split; [intros [Head Tail]; now constructor | intro E; now inversion E].
+Qed.
+
+Lemma function_type_identitiesb_extension registry suffix names sources ids :
+  function_type_identitiesb registry names sources ids = true ->
+  function_type_identitiesb (registry ++ suffix) names sources ids = true.
+Proof.
+  rewrite !function_type_identitiesb_correct.
+  apply Forall2_impl. intros source id [signature [Expected Actual]].
+  exists signature. split; [exact Expected |].
+  rewrite expand_function_type_extension; [exact Actual |].
+  unfold expand_function_type, expand_defined_type in Actual.
+  destruct (lookup_defined_type registry id) as [st|] eqn:Lookup; [|discriminate].
+  unfold lookup_defined_type in Lookup.
+  destruct (nth_error registry (N.to_nat (defined_group id))) eqn:Group;
+    [now apply nth_error_index_bound in Group | discriminate].
+Qed.

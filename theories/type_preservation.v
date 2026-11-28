@@ -1,6 +1,7 @@
 (** Proof of preservation **)
 
 From Wasm Require Export typing_inversion tactic.
+From Wasm Require Import gc_declaration_typing_properties.
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From Stdlib Require Import Program.Equality ZArith.
 
@@ -302,8 +303,17 @@ Lemma inst_typing_extension: forall s s' i C,
       context_extension C C'.
 Proof.
   move => s s' i C HST HIT.
+  pose proof (inst_typing_identities HIT) as Hidentities.
+  pose proof (inst_typing_functypes_valid HIT) as Hvalid.
+  destruct (store_extension_type_groups HST) as [suffix Hregistry].
+  pose proof (gc_declaration_typing_properties.function_type_identitiesb_extension
+    (s_types s) suffix _ _ _ Hidentities) as Hidentities'.
+  assert (Hnew : gc_declaration_typing.function_type_identitiesb (s_types s')
+    i.(inst_defined_types) i.(inst_types) i.(inst_defined_types) = true).
+  { rewrite Hregistry. exact Hidentities'. }
   unfold inst_typing in *.
   destruct i.
+  simpl in Hnew, Hvalid. rewrite Hnew Hvalid.
   remove_bools_options.
   (* Functions *)
   eapply those_map_impl in Hoption; last first.
@@ -879,6 +889,8 @@ Qed.
 
 Ltac resolve_store_extension :=
   repeat lazymatch goal with
+  | |- context [ gc_type_context.canonical_registry_prefixb ?x ?x ] =>
+      rewrite gc_type_context_properties.canonical_registry_prefixb_refl
   | |- context [ component_extension (@operations.func_extension _) ?x ?x ] =>
       rewrite -> component_extension_same_refl with (f := func_extension); last by apply func_extension_refl
   | |- context [ component_extension table_extension ?x ?x ] =>
@@ -897,6 +909,7 @@ Ltac resolve_store_extension :=
 Ltac resolve_store_typing :=
   repeat split;
   repeat lazymatch goal with
+  | |- gc_declaration_typing.canonical_registry_validb _ = true => assumption
   | |- List.Forall (fun x => exists t, funcinst_typing ?s x t) _ =>
       by eapply store_extension_funcs_typing; eauto
   | |- List.Forall (fun x => exists t, tableinst_typing ?s x = Some t) _ =>
@@ -953,7 +966,7 @@ Proof.
   eapply value_typing_extension in Hvaltype; eauto.
   unfold store_typing in *; destruct s; simpl in *.
   unfold_store_operations; remove_bools_options.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Htt Hmt Het Hdt.
   eapply Forall_set; eauto; last by apply nth_error_Some_length in Hoption1; lias.
   eapply Forall_lookup in Hoption1; eauto; simpl in *.
@@ -998,7 +1011,7 @@ Proof.
   rewrite Hnthtabt in Hnth; injection Hnth as ->.
   unfold store_typing in *; destruct s; simpl in *.
   unfold_store_operations; remove_bools_options.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Hmt Hgt Het Hdt.
   eapply Forall_set; eauto; last by apply nth_error_Some_length in Hoption1; lias.
   eapply Forall_lookup in Hoption1; eauto; simpl in *.
@@ -1055,7 +1068,7 @@ Proof.
   rewrite Hnthtabt in Hnth; injection Hnth as <-.
   unfold store_typing in *; destruct s; simpl in *.
   unfold_store_operations; remove_bools_options.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Hmt Hgt Het Hdt.
   unfold tab_size in *; simpl in *.
   apply List.Forall_forall.
@@ -1113,7 +1126,7 @@ Proof.
   rewrite Hnth in Hnthet; injection Hnthet as <-.
   unfold store_typing in *; destruct s; simpl in *.
   unfold_store_operations; remove_bools_options.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Htt Hmt Hgt Hdt.
   apply List.Forall_forall.
   move => x0 Hin.
@@ -1258,7 +1271,7 @@ Proof.
   resolve_store_inst_lookup; destruct m0; simpl in *; remove_bools_options; simpl in *.
   rewrite Hnthmt in Hnth; injection Hnth as <-.
   unfold store_typing in *; destruct s; simpl in *.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Htt Hgt Het Hdt.
   apply List.Forall_forall.
   move => x0 Hin.
@@ -1309,7 +1322,7 @@ Proof.
   resolve_store_inst_lookup; destruct m0; simpl in *; remove_bools_options; simpl in *.
   rewrite Hnthmt in Hnth; injection Hnth as <-.
   unfold store_typing in *; destruct s; simpl in *.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Htt Hgt Het Hdt.
   apply List.Forall_forall.
   move => x0 Hin.
@@ -1359,7 +1372,7 @@ Proof.
   resolve_store_inst_lookup; destruct m0; simpl in *; remove_bools_options; simpl in *.
   rewrite Hnthmt in Hnth; injection Hnth as <-.
   unfold store_typing in *; destruct s; simpl in *.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Htt Hgt Het Hdt.
   apply List.Forall_forall.
   move => x0 Hin.
@@ -1409,7 +1422,7 @@ Proof.
   resolve_store_inst_lookup; destruct m0; simpl in *; remove_bools_options; simpl in *.
   rewrite Hnthmt in Hnth; injection Hnth as <-.
   unfold store_typing in *; destruct s; simpl in *.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Htt Hgt Het Hdt.
   apply List.Forall_forall.
   move => x0 Hin.
@@ -1463,7 +1476,7 @@ Proof.
   resolve_store_inst_lookup; destruct m0; simpl in *; remove_bools_options; simpl in *.
   rewrite Hnthmt in Hnth; injection Hnth as <-.
   unfold store_typing in *; destruct s; simpl in *.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Htt Hgt Het Hdt.
   apply List.Forall_forall.
   move => x0 Hin.
@@ -1507,7 +1520,7 @@ Proof.
   rewrite Hnth in Hnthdt; injection Hnthdt as <-.
   unfold store_typing in *; destruct s; simpl in *.
   unfold_store_operations; remove_bools_options.
-  destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
+  destruct Hst as [Htypes [Hft [Htt [Hmt [Hgt [Het Hdt]]]]]].
   resolve_store_typing; simpl in *; clear Hft Htt Hmt Hgt Het.
   apply List.Forall_forall.
   move => x0 Hin.

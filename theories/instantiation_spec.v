@@ -269,6 +269,7 @@ Definition alloc_module (s : store_record) (m : module) (imps : list extern_valu
   let '(s'_goal, inst) := s'_inst in
   exists registry typeids,
   close_and_validate_type_groups s.(s_types) (module_type_groups m) = Some (registry, typeids) /\
+  function_type_identitiesb registry typeids m.(mod_types) typeids = true /\
   inst.(inst_defined_types) = typeids /\
   let '(s1, i_fs) := alloc_funcs s m.(mod_funcs) inst in
   let '(s2, i_ts) := alloc_tabs s1 (map modtab_type m.(mod_tables)) in
@@ -550,7 +551,8 @@ Definition module_components_typing (m : module) (impts : list extern_type) (exp
 
 Definition module_typing (m : module) (impts expts : list extern_type) : Prop :=
   (exists registry ids,
-    close_and_validate_type_groups nil (module_type_groups m) = Some (registry, ids)) /\
+    close_and_validate_type_groups nil (module_type_groups m) = Some (registry, ids) /\
+    function_type_identitiesb registry ids m.(mod_types) ids = true) /\
   module_components_typing m impts expts.
 
 (** std-doc:
