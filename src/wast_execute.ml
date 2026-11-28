@@ -143,9 +143,18 @@ let wasm_assert_ret verbosity ret ret_exp =
   | RefResult refpat -> wasm_assert_refpat ret refpat
   | VecResult vecpat -> wasm_assert_vecpat verbosity ret vecpat
 
-let wasm_assert_rets verbosity rets ret_exps = 
-  let assert_results = List.map2 (fun x y -> wasm_assert_ret verbosity x y) rets ret_exps in
-  List.fold_left (fun a b -> a && b) true assert_results
+let wasm_assert_rets ?(any_null_positions=[]) verbosity rets ret_exps =
+  let rec matches position values expectations =
+    match values, expectations with
+    | [], [] -> true
+    | value :: values, expected :: expectations ->
+        let matched =
+          if List.mem position any_null_positions then
+            match value with Extract.VAL_ref (Extract.VAL_ref_null _) -> true | _ -> false
+          else wasm_assert_ret verbosity value expected in
+        matched && matches (position + 1) values expectations
+    | _ -> false in
+  matches 0 rets ret_exps
 
 (* Keep parsing separate from validation/linking. A failure in a later phase
    must not satisfy assert_malformed (or a parse failure assert_invalid). *)
@@ -183,9 +192,14 @@ let instantiate_wast_module verbosity hs s ovar m mod_counter =
   pure (hs', s', inst_res, mod_counter + 1, modname)
 
 let print_wast_command cmd = 
-  let cmd_sexpr = Wasm.Arrange.script `Textual [cmd] in
-  let cmd_string = String.concat "" (List.map (Wasm.Sexpr.to_string 200) cmd_sexpr) in
-  cmd_string
+  (* Diagnostic rendering must not run the old reference binary decoder on
+     new core types, or malformed fixtures, and crash before our own parser. *)
+  try
+    let cmd_sexpr = Wasm.Arrange.script `Textual [cmd] in
+    String.concat "" (List.map (Wasm.Sexpr.to_string 200) cmd_sexpr)
+  with exn ->
+    Printf.sprintf "<WAST command at line %d; legacy diagnostic formatter failed: %s>"
+      cmd.at.left.line (Printexc.to_string exn)
 
 let wasm_name_to_raw_string n = 
   Wasm.Utf8.encode n
@@ -230,9 +244,17 @@ let finish_instantiation (hs, s, inst_res, counter, name) =
   | _ -> error "Post instantiation execution resulted in unexpected error"
 
 let run_wast_command verbosity max_call_depth definitions (directive, cmd) hs s mod_counter default_module_name test_counter =
+  let any_null_positions = match directive with
+    | Wast_binary_script.Expect_null positions -> positions
+    | _ -> [] in
   debug_info verbosity stage 
   (fun _ -> 
-    "\n\n----------\nTest " ^ string_of_int test_counter ^ "\n----------\n" ^ print_wast_command cmd ^ "\n"
+    let null_note = if any_null_positions = [] then "" else
+      "\nOriginal any-null result positions: " ^
+      String.concat ", " (List.map string_of_int any_null_positions) ^
+      " (ref.func above is only the legacy parser carrier).\n" in
+    "\n\n----------\nTest " ^ string_of_int test_counter ^ "\n----------\n" ^
+    print_wast_command cmd ^ null_note ^ "\n"
     );
  begin try
   begin match directive with
@@ -256,7 +278,7 @@ let run_wast_command verbosity max_call_depth definitions (directive, cmd) hs s 
       | _, None -> error "Unknown binary module definition"
       | _ -> error "Expected a binary module instance directive"
       end
-  | Wast_binary_script.Ordinary ->
+  | Wast_binary_script.Ordinary | Wast_binary_script.Expect_null _ ->
   begin match cmd.it with
   | Module (ovar, moddef) -> 
     let* m = parse_wast_module verbosity moddef in
@@ -293,7 +315,7 @@ let run_wast_command verbosity max_call_depth definitions (directive, cmd) hs s 
           debug_info verbosity stage (fun _ -> "Returned: ");
           debug_info verbosity stage (fun _ -> Execute.print_invoke_result verbosity res; "");
           debug_info verbosity stage (fun _ -> "Expected: " ^ wasm_results_to_string expect_rets ^ "\n");
-          let assert_result = wasm_assert_rets verbosity vs expect_rets in
+          let assert_result = wasm_assert_rets ~any_null_positions verbosity vs expect_rets in
             if assert_result then
               (debug_info verbosity stage (fun _ -> "Test passed: result matches asserted value\n");
               pure (hs, s', mod_counter, default_module_name, Verdict_OK))
@@ -304,7 +326,7 @@ let run_wast_command verbosity max_call_depth definitions (directive, cmd) hs s 
         end
       | Get (ovar, extname_utf8) ->
         let* res_v = run_get (ovar, extname_utf8) hs s default_module_name in
-        let assert_result = wasm_assert_rets verbosity [res_v] expect_rets in
+        let assert_result = wasm_assert_rets ~any_null_positions verbosity [res_v] expect_rets in
           if assert_result then
             (debug_info verbosity stage (fun _ -> "Test passed: result matches asserted value\n");
               pure (hs, s, mod_counter, default_module_name, Verdict_OK))

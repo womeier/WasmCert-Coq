@@ -26,6 +26,16 @@ trapping = (magic + sec(1, b"\x01\x60\x00\x00") + sec(3, b"\x01\x00")
 unlinkable = (magic + sec(1, b"\x01\x60\x00\x00")
               + sec(2, b"\x01\x06absent\x01f\x00\x00"))
 invalid = magic + sec(3, b"\x01\x00") + sec(10, b"\x01\x02\x00\x0b")
+null_results = (
+    magic
+    + sec(1, vec([b"\x60\x00\x01\x70", b"\x60\x00\x01\x6f", b"\x60\x00\x02\x7f\x70"]))
+    + sec(3, b"\x04\x00\x01\x00\x02")
+    + sec(7, vec([b"\x02nf\x00\x00", b"\x02ne\x00\x01",
+                  b"\x01f\x00\x02", b"\x03mix\x00\x03"]))
+    + sec(9, b"\x01\x03\x00\x01\x00")
+    + sec(10, vec([b"\x04\x00\xd0\x70\x0b", b"\x04\x00\xd0\x6f\x0b",
+                   b"\x04\x00\xd2\x00\x0b", b"\x06\x00\x41\x01\xd0\x70\x0b"]))
+)
 
 
 def module(data, prefix=""):
@@ -49,6 +59,12 @@ elif mode == "trapping":
     print("(module instance $T)")
 elif mode == "inline":
     print("(func)\n(memory 0)")
+elif mode == "nonnull":
+    print(module(null_results))
+    print('(assert_return (invoke "f") (ref.null))')
+elif mode == "unsupported-reference":
+    print(module(magic + sec(1, b"\x01\x60\x00\x00")
+                 + sec(4, b"\x01\x63\x00\x00\x00")))
 else:
     assert mode == "positive"
     print(module(counter, "$initial "))
@@ -69,3 +85,8 @@ else:
     print("(module instance)")
     expect("", "bump", 1)
     expect("$B ", "get", 0)
+    print(module(null_results))
+    print('(assert_return (invoke "nf") (ref.null))')
+    print('(assert_return (invoke "ne") (ref.null))')
+    print('(assert_return (invoke "f") (ref.func))')
+    print('(assert_return (invoke "mix") (i32.const 1) (ref.null))')

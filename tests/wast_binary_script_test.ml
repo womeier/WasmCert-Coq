@@ -21,6 +21,13 @@ let () =
     (directives = [Instantiate (Some "$D"); Instantiate (Some "$D"); Instantiate None]);
   check "instance placeholders parse"
     (List.length (Wasm.Parse.Script.parse_string prepared) = 3);
+  let source = "(assert_return (invoke \"x\" (ref.null func)) (i32.const 1) (ref.null))" in
+  let prepared, directives = prepare source in
+  check "only the untyped expected result is annotated"
+    (directives = [Expect_null [1]]);
+  check "null-result source width retained" (String.length source = String.length prepared);
+  check "null-result carrier parses"
+    (List.length (Wasm.Parse.Script.parse_string prepared) = 1);
   let source = "(module definition $D (memory i64 1))" in
   check "text module definitions are not extended" (prepare source = (source, [Ordinary]));
   List.iter (fun source ->

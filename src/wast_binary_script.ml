@@ -6,6 +6,7 @@ type directive =
   | Ordinary
   | Define of string option
   | Instantiate of string option
+  | Expect_null of int list
 
 let prepare source =
   let length = String.length source in
@@ -13,6 +14,9 @@ let prepare source =
   let directives = ref [] in
   let depth = ref 0 in
   let heads = ref [] in
+  let direct_group = ref (-1) in
+  let group_atoms = ref [] in
+  let null_results = ref [] in
   let starts i s =
     i + String.length s <= length &&
     String.sub source i (String.length s) = s in
@@ -38,9 +42,24 @@ let prepare source =
             erase keyword; erase target; Instantiate (Some (word target))
         | _ -> Ordinary
         end
+    | ("assert_return", _, _) :: _ when !null_results <> [] ->
+        Expect_null (List.rev !null_results)
     | _ -> Ordinary in
     directives := directive :: !directives;
-    heads := [] in
+    heads := [];
+    direct_group := -1;
+    group_atoms := [];
+    null_results := [] in
+  let finish_group () =
+    match List.rev !heads, !group_atoms with
+    | ("assert_return", _, _) :: _, [("ref.null", start, stop)]
+      when !direct_group > 0 ->
+        (* Legacy RefTypePat is only a syntactic carrier. Dispatch matches
+           the original any-null result, not the non-null placeholder. *)
+        assert (stop - start = 8);
+        Bytes.blit_string "ref.func" 0 output start 8;
+        null_results := (!direct_group - 1) :: !null_results
+    | _ -> () in
   let rec string i =
     if i >= length then failwith "Unterminated WAST string"
     else match source.[i] with
@@ -66,8 +85,11 @@ let prepare source =
     else if starts i "(;" then scan (comment 1 (i + 2))
     else match source.[i] with
     | '"' -> scan (string (i + 1))
-    | '(' -> incr depth; scan (i + 1)
+    | '(' ->
+        if !depth = 1 then begin incr direct_group; group_atoms := [] end;
+        incr depth; scan (i + 1)
     | ')' ->
+        if !depth = 2 then finish_group ();
         decr depth;
         if !depth < 0 then failwith "Unmatched WAST closing parenthesis";
         if !depth = 0 then finish ();
@@ -77,6 +99,8 @@ let prepare source =
         let stop = atom i in
         if !depth = 1 then
           heads := (String.sub source i (stop - i), i, stop) :: !heads;
+        if !depth = 2 then
+          group_atoms := (String.sub source i (stop - i), i, stop) :: !group_atoms;
         scan stop in
   scan 0;
   if !depth <> 0 then failwith "Unterminated WAST command";
