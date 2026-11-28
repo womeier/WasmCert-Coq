@@ -81,7 +81,9 @@ validation rejection as successful conformance.
    identical defined type and nullable/abstract `func` supertypes. Reject
    incompatible signatures/kinds. Apply this to global/table initializers,
    imported globals, table gets and exported function results. The current
-   `reference_type_matches`/instruction checker path does not discharge it.
+   `subtyping.reference_type_match`/instruction checker path does not discharge
+   it: the former ignores its context, and `value_subtyping` calls it with
+   `nil` rather than closing defined heaps under the actual module names.
 3. **Stored descriptors and imports:** producer globals/tables carry their
    closed descriptors. Classify stored function references with the store's
    canonical registry. Close consumer declarations under the **consumer**
