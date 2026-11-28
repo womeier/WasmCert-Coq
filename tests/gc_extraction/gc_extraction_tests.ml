@@ -1,6 +1,16 @@
 module BigZ = Z
 open Extract
 
+module No_host = struct
+  type host_function = unit
+  let host_function_eq_dec a b = a = b
+  let hfc = host_function_eq_dec
+  type host_state_type = unit
+  let host_apply_pure hs _ _ _ _ = hs, None
+end
+
+module Runtime = Extraction_instance (No_host)
+
 let checks = ref 0
 
 let check name condition =
@@ -337,4 +347,48 @@ let () =
   check "exception root does not match GC root"
     (not (cm (Comp_array (cf MUT_const (abstract HT_exn)))
       (Comp_array (cf MUT_const any))));
+  let blank =
+    match empty_module with Some m -> m | None -> failwith "empty binary module"
+  in
+  let func index =
+    { modfunc_type = BigZ.of_int index; modfunc_locals = []; modfunc_body = [] }
+  in
+  let m1 = { blank with mod_types = [Tf ([], []); Tf ([], [])];
+                       mod_funcs = [func 1] } in
+  let instantiate store m =
+    match Runtime.interp_instantiate_wrapper (Obj.magic ()) store m [] with
+    | Some (s, (frame, _)), _ -> s, frame.f_inst
+    | None, _ -> failwith "production canonical module instantiation failed"
+  in
+  let s1, inst1 = instantiate Runtime.empty_store_record m1 in
+  check "production instantiation interns repeated type declarations"
+    (List.length s1.s_types = 1 && inst1.inst_defined_types = [id 0 0; id 0 0]);
+  check "production instance resolves source type through canonical names"
+    (Runtime.resolve_type inst1 BigZ.one = Some (id 0 0));
+  check "production instance expands closed function"
+    (Runtime.expand_function s1 inst1 BigZ.one = Some (Closed_ft ([], [])));
+  check "production native function carries canonical identity"
+    (Runtime.native_function_type (List.hd s1.s_funcs) = Some (id 0 0));
+  let m2 = { blank with mod_types = [Tf ([T_num T_i32], []); Tf ([], [])];
+                       mod_funcs = [func 0; func 1] } in
+  let s2, inst2 = instantiate s1 m2 in
+  check "production second module extends shared canonical store"
+    (List.length s2.s_types = 2 && inst2.inst_defined_types = [id 1 0; id 0 0]);
+  check "production earlier identity expands after later instantiation"
+    (Runtime.expand_function s2 inst1 BigZ.one = Some (Closed_ft ([], [])));
+  check "production closed expansion distinguishes signatures"
+    (Runtime.expand_function s2 inst2 BigZ.zero =
+      Some (Closed_ft ([CV_num T_i32], [])));
+  check "production modules with different local indices share identity"
+    (Runtime.resolve_type inst1 BigZ.zero = Runtime.resolve_type inst2 BigZ.one);
+  check "production out-of-bounds type resolution fails"
+    (Runtime.resolve_type inst2 (BigZ.of_int 2) = None);
+  let bad = { blank with mod_types = [Tf ([], [T_bot])] } in
+  check "production module validation rejects invalid type declaration"
+    (match Runtime.interp_instantiate_wrapper (Obj.magic ()) s2 bad [] with
+     | None, _ -> true | Some _, _ -> false);
+  let corrupt = { s2 with s_types = [invalid_parent (id 0 0)] } in
+  check "production instantiation rejects invalid store type registry"
+    (match Runtime.interp_instantiate_wrapper (Obj.magic ()) corrupt blank [] with
+     | None, _ -> true | Some _, _ -> false);
   Printf.printf "GC extraction: %d/%d checks passed\n" !checks !checks

@@ -595,7 +595,7 @@ Definition funcinst_typing (s: store_record) (fi: funcinst) (tf0: function_type)
 
 Definition store_typing (s : store_record) : Prop :=
   match s with
-  | Build_store_record fs tabs ms gs es ds =>
+  | Build_store_record fs tabs ms gs es ds types =>
     (List.Forall (fun x => exists t, funcinst_typing s x t) fs) /\
     (List.Forall (fun x => exists t, tableinst_typing s x = Some t) tabs) /\
     (List.Forall (fun x => exists t, meminst_typing s x = Some t) ms) /\

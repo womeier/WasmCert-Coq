@@ -79,6 +79,7 @@ Proof.
   destruct Hinst as [t_imps_mod [t_imps [t_exps [hs' [inst [g_inits [r_inits [Hmodtype [Himptype [Hsubtype [Hallocmodule [Hinstglob [Hinstelem [Heqf Heqexps]]]]]]]]]]]]]].
 
   unfold alloc_module in Hallocmodule.
+  destruct Hallocmodule as [registry [typeids [Hclosed [Htypeids Hallocmodule]]]].
   destruct (alloc_funcs _ _ _) as [s1 ifs] eqn:Hallocfuncs.
   destruct (alloc_tabs _ _) as [s2 its] eqn:Halloctabs.
   destruct (alloc_mems _ _) as [s3 ims] eqn:Hallocmems.
@@ -109,7 +110,8 @@ Proof.
     erewrite component_extension_extend; eauto; last by apply all2_data_extension_same.
   }
 
-  destruct m; unfold module_typing in Hmodtype; simpl in *.
+  destruct Hmodtype as [Hdecl Hmodtype].
+  destruct m; unfold module_components_typing in Hmodtype; simpl in *.
   destruct Hmodtype as [fts [tts [mts [gts [rts [dts [Hmtypes [Hmfunctype [Hmtabletype [Hmmemtype [Hmemcount [Hmglobaltype [Hmelemtype [Hmdatatype [Hstarttype [Hmimptype [Hmexptype Hexpunique]]]]]]]]]]]]]]]]].
 
   remember (Build_t_context mod_types (ext_t_funcs t_imps ++ fts) (ext_t_tables t_imps ++ tts) (ext_t_mems t_imps ++ mts) (ext_t_globals t_imps ++ gts) rts dts nil nil None (iota_N 0 (length inst.(inst_funcs)))) as C.
@@ -138,7 +140,8 @@ Proof.
         rewrite Hntht in Hntht'; injection Hntht' as <-.
         unfold external_typing, ext_typing in Hexttype.
         remove_bools_options => /=.
-        eapply ext_func_typing_extension in Hoption; eauto.
+         eapply ext_func_typing_extension in Hoption; eauto.
+         change (ext_func_typing s6 v = Some ft) in Hoption.
         by rewrite Hnthextv /= Hoption.
       }
       (* New *)
@@ -341,7 +344,9 @@ Proof.
         move => n' vref Hnthref.
         eapply Forall2_nth_impl' in Hreduce as [be [Hnthinit Hreduce]]; eauto.
         eapply Forall_lookup in Hconstbet as [Hconst Hbet]; eauto.
-        eapply init_value_typing; eauto.
+         change (value_typing (upd_s_types s6 registry) (VAL_ref vref)
+           (T_ref modelem_type) = true).
+         eapply init_value_typing; eauto.
         { move => m addr /= Hnth'.
           destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
           rewrite List.length_app List.length_map.

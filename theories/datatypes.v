@@ -1036,9 +1036,11 @@ Record moduleinst : Type := (* inst *) {
   inst_elems : list elemaddr;
   inst_datas : list dataaddr;
   inst_exports: list exportinst;  
+  (* Source type index -> canonical closed identity in the shared store. *)
+  inst_defined_types : list defined_type;
   }.
 
-Definition empty_moduleinst := Build_moduleinst nil nil nil nil nil nil nil nil.
+Definition empty_moduleinst := Build_moduleinst nil nil nil nil nil nil nil nil nil.
 
 
 (** We assume a family of host functions. **)
@@ -1088,6 +1090,8 @@ Record store_record : Type := (* s *) {
   s_globals : list globalinst;
   s_elems: list eleminst;
   s_datas: list datainst;
+  (* Append-only canonical groups shared by instantiated modules. *)
+  s_types : canonical_registry;
 }.
 
                             

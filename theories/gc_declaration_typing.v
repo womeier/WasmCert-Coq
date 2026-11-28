@@ -168,6 +168,12 @@ Definition close_and_validate_type_groups groups source :
       if canonical_registry_validb groups then Some (groups, types) else None
   end.
 
+(** Binary function declarations are singleton final recursive groups.
+    This embedding is the migration path for the existing function-only
+    module section; explicit recursive/aggregate syntax uses the same closer. *)
+Definition function_type_groups (types : list function_type) : list recursive_type :=
+  map (fun f => [Sub_type true [] (Comp_func f)]) types.
+
 (** Declarative matching reuses the independent abstract hierarchy. Exception
     heaps add their separate bottom edge; source indices have no abstract rule. *)
 Inductive shared_abstract_heap_matches : heap_type -> heap_type -> Prop :=

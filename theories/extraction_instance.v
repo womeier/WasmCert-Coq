@@ -208,8 +208,15 @@ End PP.
 
 Section Instantiation_func_extract.
 
+Definition resolve_type := resolve_inst_type.
+Definition expand_type := expand_inst_type.
+Definition expand_function := expand_inst_function_type.
+Definition native_function_type := native_func_defined_type.
+Definition lookup_function_type := lookup_func_defined_type.
+
 Definition empty_store_record : store_record := {|
     s_funcs := nil;
+    s_types := nil;
     s_tables := nil;
     s_mems := nil;
     s_globals := nil;
