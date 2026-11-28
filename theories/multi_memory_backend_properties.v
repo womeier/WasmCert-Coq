@@ -328,3 +328,84 @@ Proof.
   intros start count total Htotal Hcount Hrange.
   unfold native63_signed. repeat split; intros; lia.
 Qed.
+
+(** Pure observation algebra of the inverse diffs used by rerootk.
+    Native BlockUpdated rotation saves the current block before restoring the
+    requested version, then installs the saved block as the inverse edge.
+    These identities verify that transformation at the byte/value-view level.
+    They do not supply a heap interpretation for Obj.t arrays or prove that
+    every actual mutable graph is well formed and implements these views. *)
+Definition block_view {A} (before: N -> A) start count (values: N -> A) i :=
+  if andb (N.leb start i) (N.ltb i (start + count))
+  then values (i - start)%N else before i.
+
+Theorem block_view_restore : forall A (before saved: N -> A) start count i,
+  block_view (block_view before start count saved) start count
+    (fun offset => before (start + offset)%N) i = before i.
+Proof.
+  intros A before saved start count i. unfold block_view.
+  destruct (andb (N.leb start i) (N.ltb i (start + count))) eqn:Hinside.
+  - apply Bool.andb_true_iff in Hinside. destruct Hinside as [Hlo Hhi].
+    apply N.leb_le in Hlo.
+    now replace (start + (i - start))%N with i by lia.
+  - reflexivity.
+Qed.
+
+Theorem block_view_saved_range : forall A (before saved: N -> A) start count offset,
+  (offset < count)%N ->
+  block_view before start count saved (start + offset)%N = saved offset.
+Proof.
+  intros A before saved start count offset Hoffset. unfold block_view.
+  assert (N.leb start (start + offset) = true) as Hlo by (apply N.leb_le; lia).
+  assert (N.ltb (start + offset) (start + count) = true) as Hhi by
+    (apply N.ltb_lt; lia).
+  rewrite Hlo Hhi.
+  now replace (start + offset - start)%N with offset by lia.
+Qed.
+
+Definition point_view {A} (before: N -> A) pos value i :=
+  if N.eqb i pos then value else before i.
+
+Theorem point_view_restore : forall A (before: N -> A) pos saved i,
+  point_view (point_view before pos saved) pos (before pos) i = before i.
+Proof.
+  intros A before pos saved i. unfold point_view.
+  destruct (N.eqb i pos) eqn:Heq; [now apply N.eqb_eq in Heq; subst|reflexivity].
+Qed.
+
+Record block_diff (A: Type) := {
+  diff_start: N;
+  diff_count: N;
+  diff_values: N -> A
+}.
+
+Fixpoint diff_path_view {A} (path: list (block_diff A)) (root: N -> A) :=
+  match path with
+  | nil => root
+  | diff :: tail =>
+      block_view (diff_path_view tail root)
+        (diff_start diff) (diff_count diff) (diff_values diff)
+  end.
+
+Theorem diff_path_extensional : forall A (path: list (block_diff A)) first second,
+  (forall i, first i = second i) ->
+  forall i, diff_path_view path first i = diff_path_view path second i.
+Proof.
+  intros A path. induction path as [|diff tail IH]; intros first second Hsame i.
+  - exact (Hsame i).
+  - cbn [diff_path_view]. unfold block_view.
+    destruct (andb (N.leb (diff_start diff) i)
+      (N.ltb i (diff_start diff + diff_count diff)));
+      [reflexivity|now apply IH].
+Qed.
+
+Theorem inverse_rotation_preserves_descendant_views :
+  forall A (path: list (block_diff A)) before saved start count i,
+  diff_path_view path
+    (block_view (block_view before start count saved) start count
+      (fun offset => before (start + offset)%N)) i =
+    diff_path_view path before i.
+Proof.
+  intros. apply diff_path_extensional.
+  intros j. apply block_view_restore.
+Qed.

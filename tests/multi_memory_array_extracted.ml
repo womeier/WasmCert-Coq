@@ -66,4 +66,16 @@ let () =
     (Big_int_Z.eq_big_int (mv_length source) (n 4) &&
      Big_int_Z.eq_big_int (mv_length grown) (n 7) &&
      Big_int_Z.eq_big_int (mv_length regrown) (n 8));
+  let modified_spare = some (mv_update_gen (n 7) (n 1) (fun _ -> byte 99) regrown) in
+  check "newly exposed capacity can be updated in its own version"
+    (bytes modified_spare 8 = [90; 2; 3; 4; 0; 0; 0; 99]);
+  check "old in-capacity grown version retains default byte"
+    (bytes regrown 8 = [90; 2; 3; 4; 0; 0; 0; 0]);
+  check "older shorter version still rejects spare capacity lookup"
+    (mv_lookup (n 7) grown = None);
+  let grown_again = some (mv_grow (n 1) grown) in
+  check "growth from an older snapshot restores its own initialized-zero invariant"
+    (bytes grown_again 8 = [90; 2; 3; 4; 0; 0; 0; 0]);
+  check "rerooting older growth does not destroy later modified version"
+    (bytes modified_spare 8 = [90; 2; 3; 4; 0; 0; 0; 99]);
   Printf.printf "Multi-memory extracted array: %d/%d checks passed\n" !checks !checks
