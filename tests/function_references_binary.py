@@ -117,6 +117,10 @@ table_cases = [
      "01700002", 0, "i32.const 2"),
     ("table_nonnull_function_initializer", "41002500d141012500d16a",
      "01400064700002d2000b", 0, "i32.const 0"),
+    ("table_nonnull_indirect_call", "4100110000",
+     "01400064700001d2000b", 0, "i32.const 42"),
+    ("table_nonnull_indirect_tail_call", "4100130000",
+     "01400064700001d2000b", 0, "i32.const 42"),
     ("table_nonnull_default_rejected", "4107",
      "0164700002", 123, "Module type checking failure:"),
     ("table_nonnull_null_initializer_rejected", "4107",
@@ -183,12 +187,31 @@ def check_imported_initializer(directory):
         raise AssertionError(f"table_imported_immutable: exit {result.returncode}; {output!r}")
 
 
+def check_exported_reference_argument(directory):
+    data = bytes.fromhex(
+        "0061736d01000000 010a026000017f60016f017f 0303020001 "
+        "070801046d61696e0001 0a0c020400412a0b05002000d10b"
+    )
+    encoded = "".join(f"\\{b:02x}" for b in data)
+    path = pathlib.Path(directory) / "exported_reference_argument.wast"
+    path.write_text(
+        f'(module binary "{encoded}")\n'
+        '(assert_return (invoke "main" (ref.extern 23)) (i32.const 0))\n'
+        '(assert_return (invoke "main" (ref.null extern)) (i32.const 1))\n'
+    )
+    result = subprocess.run([exe, "--wast", str(path)], capture_output=True, text=True)
+    output = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout + result.stderr)
+    if result.returncode != 0 or "Result: 3/3 (100.00%)" not in output:
+        raise AssertionError(f"exported_reference_argument: exit {result.returncode}; {output!r}")
+
+
 with tempfile.TemporaryDirectory() as directory:
     for name, body, status, expected in cases:
         check_case(directory, name, body, status, expected)
     for name, body, table, status, expected in table_cases:
         check_case(directory, name, body, status, expected, table=table, declare=False)
     check_imported_initializer(directory)
+    check_exported_reference_argument(directory)
 
-total = len(cases) + len(table_cases) + 1
+total = len(cases) + len(table_cases) + 2
 print(f"function-reference binary runtime regressions: {total}/{total}")

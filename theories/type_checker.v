@@ -308,7 +308,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       | BI_call_indirect x y =>
           match lookup_N C.(tc_tables) x with
           | Some tabt =>
-                if tabt.(tt_elem_type) == T_funcref then
+                if ref_heap tabt.(tt_elem_type) == HT_func then
                 match lookup_N (tc_types C) y with
                 | Some (Tf tn tm) =>
                     type_update ts ((T_num T_i32 :: tn)) tm
@@ -334,7 +334,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           | Some t2s =>
               match lookup_N C.(tc_tables) x with
               | Some tabt =>
-                    if tabt.(tt_elem_type) == T_funcref then
+                    if ref_heap tabt.(tt_elem_type) == HT_func then
                     match lookup_N (tc_types C) y with
                     | Some (Tf tn tm) =>
                         if (t2s == tm) then

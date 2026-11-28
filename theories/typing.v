@@ -270,7 +270,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   be_typing C [::BI_call i] tf
 | bet_call_indirect : forall C x y tabtype t1s t2s,
   lookup_N (tc_tables C) x = Some tabtype ->
-  tabtype.(tt_elem_type) = T_funcref ->
+  ref_heap tabtype.(tt_elem_type) = HT_func ->
   lookup_N (tc_types C) y = Some (Tf t1s t2s) ->
   be_typing C [::BI_call_indirect x y] (Tf (t1s ++ [::T_num T_i32]) t2s)
 | bet_return_call : forall C x t1s t2s t3s t4s,
@@ -279,7 +279,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   be_typing C [::BI_return_call x] (Tf (t3s ++ t1s) t4s)
 | bet_return_call_indirect : forall C x y tabt t1s t2s t3s t4s,
   lookup_N (tc_tables C) x = Some tabt ->
-  tabt.(tt_elem_type) = T_funcref ->
+  ref_heap tabt.(tt_elem_type) = HT_func ->
   lookup_N (tc_types C) y = Some (Tf t1s t2s) -> 
   tc_return C = Some t2s ->
   be_typing C [::BI_return_call_indirect x y] (Tf (t3s ++ t1s ++ [::T_num T_i32]) t4s)
