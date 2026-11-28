@@ -44,6 +44,17 @@
  (libraries wasmcert_extracted parray zarith))
 
 (rule
+ (target section_framing_binary.wast)
+ (deps section_framing_binary.py)
+ (action (run python3 %{dep:section_framing_binary.py} %{target})))
+
+(rule
+ (alias runtest)
+ (deps section_framing_binary.wast)
+ (action
+  (bash "set -o pipefail; %{exe:../src/wasm_coq_interpreter.exe} --wast %{dep:section_framing_binary.wast} | grep 'Result: 30/30 '")))
+
+(rule
  (alias runtest)
  (deps run_wast_test.sh ../run_wast.sh)
  (action (run bash %{dep:run_wast_test.sh} %{dep:../run_wast.sh})))

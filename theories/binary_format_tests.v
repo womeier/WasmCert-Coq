@@ -10,6 +10,23 @@ From Wasm Require Import binary_format_parser binary_format_printer
 Definition empty_module_header : list Byte.byte :=
   x00 :: x61 :: x73 :: x6d :: x01 :: x00 :: x00 :: x00 :: nil.
 
+Lemma type_section_size_zero_rejected :
+  run_parse_module (empty_module_header ++ (x01 :: x00 :: x00 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma type_section_size_too_large_rejected :
+  run_parse_module (empty_module_header ++ (x01 :: x02 :: x00 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma data_count_section_size_mismatch_rejected :
+  run_parse_module (empty_module_header ++ (x0c :: x02 :: x00 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma section_payload_cannot_include_next_section :
+  run_parse_module
+    (empty_module_header ++ (x01 :: x04 :: x00 :: x03 :: x01 :: x00 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
 Lemma padded_empty_type_vector :
   run_parse_module
     (empty_module_header ++ (x01 :: x02 :: x80 :: x00 :: nil)) =

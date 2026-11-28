@@ -841,7 +841,7 @@ Arguments MkLanguage {_}.
 Context
   {Tok : Type} {A B : Type} {n : nat}.
 
-Definition language : [ Language ] := Fix Language (fun k rec =>
+Definition language_step k (rec : Box Language k) : Language k :=
   let be_aux := Induction.map _be _ rec in
   let bes_end_with_x0b_aux := Induction.map _bes_end_with_x0b _ rec in
   let bes_end_with_x05_aux := Induction.map _bes_end_with_x05 _ rec in
@@ -884,7 +884,9 @@ Definition language : [ Language ] := Fix Language (fun k rec =>
     ((nil, nil) <$ exact_byte x0b) <|>
     (((fun x => (nil, x)) <$ exact_byte x05) <*> parse_bes_end_with_x0b) <|>
     (((fun x '(y, z) => (cons x y, z)) <$> parse_be) <*> bes_end_with_x0b_or_x05_ctd_aux) in
-  MkLanguage parse_be parse_bes_end_with_x0b parse_bes_end_with_x05 parse_bes_end_with_x0b_or_x05_ctd).
+  MkLanguage parse_be parse_bes_end_with_x0b parse_bes_end_with_x05 parse_bes_end_with_x0b_or_x05_ctd.
+
+Definition language : [ Language ] := Fix Language language_step.
 
 Definition parse_be : [ byte_parser basic_instruction ] := fun n => _be n (language n).
 Definition parse_bes_end_with_x0b : [ byte_parser (list basic_instruction) ] := fun n => _bes_end_with_x0b n (language n).
@@ -1085,42 +1087,47 @@ Definition parse_customsec {n} : byte_parser (name * list byte) n :=
             parse_vec_aux anyTok sz_leftover
          ))).
          
-(* Low priority: check that the sections have the correct byte sizes? *)
+(* Section lengths frame the payload, excluding the id and size header.
+   Do not discard them: doing so accepts truncated/overlong sections and
+   invalidates whole-module grammar soundness. *)
+Definition parse_section_payload {A n} (p : byte_parser A n) : byte_parser A n :=
+  parse_u32_as_N >>= (fun sz => assert_sized p (fun actual => N.eqb sz actual)).
+
 Definition parse_typesec {n} : byte_parser (list function_type) n :=
-  exact_byte x01 &> parse_u32_as_N &> parse_vec parse_function_type.
+  exact_byte x01 &> parse_section_payload (parse_vec parse_function_type).
 
 Definition parse_importsec {n} : byte_parser (list module_import) n :=
-  exact_byte x02 &> parse_u32_as_N &> parse_vec parse_module_import.
+  exact_byte x02 &> parse_section_payload (parse_vec parse_module_import).
 
 Definition parse_funcsec {n} : byte_parser (list typeidx) n :=
-  exact_byte x03 &> parse_u32_as_N &> parse_vec parse_typeidx.
+  exact_byte x03 &> parse_section_payload (parse_vec parse_typeidx).
 
 Definition parse_tablesec {n} : byte_parser (list module_table) n :=
-  exact_byte x04 &> parse_u32_as_N &> parse_vec parse_module_table.
+  exact_byte x04 &> parse_section_payload (parse_vec parse_module_table).
 
 Definition parse_memsec {n} : byte_parser (list module_mem) n :=
-  exact_byte x05 &> parse_u32_as_N &> parse_vec parse_module_mem.
+  exact_byte x05 &> parse_section_payload (parse_vec parse_module_mem).
 
 Definition parse_globalsec {n} : byte_parser (list module_global) n :=
-  exact_byte x06 &> parse_u32_as_N &> parse_vec parse_module_global.
+  exact_byte x06 &> parse_section_payload (parse_vec parse_module_global).
 
 Definition parse_exportsec {n} : byte_parser (list module_export) n :=
-  exact_byte x07 &> parse_u32_as_N &> parse_vec parse_module_export.
+  exact_byte x07 &> parse_section_payload (parse_vec parse_module_export).
 
 Definition parse_startsec {n} : byte_parser module_start n :=
-  exact_byte x08 &> parse_u32_as_N &> parse_module_start.
+  exact_byte x08 &> parse_section_payload parse_module_start.
 
 Definition parse_elemsec {n} : byte_parser (list module_element) n :=
-  exact_byte x09 &> parse_u32_as_N &> parse_vec parse_module_element.
+  exact_byte x09 &> parse_section_payload (parse_vec parse_module_element).
 
 Definition parse_codesec {n} : byte_parser (list module_func_without_type) n :=
-  exact_byte x0a &> parse_u32_as_N &> parse_vec parse_code.
+  exact_byte x0a &> parse_section_payload (parse_vec parse_code).
 
 Definition parse_datasec {n} : byte_parser (list module_data) n :=
-  exact_byte x0b &> parse_u32_as_N &> parse_vec parse_module_data.
+  exact_byte x0b &> parse_section_payload (parse_vec parse_module_data).
 
 Definition parse_datacountsec {n} : byte_parser N n :=
-  exact_byte x0c &> parse_u32_as_N &> parse_u32_as_N.
+  exact_byte x0c &> parse_section_payload parse_u32_as_N.
 
 Definition parse_magic {n} : byte_parser unit n :=
   (exact_byte x00 &> exact_byte x61 &> exact_byte x73 &> exact_byte x6d) $> tt.
