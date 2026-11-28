@@ -35,6 +35,21 @@ Proof.
   inversion Hgrammar; subst; reflexivity.
 Qed.
 
+Lemma parse_concrete_valtype_sound : forall n m (input : SizedList Byte.byte m)
+    type suffix (Hle : (m <= n)%nat),
+    option_map observe_reader
+      (runParser (parse_value_type :
+        Parser (SizedList Byte.byte) Byte.byte option value_type n)
+        Hle input) = Some (type, suffix) ->
+    concrete_valtype_prefix (@Sized.value _ _ _ input) type suffix.
+Proof.
+  intros n m [input Hlength] type suffix Hle Hobs.
+  destruct input as [|b input]; cbn in Hlength; subst m.
+  - discriminate.
+  - destruct b; cbn in Hobs; try discriminate;
+      inversion Hobs; subst; constructor.
+Qed.
+
 Inductive local_decl_prefix :
     list Byte.byte -> (N * value_type) -> list Byte.byte -> Prop :=
 | local_decl_bytes : forall input count middle type suffix,
@@ -72,6 +87,53 @@ Proof.
   apply parse_vec_complete with (element := local_decl_prefix).
   - intros. now apply parse_local_decl_prefix.
   - exact Hgrammar.
+Qed.
+
+Lemma parse_local_decl_sound : forall n m (input : SizedList Byte.byte m)
+    decl suffix (Hle : (m <= n)%nat),
+    option_map observe_reader
+      (runParser (parse_locals :
+        Parser (SizedList Byte.byte) Byte.byte option (N * value_type) n)
+        Hle input) = Some (decl, suffix) ->
+    local_decl_prefix (@Sized.value _ _ _ input) decl suffix.
+Proof.
+  intros n m input [count type] suffix Hle Hobs.
+  destruct (parser_and_prefix_sound _ _ n parse_u32_as_N parse_value_type
+    u32_prefix concrete_valtype_prefix
+    (fun k Hkn tokens value rest =>
+      proj1 (parse_u32_as_N_correct n k Hkn tokens value rest))
+    (fun k Hkn tokens value rest =>
+      parse_concrete_valtype_sound n k tokens value rest Hkn)
+    m Hle input count type suffix Hobs) as [middle [Hcount Htype]].
+  econstructor; eassumption.
+Qed.
+
+Theorem parse_local_vector_sound :
+    forall n m (input : SizedList Byte.byte m)
+      decls suffix (Hle : (m <= n)%nat),
+    option_map observe_reader
+      (runParser (parse_vec parse_locals :
+        Parser (SizedList Byte.byte) Byte.byte option (list (N * value_type)) n)
+        Hle input) = Some (decls, suffix) ->
+    vector_prefix local_decl_prefix (@Sized.value _ _ _ input) decls suffix.
+Proof.
+  intros n m input decls suffix Hle Hobs.
+  eapply parse_vec_sound with (parser := parse_locals); [|exact Hobs].
+  intros. eapply parse_local_decl_sound; eassumption.
+Qed.
+
+Corollary parse_local_vector_correct :
+    forall n m (input : SizedList Byte.byte m)
+      decls suffix (Hle : (m <= n)%nat),
+    option_map observe_reader
+      (runParser (parse_vec parse_locals :
+        Parser (SizedList Byte.byte) Byte.byte option (list (N * value_type)) n)
+        Hle input) = Some (decls, suffix) <->
+    vector_prefix local_decl_prefix (@Sized.value _ _ _ input) decls suffix.
+Proof.
+  intros. split.
+  - eapply parse_local_vector_sound.
+  - eapply parse_local_vector_prefix.
 Qed.
 
 Definition locals_total (decls : list (N * value_type)) :=

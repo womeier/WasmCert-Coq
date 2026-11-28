@@ -206,3 +206,165 @@ Proof.
     inversion Hbody; subst parsed tail.
     reflexivity.
 Qed.
+
+Lemma elements_prefix_app : forall A
+    (element : list byte -> A -> list byte -> Prop) input first middle,
+    elements_prefix element input first middle ->
+    forall second suffix, elements_prefix element middle second suffix ->
+    elements_prefix element input (List.app first second) suffix.
+Proof.
+  intros A element input first middle Hfirst.
+  induction Hfirst as [middle |
+    input value after values middle Hhead Htail IH]; intros second suffix Hsecond.
+  - exact Hsecond.
+  - cbn [List.app]. econstructor; [exact Hhead | now apply IH].
+Qed.
+
+Definition vector_chunk_prefix {A}
+    (element : list byte -> A -> list byte -> Prop) p input values suffix :=
+  List.length values = Pos.to_nat p /\
+    elements_prefix element input values suffix.
+
+Theorem parse_vec_aux_positive_sound : forall A
+    (element : list byte -> A -> list byte -> Prop) p n
+    (parser : Parser (SizedList byte) byte option A n),
+    (forall m (Hle : (m <= n)%nat) (input : SizedList byte m) value suffix,
+      option_map observe_reader (runParser parser Hle input) =
+        Some (value, suffix) ->
+      element (@Sized.value _ _ _ input) value suffix) ->
+    forall m (Hle : (m <= n)%nat) (input : SizedList byte m) values suffix,
+    option_map observe_reader
+      (runParser (parse_vec_aux_positive parser p) Hle input) =
+      Some (values, suffix) ->
+    vector_chunk_prefix element p (@Sized.value _ _ _ input) values suffix.
+Proof.
+  intros A element p.
+  induction p as [p IH | p IH |]; intros n parser Hparser m Hle input
+    values suffix Hobs.
+  - change (option_map observe_reader
+      (runParser (Combinators.map
+        (fun '(head, (part1, part2)) => head :: List.app part1 part2)
+        (Combinators.and parser
+          (Combinators.and (parse_vec_aux_positive parser p)
+            (parse_vec_aux_positive parser p)))) Hle input) =
+      Some (values, suffix)) in Hobs.
+    apply parser_map_prefix_inv in Hobs as
+      [[value [first second]] [Hvalues Hpair]].
+    subst values.
+    assert (Hpair_sound :
+      forall k (Hkn : (k <= n)%nat) (tokens : SizedList byte k) parts rest,
+      option_map observe_reader
+        (runParser (Combinators.and (parse_vec_aux_positive parser p)
+          (parse_vec_aux_positive parser p)) Hkn tokens) = Some (parts, rest) ->
+      exists middle,
+        vector_chunk_prefix element p (@Sized.value _ _ _ tokens)
+          (fst parts) middle /\
+        vector_chunk_prefix element p middle (snd parts) rest).
+    { intros k Hkn tokens [part1 part2] rest Hparts.
+      exact (parser_and_prefix_sound _ _ n _ _
+        (vector_chunk_prefix element p) (vector_chunk_prefix element p)
+        (IH n parser Hparser) (IH n parser Hparser)
+        k Hkn tokens part1 part2 rest Hparts). }
+    destruct (parser_and_prefix_sound _ _ n parser
+      (Combinators.and (parse_vec_aux_positive parser p)
+        (parse_vec_aux_positive parser p)) element
+      (fun bytes parts rest => exists middle,
+        vector_chunk_prefix element p bytes (fst parts) middle /\
+        vector_chunk_prefix element p middle (snd parts) rest)
+      Hparser Hpair_sound m Hle input value (first, second) suffix Hpair)
+      as [middle [Hhead [after [[Hfirst_len Hfirst] [Hsecond_len Hsecond]]]]].
+    split.
+    + cbn in Hfirst_len, Hsecond_len.
+      cbn [List.length]. rewrite List.length_app, Pos2Nat.inj_xI. lia.
+    + eapply elements_cons; [exact Hhead |].
+      eapply elements_prefix_app; eassumption.
+  - change (option_map observe_reader
+      (runParser (Combinators.map
+        (fun '(part1, part2) => List.app part1 part2)
+        (Combinators.and (parse_vec_aux_positive parser p)
+          (parse_vec_aux_positive parser p))) Hle input) =
+      Some (values, suffix)) in Hobs.
+    apply parser_map_prefix_inv in Hobs as [[first second] [Hvalues Hpair]].
+    subst values.
+    destruct (parser_and_prefix_sound _ _ n _ _
+      (vector_chunk_prefix element p) (vector_chunk_prefix element p)
+      (IH n parser Hparser) (IH n parser Hparser)
+      m Hle input first second suffix Hpair)
+      as [middle [[Hfirst_len Hfirst] [Hsecond_len Hsecond]]].
+    split.
+    + rewrite List.length_app, Pos2Nat.inj_xO. lia.
+    + eapply elements_prefix_app; eassumption.
+  - cbn [parse_vec_aux_positive] in Hobs.
+    apply parser_map_prefix_inv in Hobs as [value [Hvalues Hvalue]].
+    subst values.
+    split; [reflexivity |].
+    econstructor; [exact (Hparser m Hle input value suffix Hvalue) | constructor].
+Qed.
+
+Theorem parse_vec_sound : forall A
+    (element : list byte -> A -> list byte -> Prop) n
+    (parser : Parser (SizedList byte) byte option A n),
+    (forall m (Hle : (m <= n)%nat) (input : SizedList byte m) value suffix,
+      option_map observe_reader (runParser parser Hle input) =
+        Some (value, suffix) ->
+      element (@Sized.value _ _ _ input) value suffix) ->
+    forall m (Hle : (m <= n)%nat) (input : SizedList byte m) values suffix,
+    option_map observe_reader (runParser (parse_vec parser) Hle input) =
+      Some (values, suffix) ->
+    vector_prefix element (@Sized.value _ _ _ input) values suffix.
+Proof.
+  intros A element n parser Hparser m Hle [input Hlength] values suffix Hobs.
+  destruct input as [|b input]; cbn in Hlength; subst m.
+  - discriminate.
+  - destruct (Byte.byte_eq_dec b x00) as [-> | Hbyte].
+    + change (Some (nil, input) = Some (values, suffix)) in Hobs.
+      inversion Hobs; subst values suffix.
+      exists input. split.
+      * apply decode_u32_correct. reflexivity.
+      * constructor.
+    + assert (Hneq : datatypes_properties.byte_eqb b x00 = false).
+      { unfold datatypes_properties.byte_eqb.
+        destruct (Byte.byte_eq_dec b x00); cbn; congruence. }
+      unfold parse_vec, parse_vec_length, Combinators.alt,
+        Combinators.cmap, Combinators.map, exact_byte, Combinators.guardM in Hobs.
+      cbn [runParser anyTok Success.getTok sizedList uncons listUncons
+        Success.fromView Success.guardM option_map uncurry Success.value
+        Success.size Success.small Success.leftovers] in Hobs.
+      unfold Combinators.map, Category.bind, Category.alt, Category.fmap,
+        fromOption, Success.guardM in Hobs.
+      cbn [runParser anyTok Success.getTok sizedList uncons listUncons
+        Success.fromView Success.guardM option_map uncurry Success.value
+        Success.size Success.small Success.leftovers
+        _bind _alt _fmap _pure _fail optionRawMonad optionRawAlternative
+        optionRawFunctor optionRawApplicative pure fail] in Hobs.
+      cbn -[parse_u32_as_N] in Hobs.
+      rewrite Hneq in Hobs. cbn -[parse_u32_as_N] in Hobs.
+      match goal with
+      | Hobs : context [runParser ?reader ?bound ?tokens] |- _ =>
+          pose proof (parse_u32_as_N_correct n _ bound tokens) as Hheader;
+          destruct (runParser reader bound tokens) as [result|] eqn:Hraw
+      end; [|discriminate].
+      destruct result as [count remaining Hsmall [body Hbody_length]].
+      assert (Hgrammar : u32_prefix (b :: input) count body).
+      { apply Hheader. reflexivity. }
+      destruct count as [|p].
+      * change (Some (nil, body) = Some (values, suffix)) in Hobs.
+        inversion Hobs; subst values suffix.
+        exists body. split; [exact Hgrammar | constructor].
+      * cbn [Combinators.bind Combinators.andbind Combinators.map
+          Combinators.box le_close Combinators.le_lower call runParser] in Hobs.
+        cbn -[parse_vec_aux_positive] in Hobs.
+        match goal with
+        | Hobs : context [runParser ?reader ?bound ?tokens] |- _ =>
+            pose proof (parse_vec_aux_positive_sound A element p n parser Hparser
+              _ bound tokens) as Hchunk;
+            destruct (runParser reader bound tokens) as [result|]
+        end; [|discriminate].
+        destruct result as [parsed after Hafter_small [rest Hrest_length]].
+        change (Some (parsed, rest) = Some (values, suffix)) in Hobs.
+        inversion Hobs; subst values suffix.
+        destruct (Hchunk parsed rest eq_refl) as [Hlen Helements].
+        exists body. split; [|exact Helements].
+        rewrite Hlen. change (u32_prefix (b :: input) (N.of_nat (N.to_nat (N.pos p))) body).
+        now rewrite N2Nat.id.
+Qed.

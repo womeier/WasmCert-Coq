@@ -180,3 +180,87 @@ Proof.
   inversion Hnext; subst v rest.
   reflexivity.
 Qed.
+
+Lemma parser_map_prefix_inv : forall A B n m (Hle : (m <= n)%nat)
+    (parser : Parser (SizedList byte) byte option A n)
+    (f : A -> B) (input : SizedList byte m) value suffix,
+    option_map observe_reader
+      (runParser (Combinators.map f parser) Hle input) =
+      Some (value, suffix) ->
+    exists original, f original = value /\
+      option_map observe_reader (runParser parser Hle input) =
+        Some (original, suffix).
+Proof.
+  intros A B n m Hle parser f input value suffix Hobs.
+  unfold Combinators.map in Hobs; cbn [runParser] in Hobs.
+  destruct (runParser parser Hle input) as [result|]; [|discriminate].
+  destruct result as [original remaining Hsmall [rest Hlength]].
+  change (Some (f original, rest) = Some (value, suffix)) in Hobs.
+  inversion Hobs; subst value suffix.
+  exists original. split; reflexivity.
+Qed.
+
+Lemma parser_alt_prefix_inv : forall A n m (Hle : (m <= n)%nat)
+    (first second : Parser (SizedList byte) byte option A n)
+    (input : SizedList byte m) value suffix,
+    option_map observe_reader
+      (runParser (Combinators.alt first second) Hle input) =
+      Some (value, suffix) ->
+    option_map observe_reader (runParser first Hle input) =
+      Some (value, suffix) \/
+    option_map observe_reader (runParser second Hle input) =
+      Some (value, suffix).
+Proof.
+  intros A n m Hle first second input value suffix Hobs.
+  unfold Combinators.alt in Hobs; cbn [runParser] in Hobs.
+  destruct (runParser first Hle input).
+  - left. exact Hobs.
+  - right. exact Hobs.
+Qed.
+
+Lemma parser_and_prefix_sound : forall A B n
+    (first : Parser (SizedList byte) byte option A n)
+    (second : Parser (SizedList byte) byte option B n)
+    (first_grammar : list byte -> A -> list byte -> Prop)
+    (second_grammar : list byte -> B -> list byte -> Prop),
+    (forall m (Hle : (m <= n)%nat) (input : SizedList byte m) value suffix,
+      option_map observe_reader (runParser first Hle input) =
+        Some (value, suffix) ->
+      first_grammar (@Sized.value _ _ _ input) value suffix) ->
+    (forall m (Hle : (m <= n)%nat) (input : SizedList byte m) value suffix,
+      option_map observe_reader (runParser second Hle input) =
+        Some (value, suffix) ->
+      second_grammar (@Sized.value _ _ _ input) value suffix) ->
+    forall m (Hle : (m <= n)%nat) (input : SizedList byte m) a b suffix,
+    option_map observe_reader
+      (runParser (Combinators.and first second) Hle input) =
+      Some ((a, b), suffix) ->
+    exists middle,
+      first_grammar (@Sized.value _ _ _ input) a middle /\
+      second_grammar middle b suffix.
+Proof.
+  intros A B n first second first_grammar second_grammar
+    Hfirst Hsecond m Hle input a b suffix Hobs.
+  unfold Combinators.and, Combinators.andbind in Hobs; cbn [runParser] in Hobs.
+  destruct (runParser first Hle input) as [result|] eqn:Hraw;
+    [|discriminate].
+  destruct result as [v remaining Hsmall [middle Hlength]].
+  cbn [Combinators.box le_close Combinators.le_lower call runParser] in Hobs.
+  cbn in Hobs.
+  match goal with
+  | Hobs : context [runParser ?parser ?bound ?tokens] |- _ =>
+      pose proof (Hsecond _ bound tokens) as Hsecond_at;
+      change (forall value rest,
+        option_map observe_reader (runParser parser bound tokens) =
+          Some (value, rest) ->
+        second_grammar middle value rest) in Hsecond_at;
+      destruct (runParser parser bound tokens) as [result|]
+  end; [|discriminate].
+  destruct result as [w after Hafter_small [rest Hafter_length]].
+  change (Some ((v, w), rest) = Some ((a, b), suffix)) in Hobs.
+  inversion Hobs; subst a b suffix.
+  exists middle. split.
+  - apply Hfirst with (Hle := Hle) (input := input).
+    rewrite Hraw. reflexivity.
+  - apply Hsecond_at. reflexivity.
+Qed.
