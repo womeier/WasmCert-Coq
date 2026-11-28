@@ -59,6 +59,44 @@ let run projection =
   let proceed (hs, initial_store) =
   let host = ref hs and store = ref initial_store in
   let bindings = ref M.empty and default = ref None in
+  let diagnostics = ref [] in
+  let at values index =
+    if Z.fits_int index then List.nth_opt values (Z.to_int index) else None
+  in
+  let id_json id = `List [`String (Z.to_string id.Extract.defined_group);
+                         `String (Z.to_string id.Extract.defined_member)] in
+  let tag_diagnostics m =
+    match Extract.close_and_validate_type_groups (!store).Extract.s_types m.Extract.mod_types with
+    | None -> []
+    | Some (registry, names) ->
+        List.filter_map (fun imp ->
+          match imp.Extract.imp_desc with
+          | Extract.MID_tag index ->
+              let raw name = String.of_seq (List.to_seq name) in
+              let supplied = Execute.get_ext_import !host
+                (raw imp.Extract.imp_module, raw imp.Extract.imp_name) in
+              let actual = match supplied with
+                | Some (Extract.EV_tag address) -> at (!store).Extract.s_tag_ids address
+                | _ -> None in
+              let expected = at names index in
+              let equivalent = match actual, expected with
+                | Some a, Some e -> Extract.defined_type_equiv registry a e
+                | _ -> false in
+              let portable = match supplied,
+                Extract.module_import_desc_typer (List.concat m.Extract.mod_types) imp.Extract.imp_desc with
+                | Some (Extract.EV_tag address), Some (Extract.ET_tag expected_ps) ->
+                    (match at (!store).Extract.s_tags address with
+                     | Some actual_ps -> Extract.portable_tag_parameters actual_ps expected_ps
+                     | None -> false)
+                | _ -> false in
+              Some (`Assoc [
+                "source_type_index", `String (Z.to_string index);
+                "actual_id", (match actual with None -> `Null | Some id -> id_json id);
+                "expected_id", (match expected with None -> `Null | Some id -> id_json id);
+                "canonical_equivalent", `Bool equivalent;
+                "portable_payloads", `Bool portable])
+          | _ -> None) m.Extract.mod_imports
+  in
   let resolve_module json key =
     match optional key json with
     | Some name -> require "action" ("unknown module " ^ name) (M.find_opt name !bindings)
@@ -75,7 +113,9 @@ let run projection =
      | None | Some "binary" -> ()
      | Some kind -> fail "projection" ("not a binary module: " ^ kind));
     let path = Filename.concat directory (field "filename" command) in
-    I.run_parse_module_str (read_binary path)
+    let parsed = I.run_parse_module_str (read_binary path) in
+    (match parsed with Some m -> diagnostics := tag_diagnostics m | None -> ());
+    parsed
   in
   let validate m =
     match Extract.module_type_checker m with
@@ -179,6 +219,7 @@ let run projection =
   in
   let passed = ref 0 in
   let results = List.mapi (fun i command ->
+    diagnostics := [];
     let provenance = member "provenance" command in
     let ordinal = match member "ordinal" provenance with
       | `Int n -> n | _ -> i + 1 in
@@ -188,7 +229,8 @@ let run projection =
       with exception_ -> false, Printexc.to_string exception_
     in
     `Assoc ["provenance", provenance; "type", member "type" command;
-      "passed", `Bool ok; "error", `String message]
+      "passed", `Bool ok; "error", `String message;
+      "tag_import_diagnostics", `List !diagnostics]
   ) commands in
   let report = `Assoc ["source", `String source; "passed", `Int !passed;
     "total", `Int (List.length commands); "commands", `List results] in

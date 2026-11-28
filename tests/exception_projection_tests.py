@@ -10,6 +10,7 @@ import sys
 import tempfile
 from unittest.mock import patch
 
+sys.dont_write_bytecode = True
 from prepare_exception_binary import forms, prepare
 
 
@@ -52,6 +53,66 @@ def tag_module(types, *, local=None, imported=None, export=True):
     if export:
         data += sec(7, b"\x01\x04main\x04\0")
     return data
+
+
+def reference_payload_producer(payload, null_payload=False):
+    body = (b"\xd0\x74" if null_payload else
+            b"\x02\x64\x69\x1f\x40\x01\x03\0\x08\0\x0b\0\x0b")
+    body += b"\x08\x01"
+    code = b"\0" + body + b"\x0b"
+    return (
+        b"\0asm\x01\0\0\0"
+        + sec(1, vec([b"\x60\0\0", b"\x60\x01" + payload + b"\0"]))
+        + sec(3, b"\x01\0") + sec(13, b"\x02\0\0\0\x01")
+        + sec(7, vec([b"\x04emit\0\0", b"\x04main\x04\x01"]))
+        + sec(10, vec([u32(len(code)) + code]))
+    )
+
+
+def reference_payload_consumer(payload, provider):
+    provider = provider.encode()
+    prefix = u32(len(provider)) + provider
+    code = (b"\0\x02" + payload + b"\x1f\x40\x01\0\0\0"
+            b"\x10\0\x0b\0\x0b\xd1\x0b")
+    return (
+        b"\0asm\x01\0\0\0"
+        + sec(1, vec([b"\x60\0\0", b"\x60\x01" + payload + b"\0",
+                      b"\x60\0\x01\x7f"]))
+        + sec(2, vec([prefix + b"\x04emit\0\0", prefix + b"\x04main\x04\0\x01"]))
+        + sec(3, b"\x01\x02") + sec(7, b"\x01\x04main\0\x01")
+        + sec(10, vec([u32(len(code)) + code]))
+    )
+
+
+def exception_payload_cases():
+    files, commands = {}, []
+    payloads = [b"\x69", b"\x64\x69", b"\x74", b"\x64\x74"]
+    for source, payload in enumerate(payloads):
+        provider = f"payload-{source}"
+        filename = provider + ".wasm"
+        files[filename] = tag_module([b"\x60\x01" + payload + b"\0"], local=0)
+        commands.extend([load(filename, provider),
+                         {"type": "register", "name": provider, "as": provider}])
+        for target, expected in enumerate(payloads):
+            filename = f"payload-{source}-to-{target}.wasm"
+            files[filename] = tag_module([b"\x60\x01" + expected + b"\0"],
+                                         imported=(provider, 0))
+            # Tag matching is invariant even where values may widen along the
+            # exception nullability/noexn subtype lattice.
+            commands.append(load(filename) if source == target else
+                            {"type": "assert_unlinkable", "filename": filename})
+    for number, payload in enumerate(payloads[:3]):
+        provider = f"payload-flow-{number}"
+        files[provider + ".wasm"] = reference_payload_producer(
+            payload, null_payload=number == 2)
+        files[provider + "-consumer.wasm"] = reference_payload_consumer(payload, provider)
+        commands.extend([
+            load(provider + ".wasm", provider),
+            {"type": "register", "name": provider, "as": provider},
+            load(provider + "-consumer.wasm"),
+            assertion("assert_return", [literal(1 if number == 2 else 0)]),
+        ])
+    return files, commands
 
 
 def literal(n):
@@ -218,6 +279,9 @@ def main(exe):
         {"type": "register", "name": "Reexport", "as": "reexport"},
         load("same-tag-import-again.wasm"),
     ]
+    payload_files, payload_commands = exception_payload_cases()
+    files.update(payload_files)
+    positive.extend(payload_commands)
     check_driver(exe, files, positive, len(positive))
     negative = [
         load("throw.wasm"), assertion("assert_trap"),

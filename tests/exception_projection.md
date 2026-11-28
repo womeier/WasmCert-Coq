@@ -236,3 +236,8 @@ is still required to replace this restriction with contextual closed payload
 typing. GC `b2fbd83` was inspected; no unfinished migration or competing runtime
 descriptor model was imported. Existing GC39 expansion and bidirectional
 equivalence contracts suffice for this nominal tag-linking increment.
+
+Additional indexed-payload probes deliberately remain red; their exact stages,
+canonical-ID diagnostics and the connected GC/common-parser handoff contracts
+are recorded in `exception_payload_handoff.md`. They are not included in the
+489/489 claim, and no text deferral is used for their binary failures.
