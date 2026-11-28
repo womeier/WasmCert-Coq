@@ -57,7 +57,7 @@ Proof.
     assert (Hfuel' : (0 < fuel)%nat).
     { destruct fuel; cbn [uleb_limit] in Hbound; lia. }
     assert (Hquot : value / 128 < uleb_limit fuel).
-    { apply N.div_lt_upper_bound; [discriminate | exact Hbound]. }
+    { apply N.Div0.div_lt_upper_bound. exact Hbound. }
     destruct (IH (value / 128) Hfuel' Hquot) as [bytes [Hencode Hprefix]].
     rewrite Hencode.
     exists (small_byte (value mod 128 + 128) :: bytes).

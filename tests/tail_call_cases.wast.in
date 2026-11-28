@@ -117,3 +117,15 @@
 (module binary
   "\00asm\01\00\00\00\01\04\01\60\00\00\03\02\01\00"
   "\0a\07\01\05\80\00\12\00\0b")
+
+;; A nonempty declaration vector may contain a zero-count declaration.
+(module binary
+  "\00asm\01\00\00\00\01\04\01\60\00\00\03\02\01\00"
+  "\0a\08\01\06\01\00\7f\12\00\0b")
+
+;; Individual counts fit u32, but their total must still be below 2^32.
+(assert_malformed
+  (module binary
+    "\00asm\01\00\00\00\01\04\01\60\00\00\03\02\01\00"
+    "\0a\0e\01\0c\02\ff\ff\ff\ff\0f\7f\01\7e\12\00\0b")
+  "too many locals")

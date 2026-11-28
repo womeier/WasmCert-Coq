@@ -24,6 +24,8 @@ relaxed-SIMD support are enabled. Generated binaries exercise the actual extract
 start function, a nonzero table index, null and mismatch traps, four malformed
 instruction immediates, cross-instance imported tail calls, incorrect function
 sizes, and permitted u32 padding in function-size and zero-local-count fields.
+It also covers zero-count entries in nonempty local vectors and aggregate local
+count overflow with individually valid u32 counts.
 Both `dune test` and CI run the checked-in fixtures without requiring wasm-tools.
 Binary invalid assertions must decode then fail validation; binary malformed
 assertions must fail decoding.

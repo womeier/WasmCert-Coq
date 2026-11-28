@@ -5,7 +5,8 @@ From Stdlib Require Import List Strings.Byte NArith PeanoNat Lia.
 From parseque Require Import Parseque Success.
 From Wasm Require Import datatypes_properties binary_format_parser
   binary_format_printer binary_uleb128 binary_uleb128_printer
-  binary_format_parser_properties tail_call_parser_properties
+  binary_format_parser_properties binary_vector_properties
+  binary_locals_properties tail_call_parser_properties
   tail_call_sequence_properties tail_call_codec_properties.
 
 Lemma parse_code_func_tail_prefix : forall n opcode b input instruction suffix
@@ -288,7 +289,7 @@ Proof.
   - pose proof (binary_of_tailidx_length table Htable).
     pose proof (binary_of_tailidx_length type Htype).
     cbn [binary_of_be List.length].
-    rewrite List.app_length. lia.
+    rewrite List.length_app. lia.
 Qed.
 
 Lemma empty_locals_single_body_bytes : forall instruction,
@@ -324,7 +325,7 @@ Proof.
   intros instruction Htail.
   pose proof (tail_instruction_print_length instruction Htail).
   rewrite empty_locals_single_body_bytes.
-  cbn [List.length]. rewrite List.app_length. cbn. lia.
+  cbn [List.length]. rewrite List.length_app. cbn. lia.
 Qed.
 
 Theorem tail_code_print_prefix : forall n type instruction suffix
@@ -354,7 +355,7 @@ Proof.
     cbn [modfunc_locals modfunc_body].
     rewrite <- List.app_assoc.
     now apply binary_of_tailidx_correct.
-  - rewrite List.app_length, Nat.add_sub. reflexivity.
+  - rewrite List.length_app, Nat.add_sub. reflexivity.
   - now apply tail_body_print_prefix.
 Qed.
 
@@ -371,4 +372,93 @@ Proof.
   pose proof (tail_code_print_prefix _ type instruction nil
     (Nat.le_refl _) Htail) as Hprefix.
   now rewrite List.app_nil_r in Hprefix.
+Qed.
+
+Definition locals_tail_body_prefix input locals instruction suffix :=
+  exists decls payload,
+    vector_prefix local_decl_prefix input decls payload /\
+    (locals_total decls < 4294967296)%N /\
+    locals = locals_expansion decls /\
+    (return_call_prefix payload instruction (x0b :: suffix) \/
+      return_call_indirect_prefix payload instruction (x0b :: suffix)).
+
+Theorem parse_code_func_locals_tail_prefix :
+    forall n m (input : SizedList Byte.byte m) locals instruction suffix
+      (Hle : (m <= n)%nat),
+    locals_tail_body_prefix (@Sized.value _ _ _ input)
+      locals instruction suffix ->
+    option_map observe_reader
+      (runParser (parse_code_func :
+        Parser (SizedList Byte.byte) Byte.byte option module_func_without_type n)
+        Hle input) = Some ((locals, instruction :: nil), suffix).
+Proof.
+  intros n m input locals instruction suffix Hle
+    [decls [payload [Hlocals [Htotal [Hexpand Hgrammar]]]]].
+  subst locals.
+  pose proof (parse_local_vector_prefix n m input decls payload Hle Hlocals)
+    as Hvec.
+  destruct (tail_prefix_has_immediate payload instruction _ Hgrammar)
+    as [opcode [b [rest [Hpayload Hopcode]]]].
+  subst payload.
+  unfold parse_code_func, Combinators.and, Combinators.andbind,
+    Combinators.guardM; cbn [runParser].
+  destruct (runParser (parse_vec parse_locals :
+    Parser (SizedList Byte.byte) Byte.byte option (list (N * value_type)) n)
+    Hle input) as [result|]; [|discriminate].
+  destruct result as [parsed remaining Hsmall [tail Hlength]].
+  cbn [observe_reader Success.value Success.leftovers Sized.value] in Hvec.
+  inversion Hvec; subst parsed tail.
+  cbn in Hlength. subst remaining.
+  cbn [Combinators.box le_close Combinators.le_lower call runParser].
+  cbn -[parse_expr verify_locals locals_expansion].
+  match goal with
+  | |- context [runParser ?parser ?bound ?tokens] =>
+      pose proof (parse_expr_tail_prefix_sized n _ tokens
+        opcode b rest instruction suffix bound eq_refl Hopcode Hgrammar)
+        as Hexpr;
+      change (option_map observe_reader (runParser parser bound tokens) =
+        Some (instruction :: nil, suffix)) in Hexpr;
+      destruct (runParser parser bound tokens) as [result|]
+  end; [|discriminate].
+  destruct result as [body remaining Hbody_small [tail Hbody_length]].
+  cbn [observe_reader Success.value Success.leftovers Sized.value] in Hexpr.
+  inversion Hexpr; subst body tail.
+  unfold Category.bind, fromOption, Success.guardM.
+  cbn -[verify_locals locals_expansion].
+  rewrite (verify_locals_accept decls Htotal).
+  reflexivity.
+Qed.
+
+Theorem parse_code_func_locals_overflow :
+    forall n m (input : SizedList Byte.byte m) decls payload
+      (Hle : (m <= n)%nat),
+    vector_prefix local_decl_prefix (@Sized.value _ _ _ input) decls payload ->
+    (4294967296 <= locals_total decls)%N ->
+    runParser (parse_code_func :
+      Parser (SizedList Byte.byte) Byte.byte option module_func_without_type n)
+      Hle input = None.
+Proof.
+  intros n m input decls payload Hle Hlocals Htotal.
+  pose proof (parse_local_vector_prefix n m input decls payload Hle Hlocals)
+    as Hvec.
+  unfold parse_code_func, Combinators.and, Combinators.andbind,
+    Combinators.guardM; cbn [runParser].
+  destruct (runParser (parse_vec parse_locals :
+    Parser (SizedList Byte.byte) Byte.byte option (list (N * value_type)) n)
+    Hle input) as [result|]; [|discriminate].
+  destruct result as [parsed remaining Hsmall [tail Hlength]].
+  cbn [observe_reader Success.value Success.leftovers Sized.value] in Hvec.
+  inversion Hvec; subst parsed tail.
+  subst remaining.
+  cbn [Combinators.box le_close Combinators.le_lower call runParser].
+  cbn -[parse_expr verify_locals].
+  match goal with
+  | |- context [runParser ?parser ?bound ?tokens] =>
+      destruct (runParser parser bound tokens) as [result|]
+  end; [|reflexivity].
+  destruct result as [body remaining Hbody_small tail].
+  unfold Category.bind, fromOption, Success.guardM.
+  cbn -[verify_locals].
+  rewrite (verify_locals_reject decls Htotal).
+  reflexivity.
 Qed.

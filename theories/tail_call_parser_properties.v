@@ -357,3 +357,23 @@ Proof.
   rewrite (parse_be_tail_opcode_exact _ input opcode (Nat.le_refl _) Hopcode).
   apply tail_call_parser_sound_complete.
 Qed.
+
+Lemma tail_prefix_has_immediate : forall input instruction suffix,
+    return_call_prefix input instruction suffix \/
+      return_call_indirect_prefix input instruction suffix ->
+    exists opcode b rest,
+      input = opcode :: b :: rest /\ (opcode = x12 \/ opcode = x13).
+Proof.
+  intros input instruction suffix Hgrammar.
+  destruct input as [|opcode input].
+  - destruct Hgrammar as [H | H]; inversion H.
+  - assert (Hopcode : opcode = x12 \/ opcode = x13).
+    { destruct Hgrammar as [H | H]; inversion H; auto. }
+    destruct input as [|b rest].
+    + destruct Hgrammar as [H | H]; inversion H; subst;
+        match goal with
+        | Hindex : u32_prefix nil _ _ |- _ =>
+            destruct Hindex as [Hindex _]; inversion Hindex
+        end.
+    + exists opcode, b, rest. auto.
+Qed.
