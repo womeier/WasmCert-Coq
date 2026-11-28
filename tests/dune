@@ -40,17 +40,26 @@
  (targets
   official_multi_memory_memory_size0.wast
   official_multi_memory_memory_size1.wast
-  official_multi_memory_memory_fill0.wast)
+  official_multi_memory_memory_fill0.wast
+  official_multi_memory_memory_copy0.wast
+  official_multi_memory_memory_copy1.wast
+  official_multi_memory_data_drop0.wast)
  (deps
   official_multi_memory_binary.py binary_fixtures.py
   ../wast_testsuite/proposals/multi-memory/memory_size0.wast
   ../wast_testsuite/proposals/multi-memory/memory_size1.wast
-  ../wast_testsuite/proposals/multi-memory/memory_fill0.wast)
+  ../wast_testsuite/proposals/multi-memory/memory_fill0.wast
+  ../wast_testsuite/proposals/multi-memory/memory_copy0.wast
+  ../wast_testsuite/proposals/multi-memory/memory_copy1.wast
+  ../wast_testsuite/proposals/multi-memory/data_drop0.wast)
  (action
   (run python3 %{dep:official_multi_memory_binary.py}
    %{dep:../wast_testsuite/proposals/multi-memory/memory_size0.wast}
    %{dep:../wast_testsuite/proposals/multi-memory/memory_size1.wast}
-   %{dep:../wast_testsuite/proposals/multi-memory/memory_fill0.wast})))
+   %{dep:../wast_testsuite/proposals/multi-memory/memory_fill0.wast}
+   %{dep:../wast_testsuite/proposals/multi-memory/memory_copy0.wast}
+   %{dep:../wast_testsuite/proposals/multi-memory/memory_copy1.wast}
+   %{dep:../wast_testsuite/proposals/multi-memory/data_drop0.wast})))
 
 (rule
  (alias runtest)
@@ -58,6 +67,9 @@
   official_multi_memory_memory_size0.wast
   official_multi_memory_memory_size1.wast
   official_multi_memory_memory_fill0.wast
+  official_multi_memory_memory_copy0.wast
+  official_multi_memory_memory_copy1.wast
+  official_multi_memory_data_drop0.wast
   ../run_wast.sh)
  (action
   (setenv EXE %{exe:../src/wasm_coq_interpreter.exe}
