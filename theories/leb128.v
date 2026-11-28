@@ -101,7 +101,17 @@ Definition encode_unsigned (n : N) : list byte :=
 Definition encode_signed_aux (z : Z) : list byte :=
   match z with
   | Z0 => cons x00 nil
-  | Zpos n' => make_msb_of_non_first_byte_one (binary_of_aux2 nil nil n')
+  | Zpos n' =>
+      let bs := binary_of_aux2 nil nil n' in
+      (* The most significant payload bit is the sign bit.  Unsigned
+         encodings whose top group has that bit set need a zero sign group. *)
+      let signed_bs :=
+        match bs with
+        | cons b _ =>
+            if N.leb 64 (Byte.to_N b) then cons x00 bs else bs
+        | nil => bs
+        end in
+      make_msb_of_non_first_byte_one signed_bs
   | Zneg n' => make_msb_of_non_first_byte_one
                 (bytes_of_bits
                    (complement_of_one_two

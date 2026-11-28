@@ -76,7 +76,22 @@ Definition parse_s64 {n} : byte_parser Wasm_int.Int64.int n :=
                  (Z.leb (-9223372036854775808)%Z x)) then
                   Some (Wasm_int.Int64.repr x)
                 else None)
-    (assert_sized (extract parse_signed n) (fun sz => N.leb sz 10)).
+   (assert_sized (extract parse_signed n) (fun sz => N.leb sz 10)).
+
+(** Heap type indices use s33, not u32: this keeps all u32 indices available
+    while reserving negative single-byte encodings for abstract heap types.
+    Keep this integer decoder separate from the shared heap-type syntax. *)
+Definition parse_s33 {n} : byte_parser Z n :=
+  guardM
+    (fun z =>
+       if andb (Z.leb (-4294967296) z) (Z.leb z 4294967295)
+       then Some z else None)
+    (assert_sized (extract parse_signed n) (fun sz => N.leb sz 5)).
+
+Definition parse_heap_typeidx {n} : byte_parser typeidx n :=
+  guardM
+    (fun z => if Z.leb 0 z then Some (Z.to_N z) else None)
+    parse_s33.
 
 Definition parse_vec_length {n} : byte_parser N n :=
   parse_u32_as_N.
@@ -101,7 +116,10 @@ Definition parse_vec_aux {B} {n} (f : byte_parser B n) (k : N)
 
 (* parsing a length-indexed list *)
 Definition parse_vec {B} {n} (f : byte_parser B n) : byte_parser (list B) n :=
-  exact_byte x00 $> nil <|>
+  (* Empty vectors can have a padded u32 length, not only the byte 0x00.
+     Return nil while consuming the length itself: Parseque parsers must
+     consume input, so [parse_vec_aux f 0] cannot be a pure nil parser. *)
+  guardM (fun k => if N.eqb k 0 then Some nil else None) parse_vec_length <|>
   (parse_vec_length >>= (fun k => parse_vec_aux f k)).
 
 Definition parse_16bytes {n} : byte_parser SIMD.v128 n :=
@@ -142,7 +160,8 @@ Definition parse_dataidx {n} : byte_parser dataidx n :=
   parse_u32_as_N.
 
 Definition parse_laneidx {n} : byte_parser laneidx n :=
-  parse_u8_as_N.
+  (* Lane indices are raw bytes, not LEB128 integers. *)
+  Byte.to_N <$> anyTok.
 
 Definition parse_number_type {n} : byte_parser number_type n :=
   (exact_byte x7f $> T_i32) <|>
@@ -165,7 +184,8 @@ Definition parse_value_type {n} : byte_parser value_type n :=
 Definition parse_block_type {n} : byte_parser block_type n :=
   (exact_byte x40 $> BT_valtype None) <|>
   (fun t => BT_valtype (Some t)) <$> parse_value_type <|>
-  BT_id <$> parse_typeidx.
+  (* Like heap indices, block type indices are nonnegative s33 values. *)
+  BT_id <$> parse_heap_typeidx.
 
 
 Definition parse_unreachable {n} : byte_parser basic_instruction n :=
@@ -1339,6 +1359,9 @@ End Run.
 
 Definition run_parse_be (bs : list byte) : option basic_instruction :=
   run bs parse_be.
+
+Definition run_parse_heap_typeidx (bs : list byte) : option typeidx :=
+  run bs (fun _ => parse_heap_typeidx).
 
 Definition run_parse_expr (bs : list byte) : option (list basic_instruction) :=
   run bs (fun n => parse_expr).

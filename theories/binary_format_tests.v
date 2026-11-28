@@ -4,6 +4,137 @@ From parseque Require Import Parseque.
 From Wasm Require Import binary_format_parser binary_format_printer
                          datatypes_properties check_toks.
 
+(** A vector's u32 length may have a non-minimal LEB128 representation.
+    In particular, a padded zero length must not require an element parser
+    to consume a token.  These tests use the actual whole-module parser. *)
+Definition empty_module_header : list Byte.byte :=
+  x00 :: x61 :: x73 :: x6d :: x01 :: x00 :: x00 :: x00 :: nil.
+
+Lemma padded_empty_type_vector :
+  run_parse_module
+    (empty_module_header ++ (x01 :: x02 :: x80 :: x00 :: nil)) =
+  run_parse_module empty_module_header.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma maximally_padded_empty_type_vector :
+  run_parse_module
+    (empty_module_header ++
+      (x01 :: x05 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil)) =
+  run_parse_module empty_module_header.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma overlong_empty_type_vector_rejected :
+  run_parse_module
+    (empty_module_header ++
+      (x01 :: x06 :: x80 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma overflowing_type_vector_length_rejected :
+  run_parse_module
+    (empty_module_header ++
+      (x01 :: x05 :: x80 :: x80 :: x80 :: x80 :: x10 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+(** Heap indices are unsigned indices encoded with signed LEB128. *)
+Lemma heap_index_64 :
+  run_parse_heap_typeidx (xc0 :: x00 :: nil) = Some 64%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_64_requires_positive_sign :
+  run_parse_heap_typeidx (x40 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_u32_max :
+  run_parse_heap_typeidx (xff :: xff :: xff :: xff :: x0f :: nil) =
+  Some 4294967295%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_padded_zero :
+  run_parse_heap_typeidx (x80 :: x80 :: x80 :: x80 :: x00 :: nil) = Some 0%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_overlong_zero_rejected :
+  run_parse_heap_typeidx (x80 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_overflow_rejected :
+  run_parse_heap_typeidx (x80 :: x80 :: x80 :: x80 :: x10 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_abstract_type_rejected :
+  run_parse_heap_typeidx (x70 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_leftovers_rejected :
+  run_parse_heap_typeidx (x00 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Open Scope list_scope.
+
+(** Block type indices are nonnegative s33 values, not unsigned LEB128. *)
+Lemma negative_block_type_index_rejected :
+  run_parse_be (x02 :: x41 :: x0b :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma block_type_index_64_encoding :
+  binary_of_block_type (BT_id 64%N) = (xc0 :: x00 :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma block_type_index_64_roundtrip :
+  let be := BI_block (BT_id 64%N) nil in
+  run_parse_be (binary_of_be be) = Some be.
+Proof. vm_compute. reflexivity. Qed.
+
+(** A lane immediate is one byte, even when its high bit is set. *)
+Lemma lane_index_high_bit :
+  @binary_format_parser.run option _ _ _ _ Byte.byte tokBytes laneidx
+    (x80 :: nil) (fun _ => parse_laneidx) = Some 128%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma lane_index_does_not_consume_leb_padding :
+  @binary_format_parser.run option _ _ _ _ Byte.byte tokBytes laneidx
+    (x80 :: x00 :: nil) (fun _ => parse_laneidx) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma extract_lane_byte_roundtrip :
+  let be := BI_extract_vec (VS_i VSI_8_16) (Some SX_U) 128%N in
+  run_parse_be (binary_of_be be) = Some be.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma signed_positive_sign_boundary :
+  leb128.encode_signed 64%Z = (xc0 :: x00 :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma i32_positive_sign_boundary_roundtrip :
+  let be := BI_const_num (VAL_int32 (Wasm_int.Int32.repr 64)) in
+  run_parse_be (binary_of_be be) = Some be.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma signed_positive_boundaries :
+  List.map leb128.encode_signed
+    (63%Z :: 64%Z :: 127%Z :: 128%Z :: 8191%Z :: 8192%Z :: nil) =
+  ((x3f :: nil) :: (xc0 :: x00 :: nil) :: (xff :: x00 :: nil) ::
+   (x80 :: x01 :: nil) :: (xff :: x3f :: nil) ::
+   (x80 :: xc0 :: x00 :: nil) :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma signed_negative_boundaries :
+  List.map leb128.encode_signed
+    ((-64)%Z :: (-65)%Z :: (-128)%Z :: (-8192)%Z :: (-8193)%Z :: nil) =
+  ((x40 :: nil) :: (xbf :: x7f :: nil) :: (x80 :: x7f :: nil) ::
+   (x80 :: x40 :: nil) :: (xff :: xbf :: x7f :: nil) :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma block_type_index_u32_max_roundtrip :
+  let be := BI_block (BT_id 4294967295%N) nil in
+  run_parse_be (binary_of_be be) = Some be.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma overflowing_block_type_index_rejected :
+  run_parse_be
+    (x02 :: x80 :: x80 :: x80 :: x80 :: x10 :: x0b :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
 Open Scope string_scope.
 Import Stdlib.Strings.String.StringSyntax.
 Open Scope list_scope.

@@ -89,7 +89,7 @@ Definition binary_of_f64 (x : f64) : list byte :=
 
 Definition binary_of_block_type (tb : block_type) : list byte :=
   match tb with
-  | BT_id x => binary_of_idx x
+  | BT_id x => leb128.encode_signed (Z.of_N x)
   | BT_valtype None => x40 :: nil
   | BT_valtype (Some t) => binary_of_value_type t :: nil
   end.
@@ -146,6 +146,12 @@ Definition binary_of_splat_vec (sh: vshape) :=
    end
   ) :: nil.
 
+Definition binary_of_laneidx (x : laneidx) : list byte :=
+  match Byte.of_N x with
+  | Some b => b :: nil
+  | None => x00 :: nil (* outside the byte range; not produced by the parser *)
+  end.
+
 Definition binary_of_extract_vec (sh: vshape) (s: option sx) (x: laneidx) :=
   xfd ::
   (match sh, s with
@@ -159,7 +165,7 @@ Definition binary_of_extract_vec (sh: vshape) (s: option sx) (x: laneidx) :=
    | VS_f VSF_64_2, None => x21
    | _, _ => x00 (* will not happen due to well formedness *)
    end
-  ) :: binary_of_N x.
+  ) :: binary_of_laneidx x.
 
 Definition binary_of_replace_vec (sh: vshape) (x: laneidx) :=
   xfd ::
@@ -171,7 +177,7 @@ Definition binary_of_replace_vec (sh: vshape) (x: laneidx) :=
    | VS_f VSF_32_4 => x20
    | VS_f VSF_64_2 => x22
    end
-  ) :: binary_of_N x.
+  ) :: binary_of_laneidx x.
   
 Definition binary_of_load_vec (lvarg: load_vec_arg) (marg: memarg) :=
   xfd :: x0c :: (List.repeat x00 16).
@@ -185,7 +191,7 @@ Definition binary_of_load_vec_lane (w: vwidth) (marg: memarg) (x: laneidx) :=
   | 64%N => x57
   | _ => x00 (* will not happen due to wellformedness *)
   end
-  ) :: binary_of_memarg marg ++ binary_of_N x.
+  ) :: binary_of_memarg marg ++ binary_of_laneidx x.
 
 (* store_vec_lane and load_vec uses the same args. Maybe it's better to find a new name *)
 Definition binary_of_store_vec (marg: memarg) :=
@@ -200,7 +206,7 @@ Definition binary_of_store_vec_lane (w: vwidth) (marg: memarg) (x: laneidx) :=
   | 64%N => x5b
   | _ => x00 (* will not happen due to wellformedness *)
   end
-  ) :: binary_of_memarg marg ++ binary_of_N x.
+  ) :: binary_of_memarg marg ++ binary_of_laneidx x.
 
 Fixpoint binary_of_be (be : basic_instruction) : list byte :=
   let binary_of_instrs bes := List.concat (List.map binary_of_be bes) in
