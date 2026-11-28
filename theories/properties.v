@@ -2099,7 +2099,7 @@ Qed.
 
 Lemma inst_typing_identities s inst C :
   inst_typing s inst = Some C ->
-  gc_declaration_typing.function_type_identitiesb s.(s_types)
+  gc_declaration_typing.source_type_identitiesb s.(s_types)
     inst.(inst_defined_types) inst.(inst_types) inst.(inst_defined_types) = true.
 Proof.
   unfold inst_typing. destruct inst. simpl.
@@ -2109,7 +2109,7 @@ Qed.
 
 Lemma inst_typing_functypes_valid s inst C :
   inst_typing s inst = Some C ->
-  all functype_valid inst.(inst_types) = true.
+  all source_subtype_valid inst.(inst_types) = true.
 Proof.
   unfold inst_typing. destruct inst. simpl.
   destruct (all _ _ && _) eqn:Checked; [|discriminate].
@@ -2199,7 +2199,7 @@ Qed.
 (** Lookups connecting module instance, store, and typing context *)
 Lemma inst_typing_type_lookup: forall s inst C n,
     inst_typing s inst = Some C ->
-    lookup_N inst.(inst_types) n = lookup_N C.(tc_types) n.
+    lookup_function_type inst.(inst_types) n = lookup_function_type C.(tc_types) n.
 Proof.
   move => s inst C n Hit.
   unfold inst_typing in Hit.

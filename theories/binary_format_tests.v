@@ -227,7 +227,7 @@ Lemma empty_module_round_trip : run_parse_module (binary_of_module empty_module)
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_type := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs := nil;
   mod_tables := nil;
   mod_mems := nil;
@@ -244,7 +244,7 @@ Lemma module_type_round_trip :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_type_fun := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs :=
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := nil |} nil;
   mod_tables := nil;
@@ -262,7 +262,7 @@ Lemma module_type_fun_round_trip :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_42 := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs :=
     let e := BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 42))) in
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := cons e nil |} nil;
@@ -281,7 +281,7 @@ Lemma module_42_round_trip :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_42_exported := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs :=
     let e := BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 42))) in
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := cons e nil |} nil;
@@ -300,7 +300,7 @@ Lemma module_42_exported_round_trip :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_tableops := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs :=
     let e := BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 1))) in
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := cons e nil |} nil;

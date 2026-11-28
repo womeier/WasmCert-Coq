@@ -1,6 +1,6 @@
 (** Canonical identities in the actual module validator and instantiator.
-    The existing binary function section is embedded as singleton groups;
-    explicit recursive/aggregate sections remain a subsequent integration. *)
+    Production modules retain recursive groups; instance contexts retain the
+    flattened source composite declarations and canonical identity map. *)
 From Wasm Require Import operations instantiation_spec instantiation_func
   interp_instantiate_sound gc_type_context gc_type_context_properties
   gc_declaration_typing gc_declaration_typing_properties.
@@ -19,7 +19,7 @@ Proof.
   unfold module_type_checker.
   destruct (close_and_validate_type_groups [] (module_type_groups m))
     as [[registry ids]|] eqn:Closed; [|discriminate].
-  destruct (function_type_identitiesb registry ids (mod_types m) ids);
+  destruct (source_type_identitiesb registry ids (List.concat (mod_types m)) ids);
     [|discriminate].
   intro Checked. exists registry, ids. split; [reflexivity |].
   now apply close_and_validate_type_groups_sound in Closed.

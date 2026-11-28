@@ -1,5 +1,5 @@
-(** Production source/closed signature agreement for the flat final function
-    section. Store typing checks the identity map, and store extension preserves
+(** Production source/closed signature agreement in composite type contexts.
+    Store typing checks the identity map, and store extension preserves
     the canonical registry prefix, including across host applications. *)
 From Wasm Require Import typing properties gc_type_context gc_type_context_properties
   gc_declaration_typing gc_declaration_typing_properties.
@@ -16,9 +16,49 @@ Proof.
   intros [Valid _]. now apply canonical_registry_validb_correct.
 Qed.
 
-Theorem inst_typing_function_expansion_agreement s inst C index source :
+Theorem inst_typing_declaration_expansion_agreement s inst C index source :
   inst_typing s inst = Some C ->
   lookup_N inst.(inst_types) index = Some source ->
+  exists id declaration,
+    resolve_inst_type inst index = Some id /\
+    close_subtype inst.(inst_defined_types) 0 0 source = Some declaration /\
+    expand_inst_type s inst index = Some declaration.
+Proof.
+  intros Typed Lookup.
+  pose proof (inst_typing_identities Typed) as Agreement.
+  apply source_type_identitiesb_correct in Agreement.
+  unfold lookup_N in Lookup.
+  eapply Forall2_lookup in Agreement; [|exact Lookup].
+  destruct Agreement as [id [Resolved [declaration [Closed Expanded]]]].
+  exists id, declaration. split; [exact Resolved |].
+  split; [exact Closed |]. unfold expand_inst_type.
+  change (resolve_inst_type inst index = Some id) in Resolved.
+  now rewrite Resolved.
+Qed.
+
+Lemma lookup_function_type_kind types index signature :
+  lookup_function_type types index = Some signature <->
+  exists source,
+    lookup_N types index = Some source /\
+    subtype_composite source = Comp_func signature.
+Proof.
+  unfold lookup_function_type.
+  destruct (lookup_N types index) as [source|] eqn:Lookup.
+  - destruct (subtype_composite source) as [f|fields|field] eqn:Composite.
+    + split.
+      * intro E; inversion E; subst. exists source. auto.
+      * intros [other [E Same]]. inversion E; subst.
+        rewrite Composite in Same. now inversion Same.
+    + split; [discriminate |].
+      intros [other [E Same]]. inversion E; subst. rewrite Composite in Same. discriminate.
+    + split; [discriminate |].
+      intros [other [E Same]]. inversion E; subst. rewrite Composite in Same. discriminate.
+  - split; [discriminate | intros [source [E _]]; discriminate].
+Qed.
+
+Theorem inst_typing_function_expansion_agreement s inst C index source :
+  inst_typing s inst = Some C ->
+  lookup_function_type inst.(inst_types) index = Some source ->
   exists id signature,
     resolve_inst_type inst index = Some id /\
     close_function_type inst.(inst_defined_types) 0 source = Some signature /\
@@ -26,10 +66,19 @@ Theorem inst_typing_function_expansion_agreement s inst C index source :
 Proof.
   intros Typed Lookup.
   pose proof (inst_typing_identities Typed) as Agreement.
-  apply function_type_identitiesb_correct in Agreement.
-  unfold lookup_N in Lookup.
-  eapply Forall2_lookup in Agreement; [|exact Lookup].
-  destruct Agreement as [id [Resolved [signature [Closed Expanded]]]].
+  apply source_type_identitiesb_correct in Agreement.
+  unfold lookup_function_type in Lookup.
+  destruct (lookup_N inst.(inst_types) index) as [declaration|] eqn:Declaration;
+    [|discriminate].
+  destruct (subtype_composite declaration) as [f|fields|field] eqn:Composite;
+    try discriminate.
+  inversion Lookup; subst f.
+  unfold lookup_N in Declaration.
+  eapply Forall2_lookup in Agreement; [|exact Declaration].
+  destruct Agreement as [id [Resolved Identity]].
+  apply (proj2 (source_type_identityb_correct _ _ _ _)) in Identity.
+  destruct (source_type_identity_function _ _ _ _ _ Composite Identity)
+    as [signature [Closed Expanded]].
   exists id, signature. repeat split; assumption.
 Qed.
 
@@ -44,7 +93,7 @@ Proof.
   intros [_ [_ Typed]].
   destruct (inst_typing s inst) as [C|] eqn:Instance; [|contradiction].
   unfold func_typing in Typed. destruct code as [index locals body]. simpl in *.
-  destruct (lookup_N C.(tc_types) index) as [[args results]|] eqn:Lookup;
+  destruct (lookup_function_type C.(tc_types) index) as [[args results]|] eqn:Lookup;
     [|contradiction].
   destruct Typed as [Same _]. subst source.
   rewrite <- (inst_typing_type_lookup index Instance) in Lookup.
@@ -79,6 +128,22 @@ Proof.
   rewrite Registry.
   rewrite expand_function_type_extension; [exact Expanded |].
   unfold expand_function_type, expand_defined_type in Expanded.
+  destruct (lookup_defined_type s.(s_types) id) as [st|] eqn:Lookup; [|discriminate].
+  unfold lookup_defined_type in Lookup.
+  destruct (nth_error s.(s_types) (N.to_nat (defined_group id))) eqn:Group;
+    [now apply nth_error_index_bound in Group | discriminate].
+Qed.
+
+Theorem store_extension_declaration_expansion s s' id declaration :
+  store_extension s s' ->
+  expand_defined_type s.(s_types) id = Some declaration ->
+  expand_defined_type s'.(s_types) id = Some declaration.
+Proof.
+  intros Extends Expanded.
+  destruct (store_extension_type_groups Extends) as [suffix Registry].
+  rewrite Registry.
+  rewrite expand_defined_type_extension; [exact Expanded |].
+  unfold expand_defined_type in Expanded.
   destruct (lookup_defined_type s.(s_types) id) as [st|] eqn:Lookup; [|discriminate].
   unfold lookup_defined_type in Lookup.
   destruct (nth_error s.(s_types) (N.to_nat (defined_group id))) eqn:Group;
@@ -122,8 +187,8 @@ Theorem inst_typing_equivalent_defined_types s inst1 C1 index1 source1
   store_typing s ->
   inst_typing s inst1 = Some C1 ->
   inst_typing s inst2 = Some C2 ->
-  lookup_N inst1.(inst_types) index1 = Some source1 ->
-  lookup_N inst2.(inst_types) index2 = Some source2 ->
+  lookup_function_type inst1.(inst_types) index1 = Some source1 ->
+  lookup_function_type inst2.(inst_types) index2 = Some source2 ->
   resolve_inst_type inst1 index1 = Some id1 ->
   resolve_inst_type inst2 index2 = Some id2 ->
   defined_type_equiv s.(s_types) id1 id2 = true ->
@@ -147,7 +212,7 @@ Qed.
 Theorem store_extension_instantiated_function_agreement s s' inst C index source id :
   store_extension s s' ->
   inst_typing s inst = Some C ->
-  lookup_N inst.(inst_types) index = Some source ->
+  lookup_function_type inst.(inst_types) index = Some source ->
   resolve_inst_type inst index = Some id ->
   exists signature,
     close_function_type inst.(inst_defined_types) 0 source = Some signature /\

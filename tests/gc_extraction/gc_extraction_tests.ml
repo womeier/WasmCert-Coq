@@ -353,7 +353,9 @@ let () =
   let func index =
     { modfunc_type = BigZ.of_int index; modfunc_locals = []; modfunc_body = [] }
   in
-  let m1 = { blank with mod_types = [Tf ([], []); Tf ([], [])];
+  let function_groups functions =
+    List.map (fun f -> [st true [] (Comp_func f)]) functions in
+  let m1 = { blank with mod_types = function_groups [Tf ([], []); Tf ([], [])];
                        mod_funcs = [func 1] } in
   let instantiate store m =
     match Runtime.interp_instantiate_wrapper (Obj.magic ()) store m [] with
@@ -369,7 +371,7 @@ let () =
     (Runtime.expand_function s1 inst1 BigZ.one = Some (Closed_ft ([], [])));
   check "production native function carries canonical identity"
     (Runtime.native_function_type (List.hd s1.s_funcs) = Some (id 0 0));
-  let m2 = { blank with mod_types = [Tf ([T_num T_i32], []); Tf ([], [])];
+  let m2 = { blank with mod_types = function_groups [Tf ([T_num T_i32], []); Tf ([], [])];
                        mod_funcs = [func 0; func 1] } in
   let s2, inst2 = instantiate s1 m2 in
   check "production second module extends shared canonical store"
@@ -383,7 +385,7 @@ let () =
     (Runtime.resolve_type inst1 BigZ.zero = Runtime.resolve_type inst2 BigZ.one);
   check "production out-of-bounds type resolution fails"
     (Runtime.resolve_type inst2 (BigZ.of_int 2) = None);
-  let bad = { blank with mod_types = [Tf ([], [T_bot])] } in
+  let bad = { blank with mod_types = function_groups [Tf ([], [T_bot])] } in
   check "production module validation rejects invalid type declaration"
     (match Runtime.interp_instantiate_wrapper (Obj.magic ()) s2 bad [] with
      | None, _ -> true | Some _, _ -> false);
@@ -403,11 +405,11 @@ let () =
       { inst2 with inst_defined_types = [id 12 0; id 0 0] } = None);
   let typed_param index = Tf ([T_ref { ref_nullable = true;
                                       ref_heap = HT_type (BigZ.of_int index) }], []) in
-  let typed_a = { blank with mod_types = [Tf ([], []); typed_param 0];
+  let typed_a = { blank with mod_types = function_groups [Tf ([], []); typed_param 0];
                             mod_funcs = [func 1] } in
   let sa, ia = instantiate Runtime.empty_store_record typed_a in
   let typed_b = { blank with mod_types =
-                  [Tf ([T_num T_i32], []); Tf ([], []); typed_param 1];
+                  function_groups [Tf ([T_num T_i32], []); Tf ([], []); typed_param 1];
                             mod_funcs = [func 2] } in
   let sb, ib = instantiate sa typed_b in
   check "production closes typed function parameters through map"
@@ -418,7 +420,7 @@ let () =
   check "earlier typed native expansion stays valid after store extension"
     (Runtime.instance_context sb ia <> None &&
      Runtime.expand_function sb ia BigZ.one = Runtime.expand_function sa ia BigZ.one);
-  let self = { blank with mod_types = [typed_param 0]; mod_funcs = [func 0] } in
+  let self = { blank with mod_types = function_groups [typed_param 0]; mod_funcs = [func 0] } in
   let ss, iself = instantiate Runtime.empty_store_record self in
   check "production self-reference source-resolution agrees with closed expansion"
     (Runtime.instance_context ss iself <> None &&
@@ -438,7 +440,7 @@ let () =
   check "production host function resolves canonical defining identity"
     (Runtime.lookup_function_type host_store BigZ.zero = Some (id 0 0));
   let importer =
-    { blank with mod_types = [host_signature];
+    { blank with mod_types = function_groups [host_signature];
       mod_imports = [{ imp_module = []; imp_name = []; imp_desc = MID_func BigZ.zero }] }
   in
   let imported_store, imported_instance =
@@ -460,4 +462,39 @@ let () =
     (Runtime.lookup_function_type
       { host_store with s_funcs = [FC_func_host (typed_param 0, Obj.magic ())] }
       BigZ.zero = None);
+  let mixed =
+    { blank with mod_types =
+      [[st false [] (Comp_struct [field 1]);
+        st true [] (Comp_array (packed PT_i16))];
+       [st true [] (Comp_func (Tf ([], [])))]];
+      mod_funcs = [func 2] }
+  in
+  let mixed_store, mixed_instance = instantiate Runtime.empty_store_record mixed in
+  check "production composite contexts retain all source indices"
+    (List.length mixed_instance.inst_types = 3 &&
+     mixed_instance.inst_defined_types = [id 0 0; id 0 1; id 1 0]);
+  check "production main instance typing accepts recursive aggregate context"
+    (Runtime.instance_context mixed_store mixed_instance <> None);
+  check "production struct expansion resolves recursive array field"
+    (Types.struct_type mixed_store.s_types (id 0 0) =
+      Some [{ field_mutability = MUT_const; field_storage =
+        ST_value (CV_ref (true, CH_defined (CT_def (id 0 1)))) }]);
+  check "production array expansion retains packed storage"
+    (Types.array_type mixed_store.s_types (id 0 1) = Some (packed PT_i16));
+  check "aggregate source index cannot expand as function"
+    (Runtime.expand_function mixed_store mixed_instance BigZ.zero = None);
+  check "production native identity uses uncompressed mixed source index"
+    (Runtime.lookup_function_type mixed_store BigZ.zero = Some (id 1 0));
+  let repeated_store, repeated_instance = instantiate mixed_store mixed in
+  check "production identical recursive groups reuse global identities"
+    (List.length repeated_store.s_types = 2 &&
+     repeated_instance.inst_defined_types = mixed_instance.inst_defined_types);
+  let forged_source =
+    match mixed_instance.inst_types with
+    | t :: rest -> { t with subtype_final = true } :: rest
+    | [] -> failwith "missing composite source context"
+  in
+  check "main instance typing checks source finality agreement"
+    (Runtime.instance_context mixed_store
+      { mixed_instance with inst_types = forged_source } = None);
   Printf.printf "GC extraction: %d/%d checks passed\n" !checks !checks

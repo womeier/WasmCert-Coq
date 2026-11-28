@@ -15,15 +15,15 @@ Section Instantiation_func.
 
 Context `{ho: host}.
   
-Definition gather_m_f_type (tfs : list function_type) (m_f : module_func) : option function_type :=
-  lookup_N tfs m_f.(modfunc_type).
+Definition gather_m_f_type (tfs : type_context) (m_f : module_func) : option function_type :=
+  lookup_function_type tfs m_f.(modfunc_type).
 
-Definition gather_m_f_types (tfs : list function_type) (m_fs : list module_func) : option (list function_type) :=
+Definition gather_m_f_types (tfs : type_context) (m_fs : list module_func) : option (list function_type) :=
   those (map (gather_m_f_type tfs) m_fs).
 
-Definition module_import_desc_typer (tfs: list function_type) (imp_desc : module_import_desc) : option extern_type :=
+Definition module_import_desc_typer (tfs: type_context) (imp_desc : module_import_desc) : option extern_type :=
   match imp_desc with
-  | MID_func i => option_map ET_func (lookup_N tfs i)
+  | MID_func i => option_map ET_func (lookup_function_type tfs i)
   | MID_table t_t =>
     if tabletype_valid t_t then Some (ET_table t_t) else None
   | MID_mem mt =>
@@ -32,7 +32,7 @@ Definition module_import_desc_typer (tfs: list function_type) (imp_desc : module
   end.
 
 (* breaking circularity, therefore only taking the function types *)
-Definition module_imports_typer (tfs: list function_type) (imps : list module_import) : option (list extern_type) :=
+Definition module_imports_typer (tfs: type_context) (imps : list module_import) : option (list extern_type) :=
   those (map (fun imp => module_import_desc_typer tfs imp.(imp_desc)) imps).
 
 (* prepass *)
@@ -78,7 +78,7 @@ Definition gather_m_g_types (mgs : list module_global) : list global_type :=
 
 Definition module_func_type_checker (c : t_context) (m : module_func) : bool :=
   let '{| modfunc_type := i; modfunc_locals := t_locs; modfunc_body := b_es |} := m in
-  match lookup_N c.(tc_types) i with
+  match lookup_function_type c.(tc_types) i with
   | None => false
   | Some (Tf tn tm) =>
     let c' := {|
@@ -147,7 +147,7 @@ Definition module_start_type_checker (c : t_context) (ms : module_start) : bool 
 
 Definition module_components_type_checker (m : module) : option ((list extern_type) * (list extern_type)) * string :=
   let '{|
-    mod_types := tfs;
+    mod_types := groups;
     mod_funcs := fs;
     mod_tables := ts;
     mod_mems := ms;
@@ -158,6 +158,7 @@ Definition module_components_type_checker (m : module) : option ((list extern_ty
     mod_imports := imps;
     mod_exports := exps;
   |} := m in
+  let tfs := List.concat groups in
   match (gather_m_f_types tfs fs, module_imports_typer tfs imps) with
   | (Some fts, Some impts) =>
     let ifts := ext_t_funcs impts in
@@ -219,7 +220,7 @@ Definition module_components_type_checker (m : module) : option ((list extern_ty
 Definition module_type_checker (m : module) : option ((list extern_type) * (list extern_type)) * string :=
   match close_and_validate_type_groups nil (module_type_groups m) with
   | Some (registry, ids) =>
-      if function_type_identitiesb registry ids m.(mod_types) ids
+      if source_type_identitiesb registry ids (List.concat m.(mod_types)) ids
       then module_components_type_checker m
       else (None, "inconsistent closed module type signatures")
   | None => (None, "invalid module type declarations")
@@ -272,7 +273,7 @@ Definition interp_alloc_module (s : store_record) (m : module) (imps : list exte
   let i_ds := iota_N (length s.(s_datas)) (length m.(mod_datas)) in
   let inst := {|
     inst_defined_types := typeids;
-    inst_types := m.(mod_types);
+    inst_types := List.concat m.(mod_types);
     inst_funcs := (ext_funcs imps ++ i_fs);
     inst_tables := (ext_tables imps ++ i_ts);
     inst_mems := (ext_mems imps ++ i_ms);
@@ -297,7 +298,7 @@ Definition interp_instantiate (hs: host_state) (s : store_record) (m : module) (
       match close_and_validate_type_groups s.(s_types) (module_type_groups m) with
       | None => (None, "Error in closing module types against store registry")
       | Some (registry, typeids) =>
-      if function_type_identitiesb registry typeids m.(mod_types) typeids then
+      if source_type_identitiesb registry typeids (List.concat m.(mod_types)) typeids then
       match those (map (external_type_checker s) v_imps) with
       | Some t_imps =>
           if all2 import_subtyping t_imps t_imps_mod then

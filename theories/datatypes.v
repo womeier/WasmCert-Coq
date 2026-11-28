@@ -239,10 +239,9 @@ Definition closed_subtype :=
 Definition canonical_group := list closed_subtype.
 Definition canonical_registry := list canonical_group.
 
-(* Source type declarations currently contain function signatures only.
-   GC must extend this declaration layer with recursive subtype groups.
-   An inst_types entry is not a globally allocated runtime identity. *)
-Definition type_context := list function_type.
+(* Context entries retain composite kind and the source index space.
+   An inst_types entry is never a globally allocated runtime identity. *)
+Definition type_context := list source_subtype.
 
 (* This is a definition for future extensions, where instruction types are no longer
 the same as function types. *)
@@ -338,6 +337,19 @@ Most types are universally valid. However, restrictions apply to limits, which m
 
 Definition functype_valid (ft: function_type) : bool :=
   true.
+
+Definition source_subtype_valid (t : source_subtype) : bool :=
+  match subtype_composite t with
+  | Comp_func f => functype_valid f
+  | Comp_struct _ | Comp_array _ => true
+  end.
+
+(** Like the pre-existing functype_valid predicate, this is only the
+    compatibility context-shape check. Actual source declaration validity is
+    checked by canonical closing, registry validation and identity agreement;
+    it must never be inferred from this universally true legacy predicate. *)
+Lemma source_subtype_valid_true t : source_subtype_valid t = true.
+Proof. destruct t as [final supers composite]; destruct composite; reflexivity. Qed.
 
 Definition table_limit_bound : N := (N.sub u32_bound 1%N).
 
@@ -823,7 +835,7 @@ WebAssembly programs are organized into modules, which are the unit of deploymen
 [https://webassembly.github.io/spec/core/syntax/modules.html]
 *)
 Record module : Type := {
-  mod_types : list function_type;
+  mod_types : list recursive_type;
   mod_funcs : list module_func;
   mod_tables : list module_table;
   mod_mems : list module_mem;

@@ -75,7 +75,7 @@ Ltac solve_progress :=
 Ltac inst_typing_lookup :=
   try multimatch goal with
   | H1: inst_typing ?s ?i = Some ?t,
-    H2: lookup_N (inst_types ?i) ?n = Some _ |- _ =>
+    H2: lookup_function_type (inst_types ?i) ?n = Some _ |- _ =>
       let Hteq := fresh "Hteq" in
       specialize (Logic.eq_sym (inst_typing_type_lookup n H1)) as Hteq;
       rewrite H2 in Hteq

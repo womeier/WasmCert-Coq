@@ -313,7 +313,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           match lookup_N C.(tc_tables) x with
           | Some tabt =>
                if reference_type_match C.(tc_types) tabt.(tt_elem_type) T_funcref then
-                match lookup_N (tc_types C) y with
+                match lookup_function_type (tc_types C) y with
                 | Some (Tf tn tm) =>
                     type_update ts ((T_num T_i32 :: tn)) tm
                 | None => None 
@@ -339,7 +339,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
               match lookup_N C.(tc_tables) x with
               | Some tabt =>
                    if reference_type_match C.(tc_types) tabt.(tt_elem_type) T_funcref then
-                    match lookup_N (tc_types C) y with
+                    match lookup_function_type (tc_types C) y with
                     | Some (Tf tn tm) =>
                         if (t2s == tm) then
                           type_update_top ts ((T_num T_i32 :: tn)) nil
@@ -548,9 +548,17 @@ Definition rev_tf (tf: function_type) :=
   | Tf tn tm => Tf (rev tn) (rev tm)
   end.
 
+Definition rev_source_subtype (t : source_subtype) : source_subtype :=
+  Sub_type t.(subtype_final) t.(subtype_supers)
+    (match t.(subtype_composite) with
+     | Comp_func f => Comp_func (rev_tf f)
+     | Comp_struct fields => Comp_struct fields
+     | Comp_array field => Comp_array field
+     end).
+
 Definition context_reverse (C: t_context): t_context :=
   {|
-    tc_types := map rev_tf C.(tc_types);
+    tc_types := map rev_source_subtype C.(tc_types);
     tc_funcs := map rev_tf C.(tc_funcs);
     tc_tables := C.(tc_tables);
     tc_mems := C.(tc_mems);

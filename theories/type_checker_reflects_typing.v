@@ -21,12 +21,31 @@ Definition ct_subtyping (ct1 ct2: checker_type) :=
 
 Notation "ct1 <ct: ct2" := (ct_subtyping ct1 ct2) (at level 5).
 
+Lemma lookup_function_type_reverse types index :
+  lookup_function_type (map rev_source_subtype types) index =
+    option_map rev_tf (lookup_function_type types index).
+Proof.
+  unfold lookup_function_type. rewrite lookup_N_map.
+  destruct (lookup_N types index) as [source|]; simpl; [|reflexivity].
+  unfold rev_source_subtype.
+  destruct source as [final supers composite]; destruct composite; reflexivity.
+Qed.
+
+Lemma lookup_function_type_reverse_inv types index f :
+  lookup_function_type (map rev_source_subtype types) index = Some f ->
+  exists source, lookup_function_type types index = Some source /\ rev_tf source = f.
+Proof.
+  rewrite lookup_function_type_reverse.
+  destruct (lookup_function_type types index) as [source|]; simpl; [|discriminate].
+  intro E. inversion E; subst f. exists source. auto.
+Qed.
+
 Lemma expand_t_context_reverse: forall C tb tf,
     expand_t C tb = Some tf ->
     expand_t (context_reverse C) tb = Some (rev_tf tf).
 Proof.
   intros.
-  unfold expand_t in *; destruct tb => //=; first by rewrite lookup_N_map H.
+  unfold expand_t in *; destruct tb => //=; first by rewrite lookup_function_type_reverse H.
   by remove_bools_options.
 Qed.
 
@@ -41,7 +60,11 @@ Lemma context_reverseK:
     involutive context_reverse.
 Proof.
   move => C.
-  destruct C; unfold context_reverse => /=; f_equal; try rewrite mapK => //; try (by apply rev_tfK); try by apply revK.
+  assert (SourceK : involutive rev_source_subtype).
+  { intros [final supers composite]. destruct composite as [[args results]|fields|field];
+      unfold rev_source_subtype; simpl; try reflexivity; now rewrite !revK. }
+  destruct C; unfold context_reverse => /=; f_equal; try rewrite mapK => //;
+    try (by apply rev_tfK); try (by apply SourceK); try by apply revK.
   destruct tc_return => //=; by rewrite revK.
 Qed.
 
@@ -237,7 +260,10 @@ Ltac simplify_tc_goal :=
   | H: ?expr = _ |-
     context [?expr] =>
       rewrite H
-  | H: lookup_N ?l ?n = ?x
+   | H: lookup_function_type ?l ?n = ?x
+     |- context [lookup_function_type (map rev_source_subtype ?l) ?n] =>
+     rewrite lookup_function_type_reverse H
+   | H: lookup_N ?l ?n = ?x
     |- context [lookup_N (map _ ?l) ?n] =>
     rewrite lookup_N_map H
   | H: expand_t ?C ?tb = ?tf
@@ -1563,7 +1589,7 @@ Proof.
     (* Call_indirect *)
     + destruct f.
       move/eqP in Hif.
-      apply nth_error_map in Hoption0 as [ts [Hnth Hmap]].
+      apply lookup_function_type_reverse_inv in Hoption0 as [ts [Hnth Hmap]].
       destruct ts; simpl in Hmap; inversion Hmap; subst; clear Hmap.
       eapply type_update_agree_subtyping in Hupdate; eauto.
       destruct Hupdate as [tn [Hagree' Hsub]].
@@ -1591,7 +1617,7 @@ Proof.
       move/eqP in Hif0; subst.
       eapply type_update_top_agree_subtyping in Hupdate; eauto.
       destruct Hupdate as [tn [ts1 [ts2 [Hagree' Hsub]]]].
-      apply nth_error_map in Hoption as [ts [Hnth Heq]].
+      apply lookup_function_type_reverse_inv in Hoption as [ts [Hnth Heq]].
       destruct ts; simpl in Heq.
       injection Heq as <- Hrevr.
       apply (f_equal rev) in Hrevr; repeat rewrite revK in Hrevr; subst.

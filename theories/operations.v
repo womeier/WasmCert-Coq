@@ -23,6 +23,17 @@ Section Operations.
 Definition lookup_N {T: Type} (l: list T) (n: N) : option T :=
   List.nth_error l (N.to_nat n).
 
+Definition lookup_function_type (types : type_context) (index : typeidx) :
+    option function_type :=
+  match lookup_N types index with
+  | Some source =>
+      match subtype_composite source with
+      | Comp_func f => Some f
+      | _ => None
+      end
+  | None => None
+  end.
+
 (** Runtime source-index resolution goes through the module's closed names,
     never through a source HT_type reinterpreted as a canonical address. *)
 Definition resolve_inst_type (inst : moduleinst) (index : typeidx) : option defined_type :=
@@ -910,7 +921,7 @@ Definition iota_N (offset: nat) (len: nat) : list N :=
   map N.of_nat (iota offset len).
 
 Definition stypes (s : store_record) (i : moduleinst) (j : typeidx) : option function_type :=
-  lookup_N (inst_types i) j.
+  lookup_function_type (inst_types i) j.
 
 
 Definition sfunc_ind (s : store_record) (i : moduleinst) (j : funcidx) : option funcaddr :=
@@ -1463,7 +1474,7 @@ Definition es_is_trap (es : seq administrative_instruction) : bool :=
 
 Definition expand (inst: moduleinst) (tb: block_type) : option function_type :=
   match tb with
-  | BT_id n => lookup_N inst.(inst_types) n
+  | BT_id n => lookup_function_type inst.(inst_types) n
   | BT_valtype (Some t) => Some (Tf [::] [::t])
   | BT_valtype None => Some (Tf [::] [::])
   end.

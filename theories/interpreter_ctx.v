@@ -1713,7 +1713,7 @@ the condition that all values should live in the operand stack. *)
         (* funcref *)
         * destruct (lookup_N s.(s_funcs) a) as [cl | ] eqn:Hnthcl.
           (* Some *)
-          -- destruct (lookup_N (inst_types (f_inst (fc.(FC_frame)))) y == Some (cl_type cl)) eqn:Hcl; move/eqP in Hcl.
+          -- destruct (lookup_function_type (inst_types (f_inst (fc.(FC_frame)))) y == Some (cl_type cl)) eqn:Hcl; move/eqP in Hcl.
             (* true *)
             ++ apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_invoke a)), d>> => //.
               resolve_reduce_ctx vs0 es0.
@@ -1785,7 +1785,7 @@ the condition that all values should live in the operand stack. *)
         (* funcref *)
         * destruct (lookup_N s.(s_funcs) a) as [cl | ] eqn:Hnthcl.
           (* Some *)
-          -- destruct (lookup_N (inst_types (f_inst (fc.(FC_frame)))) y == Some (cl_type cl)) eqn:Hcl; move/eqP in Hcl.
+          -- destruct (lookup_function_type (inst_types (f_inst (fc.(FC_frame)))) y == Some (cl_type cl)) eqn:Hcl; move/eqP in Hcl.
             (* true *)
             ++ apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_return_invoke a)), d>> => //.
               resolve_reduce_ctx vs0 es0.

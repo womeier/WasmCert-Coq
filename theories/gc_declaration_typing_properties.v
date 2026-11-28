@@ -400,3 +400,69 @@ Proof.
   destruct (nth_error registry (N.to_nat (defined_group id))) eqn:Group;
     [now apply nth_error_index_bound in Group | discriminate].
 Qed.
+
+Lemma source_type_identityb_correct registry names source id :
+  source_type_identityb registry names source id = true <->
+  exists declaration,
+    close_subtype names 0 0 source = Some declaration /\
+    expand_defined_type registry id = Some declaration.
+Proof.
+  unfold source_type_identityb.
+  destruct (close_subtype names 0 0 source) as [expected|] eqn:Expected,
+    (expand_defined_type registry id) as [actual|] eqn:Actual;
+    try (split; [discriminate | intros [t [E F]]; congruence]).
+  destruct (closed_subtype_eq_dec expected actual) as [Same|Different].
+  - subst actual. split; [intro E; now exists expected | reflexivity].
+  - split; [discriminate | intros [t [E F]]; congruence].
+Qed.
+
+Lemma source_type_identitiesb_correct registry names sources ids :
+  source_type_identitiesb registry names sources ids = true <->
+  Forall2 (fun source id => exists declaration,
+    close_subtype names 0 0 source = Some declaration /\
+    expand_defined_type registry id = Some declaration) sources ids.
+Proof.
+  revert ids. induction sources as [|source sources IH]; intros [|id ids]; simpl.
+  - split; intro E; constructor.
+  - split; intro E; discriminate || inversion E.
+  - split; intro E; discriminate || inversion E.
+  - rewrite andb_true_iff, source_type_identityb_correct, IH.
+    split; [intros [Head Tail]; now constructor | intro E; now inversion E].
+Qed.
+
+Lemma source_type_identitiesb_extension registry suffix names sources ids :
+  source_type_identitiesb registry names sources ids = true ->
+  source_type_identitiesb (registry ++ suffix) names sources ids = true.
+Proof.
+  rewrite !source_type_identitiesb_correct.
+  apply Forall2_impl. intros source id [declaration [Expected Actual]].
+  exists declaration. split; [exact Expected |].
+  rewrite expand_defined_type_extension; [exact Actual |].
+  unfold expand_defined_type in Actual.
+  destruct (lookup_defined_type registry id) as [st|] eqn:Lookup; [|discriminate].
+  unfold lookup_defined_type in Lookup.
+  destruct (nth_error registry (N.to_nat (defined_group id))) eqn:Group;
+    [now apply nth_error_index_bound in Group | discriminate].
+Qed.
+
+Lemma source_type_identity_function registry names source id f :
+  subtype_composite source = Comp_func f ->
+  source_type_identityb registry names source id = true ->
+  exists signature,
+    close_function_type names 0 f = Some signature /\
+    expand_function_type registry id = Some signature.
+Proof.
+  intros Composite Identity. apply source_type_identityb_correct in Identity.
+  destruct Identity as [declaration [Closed Expanded]].
+  unfold close_subtype in Closed.
+  destruct (_ && _) eqn:Valid; [|discriminate].
+  rewrite Composite in Closed. simpl in Closed.
+  destruct (list_extra.those0
+    (map (close_type_index names 0) (subtype_supers source))) as [parents|];
+    [|discriminate].
+  destruct (close_function_type names 0 f) as [signature|] eqn:Function;
+    [|discriminate].
+  inversion Closed; subst declaration.
+  exists signature. split; [reflexivity |].
+  unfold expand_function_type. now rewrite Expanded.
+Qed.

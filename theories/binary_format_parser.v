@@ -946,8 +946,27 @@ Definition parse_bes_end_with_x0b : [ byte_parser (list basic_instruction) ] := 
 Definition parse_expr {n} : byte_parser (list basic_instruction) n :=
   parse_bes_end_with_x0b n.
 
+(** Declaration references use the full source index space. Scope and
+    composite-kind checking are performed by canonical module validation. *)
+Definition parse_declaration_abstract_heap_type {n} : byte_parser heap_type n :=
+  parse_gc_heap_type <|> (exact_byte x69 $> HT_exn) <|>
+  (exact_byte x74 $> HT_noexn).
+
+Definition parse_declaration_heap_type {n} : byte_parser heap_type n :=
+  parse_declaration_abstract_heap_type <|> (HT_type <$> parse_heap_typeidx).
+
+Definition parse_declaration_reference_type {n} : byte_parser reference_type n :=
+  (Ref_type true <$> (exact_byte x63 &> parse_declaration_heap_type)) <|>
+  (Ref_type false <$> (exact_byte x64 &> parse_declaration_heap_type)) <|>
+  (Ref_type true <$> parse_declaration_abstract_heap_type).
+
+Definition parse_declaration_value_type {n} : byte_parser value_type n :=
+  (T_num <$> parse_number_type) <|> (T_vec <$> parse_vector_type) <|>
+  (T_ref <$> parse_declaration_reference_type).
+
 Definition parse_function_type {n} : byte_parser function_type n :=
-  exact_byte x60 &> (uncurry Tf <$> parse_vec parse_value_type <&> parse_vec parse_value_type).
+  exact_byte x60 &> (uncurry Tf <$>
+    parse_vec parse_declaration_value_type <&> parse_vec parse_declaration_value_type).
 
 Definition parse_limits {n} : byte_parser limits n :=
   exact_byte x00 &> ((fun min => {| lim_min := min; lim_max := None |}) <$> parse_u32_as_N) <|>
@@ -962,6 +981,32 @@ Definition parse_memory_type {n} : byte_parser memory_type n :=
 Definition parse_mut {n} : byte_parser mutability n :=
   exact_byte x00 $> MUT_const <|>
   exact_byte x01 $> MUT_var.
+
+Definition parse_storage_type {n} : byte_parser (storage_type value_type) n :=
+  (exact_byte x78 $> ST_packed PT_i8) <|>
+  (exact_byte x77 $> ST_packed PT_i16) <|>
+  (ST_value <$> parse_declaration_value_type).
+
+Definition parse_field_type {n} : byte_parser (field_type value_type) n :=
+  ((fun storage mut => {| field_mutability := mut; field_storage := storage |})
+    <$> parse_storage_type) <*> parse_mut.
+
+Definition parse_composite_type {n} :
+    byte_parser (composite_type value_type function_type) n :=
+  (Comp_func <$> parse_function_type) <|>
+  (exact_byte x5f &> (Comp_struct <$> parse_vec parse_field_type)) <|>
+  (exact_byte x5e &> (Comp_array <$> parse_field_type)).
+
+Definition parse_subtype {n} : byte_parser source_subtype n :=
+  ((Sub_type false <$> (exact_byte x50 &> parse_vec parse_u32_as_N))
+    <*> parse_composite_type) <|>
+  ((Sub_type true <$> (exact_byte x4f &> parse_vec parse_u32_as_N))
+    <*> parse_composite_type) <|>
+  (Sub_type true nil <$> parse_composite_type).
+
+Definition parse_recursive_type {n} : byte_parser recursive_type n :=
+  (exact_byte x4e &> parse_vec parse_subtype) <|>
+  ((fun t => cons t nil) <$> parse_subtype).
 
 Definition parse_global_type {n} : byte_parser global_type n :=
   ((fun x y => Build_global_type y x) <$> parse_value_type) <*> parse_mut.
@@ -1140,8 +1185,8 @@ Definition parse_customsec {n} : byte_parser (name * list byte) n :=
          ))).
          
 (* Low priority: check that the sections have the correct byte sizes? *)
-Definition parse_typesec {n} : byte_parser (list function_type) n :=
-  exact_byte x01 &> parse_u32_as_N &> parse_vec parse_function_type.
+Definition parse_typesec {n} : byte_parser (list recursive_type) n :=
+  exact_byte x01 &> parse_u32_as_N &> parse_vec parse_recursive_type.
 
 Definition parse_importsec {n} : byte_parser (list module_import) n :=
   exact_byte x02 &> parse_u32_as_N &> parse_vec parse_module_import.
@@ -1192,7 +1237,7 @@ Definition parse_with_customsec_star_after {A : Type} {n} f :=
   @iteratel _ _ _ _ _ _ _ _ _ A n f parse_customsec_forget.
 
 Record parsing_module : Type := {
-  pmod_types : list function_type;
+  pmod_types : list recursive_type;
   pmod_funcs : list typeidx;
   pmod_tables : list module_table;
   pmod_mems : list module_mem;
@@ -1205,7 +1250,7 @@ Record parsing_module : Type := {
   pmod_code : list module_func_without_type;
   }.
 
-Definition parse_typesec_wrapper {n} : byte_parser (list function_type) n :=
+Definition parse_typesec_wrapper {n} : byte_parser (list recursive_type) n :=
   (parse_with_customsec_star_before parse_typesec).
 
 Definition parse_importsec_wrapper {n} : byte_parser (list module_import) n :=

@@ -194,6 +194,23 @@ Fixpoint function_type_identitiesb registry names
   | _, _ => false
   end.
 
+Definition source_type_identityb registry names source id : bool :=
+  match close_subtype names 0 0 source, expand_defined_type registry id with
+  | Some expected, Some actual =>
+      if closed_subtype_eq_dec expected actual then true else false
+  | _, _ => false
+  end.
+
+Fixpoint source_type_identitiesb registry names
+    (sources : type_context) (ids : list defined_type) : bool :=
+  match sources, ids with
+  | [], [] => true
+  | source :: sources, id :: ids =>
+      source_type_identityb registry names source id &&
+      source_type_identitiesb registry names sources ids
+  | _, _ => false
+  end.
+
 (** Declarative matching reuses the independent abstract hierarchy. Exception
     heaps add their separate bottom edge; source indices have no abstract rule. *)
 Inductive shared_abstract_heap_matches : heap_type -> heap_type -> Prop :=

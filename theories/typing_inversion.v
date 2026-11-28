@@ -184,7 +184,7 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       tf = (Tf (ts1 ++ [::T_num T_i32]) ts2)/\
         lookup_N (tc_tables C) x = Some tabt /\
         tabt.(tt_elem_type) = T_funcref /\
-        lookup_N (tc_types C) y = Some (Tf ts1 ts2)
+        lookup_function_type (tc_types C) y = Some (Tf ts1 ts2)
   | BI_return_call n =>
       exists ts1 ts2 ts3 ts4,
       tf = (Tf (ts3 ++ ts1) ts4) /\
@@ -195,7 +195,7 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       tf = (Tf (ts3 ++ ts1 ++ [::T_num T_i32]) ts4)/\
         lookup_N (tc_tables C) x = Some tabt /\
         tabt.(tt_elem_type) = T_funcref /\
-        lookup_N (tc_types C) y = Some (Tf ts1 ts2) /\
+        lookup_function_type (tc_types C) y = Some (Tf ts1 ts2) /\
         tc_return C = Some ts2
   | BI_local_get x =>
       exists t,

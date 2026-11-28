@@ -306,9 +306,9 @@ Proof.
   pose proof (inst_typing_identities HIT) as Hidentities.
   pose proof (inst_typing_functypes_valid HIT) as Hvalid.
   destruct (store_extension_type_groups HST) as [suffix Hregistry].
-  pose proof (gc_declaration_typing_properties.function_type_identitiesb_extension
+  pose proof (gc_declaration_typing_properties.source_type_identitiesb_extension
     (s_types s) suffix _ _ _ Hidentities) as Hidentities'.
-  assert (Hnew : gc_declaration_typing.function_type_identitiesb (s_types s')
+  assert (Hnew : gc_declaration_typing.source_type_identitiesb (s_types s')
     i.(inst_defined_types) i.(inst_types) i.(inst_defined_types) = true).
   { rewrite Hregistry. exact Hidentities'. }
   unfold inst_typing in *.
@@ -1751,7 +1751,7 @@ Lemma r_return_call_indirect_invert: forall hs s f v x y hs' s' f' a,
     exists cl i,
       $V v = $VN (VAL_int32 i) /\
         lookup_N (s_funcs s) a = Some cl /\
-        lookup_N (inst_types (f_inst f)) y = Some (cl_type cl) /\
+        lookup_function_type (inst_types (f_inst f)) y = Some (cl_type cl) /\
         stab_elem s (f_inst f) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_func a).
 Proof.
   move => hs s f v x y hs' s' f' a Hreduce.

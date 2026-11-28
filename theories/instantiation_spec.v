@@ -17,7 +17,7 @@ Section Instantiation_spec.
 Context `{ho: host}.
 
 Definition module_type_groups (m : module) : list recursive_type :=
-  function_type_groups m.(mod_types).
+  m.(mod_types).
 
 Definition alloc_Xs {A B} f (s : store_record) (xs : list A) : store_record * list B :=
   let '(s', fas) :=
@@ -52,7 +52,7 @@ Definition add_func (s : store_record) funcinst := {|
 |}.
 
 Definition gen_func_instance mf inst : funcinst :=
-  match lookup_N inst.(inst_types) mf.(modfunc_type) with
+  match lookup_function_type inst.(inst_types) mf.(modfunc_type) with
   | Some ft =>
       FC_func_native ft inst mf
   | None =>
@@ -269,7 +269,7 @@ Definition alloc_module (s : store_record) (m : module) (imps : list extern_valu
   let '(s'_goal, inst) := s'_inst in
   exists registry typeids,
   close_and_validate_type_groups s.(s_types) (module_type_groups m) = Some (registry, typeids) /\
-  function_type_identitiesb registry typeids m.(mod_types) typeids = true /\
+  source_type_identitiesb registry typeids (List.concat m.(mod_types)) typeids = true /\
   inst.(inst_defined_types) = typeids /\
   let '(s1, i_fs) := alloc_funcs s m.(mod_funcs) inst in
   let '(s2, i_ts) := alloc_tabs s1 (map modtab_type m.(mod_tables)) in
@@ -278,7 +278,7 @@ Definition alloc_module (s : store_record) (m : module) (imps : list extern_valu
   let '(s5, i_es) := alloc_elems s4 m.(mod_elems) rvs in
   let '(s', i_ds) := alloc_datas s5 m.(mod_datas) in
   (s'_goal = upd_s_types s' registry) /\
-  (inst.(inst_types) = m.(mod_types)) /\
+  (inst.(inst_types) = List.concat m.(mod_types)) /\
   (inst.(inst_funcs) = ((ext_funcs imps) ++ i_fs)) /\
   (inst.(inst_tables) = ((ext_tables imps) ++ i_ts)) /\
   (inst.(inst_mems) = ((ext_mems imps) ++ i_ms)) /\
@@ -292,7 +292,7 @@ Definition dummy_table : tableinst := {| tableinst_elem := nil; tableinst_type :
 Definition module_func_typing (c : t_context) (mf : module_func) (tf : function_type) : Prop :=
   let '{| modfunc_type := x; modfunc_locals := t_locs; modfunc_body := b_es |} := mf in
   let '(Tf tn tm) := tf in
-  lookup_N c.(tc_types) x = Some (Tf tn tm) /\
+  lookup_function_type c.(tc_types) x = Some (Tf tn tm) /\
   let c' := upd_local_label_return c (tn ++ t_locs) [::tm] (Some tm) in
   be_typing c' b_es (Tf [::] tm) /\
   (* Revise when non-defaultable types are added *)
@@ -370,7 +370,7 @@ Definition module_start_typing (c : t_context) (ms : module_start) : bool :=
 
 Definition module_import_desc_typing (c : t_context) (imp_desc : module_import_desc) (e : extern_type) : bool := 
   match imp_desc with
-  | MID_func i => (option_map ET_func (lookup_N c.(tc_types) i) == Some e)
+  | MID_func i => (option_map ET_func (lookup_function_type c.(tc_types) i) == Some e)
   | MID_table t_t =>
       tabletype_valid t_t && (e == ET_table t_t)
   | MID_mem mt =>
@@ -494,7 +494,7 @@ Definition wasm_2_memory_count_check (ms: list module_mem) (ims: list memory_typ
 Definition module_components_typing (m : module) (impts : list extern_type) (expts : list extern_type) : Prop :=
   exists fts tts mts gts rts dts,
   let '{|
-    mod_types := tfs;
+    mod_types := groups;
     mod_funcs := fs;
     mod_tables := ts;
     mod_mems := ms;
@@ -505,6 +505,7 @@ Definition module_components_typing (m : module) (impts : list extern_type) (exp
     mod_imports := imps;
     mod_exports := exps;
   |} := m in
+  let tfs := List.concat groups in
   let ifts := ext_t_funcs impts in
   let its := ext_t_tables impts in
   let ims := ext_t_mems impts in
@@ -536,7 +537,7 @@ Definition module_components_typing (m : module) (impts : list extern_type) (exp
     tc_return := None;
     tc_refs := xs;
   |} in
-  List.Forall functype_valid tfs /\
+  List.Forall source_subtype_valid tfs /\
   List.Forall2 (module_func_typing c) fs fts /\
   List.Forall2 (module_table_typing c') ts tts /\
   List.Forall2 (module_mem_typing c') ms mts /\
@@ -552,7 +553,7 @@ Definition module_components_typing (m : module) (impts : list extern_type) (exp
 Definition module_typing (m : module) (impts expts : list extern_type) : Prop :=
   (exists registry ids,
     close_and_validate_type_groups nil (module_type_groups m) = Some (registry, ids) /\
-    function_type_identitiesb registry ids m.(mod_types) ids = true) /\
+    source_type_identitiesb registry ids (List.concat m.(mod_types)) ids = true) /\
   module_components_typing m impts expts.
 
 (** std-doc:

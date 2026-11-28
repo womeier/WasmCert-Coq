@@ -120,12 +120,13 @@ Proof.
   destruct m; unfold module_components_typing in Hmodtype; simpl in *.
   destruct Hmodtype as [fts [tts [mts [gts [rts [dts [Hmtypes [Hmfunctype [Hmtabletype [Hmmemtype [Hmemcount [Hmglobaltype [Hmelemtype [Hmdatatype [Hstarttype [Hmimptype [Hmexptype Hexpunique]]]]]]]]]]]]]]]]].
 
-  remember (Build_t_context mod_types (ext_t_funcs t_imps ++ fts) (ext_t_tables t_imps ++ tts) (ext_t_mems t_imps ++ mts) (ext_t_globals t_imps ++ gts) rts dts nil nil None (iota_N 0 (length inst.(inst_funcs)))) as C.
+  remember (Build_t_context (List.concat mod_types) (ext_t_funcs t_imps ++ fts) (ext_t_tables t_imps ++ tts) (ext_t_mems t_imps ++ mts) (ext_t_globals t_imps ++ gts) rts dts nil nil None (iota_N 0 (length inst.(inst_funcs)))) as C.
 
   assert (inst_typing s' f.(f_inst) = Some C) as HIT.
   {
     extract_premise.
     destruct inst; subst; simpl in *.
+    subst inst_types.
 
     (* Functions *)
     assert (those (map (ext_func_typing s6) inst_funcs) = Some (ext_t_funcs t_imps ++ fts)) as Hfit.
@@ -418,7 +419,8 @@ Proof.
       }
     }
 
-    replace (all functype_valid inst_types) with true; last by symmetry; apply Forall_all.
+    replace (all source_subtype_valid (List.concat mod_types)) with true;
+      last by symmetry; apply/allP; intros x Member; rewrite source_subtype_valid_true.
     rewrite Hfit Htit Hmit Hgit Heit Hdit.
     rewrite Hidentity.
     reflexivity.
@@ -459,6 +461,8 @@ Proof.
         unfold module_func_typing in Hmftype; destruct mf, tf; simpl in *.
         destruct Hmftype as [Hnthmf [Hbet Hdefaultable]].
         unfold gen_func_instance => /=.
+        unfold gen_func_instance in HIT.
+        rewrite -> Hconjl0 in *.
         rewrite Hnthmf; split => //.
         rewrite HIT /= Hconjl1 Hnthmf Hfunclen; repeat split => //=.
         unfold upd_local_label_return in *; simpl in *.

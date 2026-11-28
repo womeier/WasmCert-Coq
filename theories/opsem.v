@@ -233,13 +233,13 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
       forall s f x (y: typeidx) a cl i hs,
         stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_func a) ->
         lookup_N s.(s_funcs) a = Some cl ->
-        lookup_N f.(f_inst).(inst_types) y = Some (cl_type cl) ->
+        lookup_function_type f.(f_inst).(inst_types) y = Some (cl_type cl) ->
         reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_call_indirect x y)] hs s f [::AI_invoke a]
   | r_call_indirect_failure_mismatch :
       forall s f x (y: typeidx) a cl i hs,
         stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_func a) ->
         lookup_N s.(s_funcs) a = Some cl ->
-        lookup_N f.(f_inst).(inst_types) y <> Some (cl_type cl) ->
+        lookup_function_type f.(f_inst).(inst_types) y <> Some (cl_type cl) ->
         reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_call_indirect x y)] hs s f [::AI_trap]
   | r_call_indirect_failure_bound :
       forall s f x (y: typeidx) i hs,

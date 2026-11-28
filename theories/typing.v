@@ -95,7 +95,7 @@ https://www.w3.org/TR/wasm-core-2/exec/runtime.html#exec-expand
 **)
 Definition expand_t (C: t_context) (tb: block_type) : option instr_type :=
   match tb with
-  | BT_id n => lookup_N C.(tc_types) n
+  | BT_id n => lookup_function_type C.(tc_types) n
   | BT_valtype (Some t) => Some (Tf [::] [::t])
   | BT_valtype None => Some (Tf [::] [::])
   end.
@@ -266,7 +266,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 | bet_call_indirect : forall C x y tabtype t1s t2s,
   lookup_N (tc_tables C) x = Some tabtype ->
   tabtype.(tt_elem_type) = T_funcref ->
-  lookup_N (tc_types C) y = Some (Tf t1s t2s) ->
+   lookup_function_type (tc_types C) y = Some (Tf t1s t2s) ->
   be_typing C [::BI_call_indirect x y] (Tf (t1s ++ [::T_num T_i32]) t2s)
 | bet_return_call : forall C x t1s t2s t3s t4s,
   lookup_N (tc_funcs C) x = Some (Tf t1s t2s) ->
@@ -275,7 +275,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 | bet_return_call_indirect : forall C x y tabt t1s t2s t3s t4s,
   lookup_N (tc_tables C) x = Some tabt ->
   tabt.(tt_elem_type) = T_funcref ->
-  lookup_N (tc_types C) y = Some (Tf t1s t2s) -> 
+   lookup_function_type (tc_types C) y = Some (Tf t1s t2s) ->
   tc_return C = Some t2s ->
   be_typing C [::BI_return_call_indirect x y] (Tf (t3s ++ t1s ++ [::T_num T_i32]) t4s)
 | bet_local_get : forall C x t,
@@ -407,7 +407,7 @@ Definition expr_typing (C: t_context) (bes: list basic_instruction) (ts: result_
 
 Definition func_typing (C: t_context) (code: module_func) (tf: function_type) : Prop :=
   let: {| modfunc_type := x; modfunc_locals := ts; modfunc_body := bes |} := code in
-  match lookup_N C.(tc_types) x with
+  match lookup_function_type C.(tc_types) x with
   | Some (Tf ts1 ts2) =>
       tf = (Tf ts1 ts2) /\
       let C' := upd_local_label_return C (ts1 ++ ts) [:: ts2] (Some ts2) in
@@ -479,8 +479,8 @@ This definition is currently computable -- hopefully it remains so in the future
  **)
 Definition inst_typing (s : store_record) (inst : moduleinst) : option t_context :=
   let '{| inst_types := ts; inst_funcs := fs; inst_tables := tbs; inst_mems := ms; inst_globals := gs; inst_elems := es; inst_datas := ds; inst_exports := exps |} := inst in
-  if (all functype_valid ts &&
-      function_type_identitiesb s.(s_types) inst.(inst_defined_types)
+  if (all source_subtype_valid ts &&
+      source_type_identitiesb s.(s_types) inst.(inst_defined_types)
         ts inst.(inst_defined_types)) then
     match those (map (ext_func_typing s) fs) with
     | Some tfs =>
