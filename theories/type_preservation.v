@@ -1053,6 +1053,11 @@ Qed.
 
 Ltac resolve_store_extension :=
   repeat lazymatch goal with
+  | |- context [ component_extension gc_type_context.defined_type_eqb ?x ?x ] =>
+      rewrite -> component_extension_same_refl
+        with (f := gc_type_context.defined_type_eqb);
+        last (let id := fresh "identity" in move => id;
+          by apply gc_type_context_properties.defined_type_eqb_correct)
   | |- context [ gc_type_context.canonical_registry_prefixb ?x ?x ] =>
       rewrite gc_type_context_properties.canonical_registry_prefixb_refl
   | |- context [ component_extension (@operations.func_extension _) ?x ?x ] =>
@@ -1085,6 +1090,7 @@ Ltac resolve_store_typing :=
   end;
   repeat split;
   repeat lazymatch goal with
+  | |- Datatypes.length _ = Datatypes.length _ => assumption
   | |- gc_declaration_typing.canonical_registry_validb _ = true => assumption
   | |- List.Forall (fun x => exists t, funcinst_typing ?s x t) _ =>
       by eapply store_extension_funcs_typing; eauto
@@ -1120,7 +1126,7 @@ Proof.
   move => Hstore He.
   pose proof (alloc_exn_extension s e) as Hext.
   unfold store_typing in *; destruct s; simpl in *.
-  destruct Hstore as [Htypes [Hfs [Hts [Hms [Hgs [Hes [Hds Hxs]]]]]]].
+  destruct Hstore as [Htypes [Hfs [Hts [Hms [Hgs [Hes [Hds [Hxs Hids]]]]]]]].
   repeat split.
   - exact Htypes.
   - by eapply store_extension_funcs_typing; eauto.
@@ -1133,6 +1139,7 @@ Proof.
     + by eapply store_extension_exns_typing; eauto.
     + constructor; last constructor.
       by eapply exninst_typing_extension; eauto.
+  - exact Hids.
 Qed.
 
 Lemma alloc_exn_lookup s e :

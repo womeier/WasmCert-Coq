@@ -171,3 +171,68 @@ exports, import attribute/truncation/overflow, invalid tag signatures and
 tag/function kind separation. CLI host loading validates before resolving host
 imports, so a missing provider cannot mask an invalid import declaration.
 Full official artifacts are in `/tmp/opencode/eh-tag-extern-official-binary/`.
+
+## Canonical per-tag linking: 489/489
+
+The following implementation increment resolves all three root imports and
+their 41 cascades. The **same 489 binary-scope commands now pass 489/489**, with
+zero infrastructure errors. All eight projected files pass, including
+`imports.wast` 168/168, `tag.wast` 4/4 and `try_table.wast` 52/52. The same 18
+mapped text-only malformed commands remain deferred and are not passes.
+Artifacts are under `/tmp/opencode/eh-canonical-tag-official-binary/`.
+
+Each tag address now has a canonical `defined_type` in `s_tag_ids`. Allocation
+uses the module's actual `inst_defined_types` map, retains old identities, and
+preserves imported-before-local tag address order and re-exports. Store typing
+requires equal lengths for the identity table and `s_tags`; store extension preserves
+old tag IDs and their registry meanings.
+
+Both the executable instantiator and relational `instantiate` require the
+nominal `module_tag_imports_matching` check. It resolves the expected import's
+type index through the newly closed module map; looks up the provided tag's
+stored canonical ID; checks the actual signature in the **old** registry and
+the expected signature in the extended registry; requires empty results and
+bidirectional `defined_type_equiv`. Missing, invalid or future-only provided
+IDs cannot be accepted using the new registry. Payload equality alone is not
+tag identity.
+
+The existing source-typed runtime additionally uses `portable_tag_parameters`:
+both compatibility signatures must close without local type names and compare
+equal as **closed** function types. `portable_tag_parameters_equal` proves the
+source-cache agreement used by the connected preservation/instantiation
+proofs; the executable does not compare source indices as an identity test.
+`CH_defined` payloads are not erased or reconstructed from local numbers.
+
+Explicit properties in `instantiation_properties.v`:
+
+- `tag_import_matching_correct`: iff with two directed canonical matches,
+  checked expansions and closed cache agreement.
+- `tag_import_matching_store_extension` and
+  `tag_import_matching_registry_extension`: stable checks under store/registry
+  extension (the latter assumes the existing canonical supertype well-formedness).
+- `tag_import_matching_closed_signature_agreement`: the actual and expected
+  canonical types expand to the same closed parameter list.
+- `alloc_module_tag_defined_identity`: allocated addresses, including the import
+  offset, have exactly the ID selected by the module's closed type map.
+
+`instantiated_tag_canonical_signature` in `instantiation_sound.v` connects actual
+instantiation, tag-address lookup, the stored ID, source closing and canonical
+signature expansion. Existing main soundness/preservation statements retain
+their premises; nominal matching is an actual required instantiation check.
+The matcher/extension/signature-agreement proofs are globally closed. Connected
+allocation/instantiation proofs retain disclosed inherited assumptions.
+
+Extra binary regressions distinguish equal payloads and equal source index
+numbers from canonical identity, reject directed child-to-parent tag matches,
+and exercise successful import/re-export/import chains. Extracted store tests
+inspect canonical IDs across repeated allocation, mixed type-index order and
+extension with existing exceptions. No official commands/expectations changed.
+
+**Not general final-EH completeness:** all pinned official binary commands pass,
+but indexed-payload tag imports cannot yet cross the legacy source-typed runtime
+boundary. Such imports fail the explicit portability check rather than aliasing
+raw indices. GC's main closed storage/context/classifier/null-lowering migration
+is still required to replace this restriction with contextual closed payload
+typing. GC `b2fbd83` was inspected; no unfinished migration or competing runtime
+descriptor model was imported. Existing GC39 expansion and bidirectional
+equivalence contracts suffice for this nominal tag-linking increment.

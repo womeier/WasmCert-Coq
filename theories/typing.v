@@ -666,14 +666,15 @@ Definition exninst_typing (s : store_record) (e : exninst) : Prop :=
 Definition store_typing (s : store_record) : Prop :=
   canonical_registry_validb s.(s_types) = true /\
   match s with
-  | Build_store_record fs tabs ms gs es ds tags exns types =>
+  | Build_store_record fs tabs ms gs es ds tags exns types tagids =>
     (List.Forall (fun x => exists t, funcinst_typing s x t) fs) /\
     (List.Forall (fun x => exists t, tableinst_typing s x = Some t) tabs) /\
     (List.Forall (fun x => exists t, meminst_typing s x = Some t) ms) /\
     (List.Forall (fun x => exists t, globalinst_typing s x = Some t) gs) /\
     (List.Forall (fun x => exists t, eleminst_typing s x = Some t) es) /\
     (List.Forall (fun x => exists t, datainst_typing s x = Some t) ds) /\
-    List.Forall (exninst_typing s) exns
+    List.Forall (exninst_typing s) exns /\
+    List.length tagids = List.length tags
   end.
 
 Definition config_typing (s: store_record) (th: thread) (ts: result_type) : Prop :=

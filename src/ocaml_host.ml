@@ -40,7 +40,8 @@ let starting_wasm_host_store =
       Extract.s_datas = [];
       Extract.s_tags = [];
       Extract.s_exns = [];
-     Extract.s_types = types
+     Extract.s_types = types;
+     Extract.s_tag_ids = []
     } 
   in
   let env_module_exps = StringMap.add "clock_ms"  (Extract.EV_func (z_of_int 0)) Utils.StringMap.empty in 

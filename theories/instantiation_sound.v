@@ -77,14 +77,10 @@ Lemma instantiation_sound: forall (s: store_record) m v_imps s' f exps,
 Proof.
   move => s m v_imps s' f exps HST Hinst.
   unfold instantiate in Hinst.
-  destruct Hinst as [t_imps_mod [t_imps [t_exps [hs' [inst [g_inits [r_inits [Hmodtype [Himptype [Hsubtype [Hallocmodule [Hinstglob [Hinstelem [Heqf Heqexps]]]]]]]]]]]]]].
-  have [Hactualtags Hexpectedtags] :=
-    @import_subtyping_no_source_tags t_imps t_imps_mod Hsubtype.
-  have Htagimports: ext_tags v_imps = nil.
-  { by eapply external_typing_no_source_tags; eauto. }
+  destruct Hinst as [t_imps_mod [t_imps [t_exps [hs' [inst [g_inits [r_inits [Hmodtype [Himptype [Hsubtype [Hnominal [Hallocmodule [Hinstglob [Hinstelem [Heqf Heqexps]]]]]]]]]]]]]]].
+  have Htagparameters := @import_subtyping_tag_parameters t_imps t_imps_mod Hsubtype.
 
   unfold alloc_module in Hallocmodule.
-  rewrite Htagimports /= in Hallocmodule.
   destruct Hallocmodule as [registry [typeids [Hclosed [Hidentity [Htypeids Hallocmodule]]]]].
   destruct (alloc_funcs _ _ _) as [s1 ifs] eqn:Hallocfuncs.
   destruct (alloc_tabs _ _) as [s2 its] eqn:Halloctabs.
@@ -93,6 +89,14 @@ Proof.
   destruct (alloc_elems _ _) as [s5 ies] eqn:Hallocelems.
   destruct (alloc_datas _ _) as [s_data ids] eqn:Hallocdatas.
   destruct (alloc_tags _ _ _) as [s6 itags] eqn:Halloctags.
+
+  pose proof (alloc_funcs_tag_ids Hallocfuncs) as HI1.
+  pose proof (alloc_tabs_tag_ids Halloctabs) as HI2.
+  pose proof (alloc_mems_tag_ids Hallocmems) as HI3.
+  pose proof (alloc_globs_tag_ids Hallocglobs) as HI4.
+  pose proof (alloc_elems_tag_ids Hallocelems) as HI5.
+  pose proof (alloc_datas_tag_ids Hallocdatas) as HI6.
+  pose proof (alloc_tags_tag_ids Halloctags) as HI7.
 
   pose proof (alloc_funcs_tags Hallocfuncs) as HT1.
   pose proof (alloc_tabs_tags Halloctabs) as HT2.
@@ -125,6 +129,10 @@ Proof.
     destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
     unfold store_extension => /=.
     apply/andP; split; last first.
+    { eapply component_extension_extend; first reflexivity.
+      move => ids; apply reflexive_all2_same.
+      by move => id; apply gc_type_context_properties.defined_type_eqb_correct. }
+    apply/andP; split; last first.
     { apply gc_type_context_properties.canonical_registry_prefixb_correct.
       apply gc_declaration_typing_properties.close_and_validate_type_groups_sound in Hclosed.
       destruct Hclosed as [_ Hclosed].
@@ -146,9 +154,9 @@ Proof.
   destruct Hmodtype as [Hdecl Hmodtype].
   destruct m; unfold module_components_typing in Hmodtype; simpl in *.
   destruct Hmodtype as [fts [tts [mts [gts [rts [dts [Hmtypes [Hmfunctype [Hmtabletype [Hmmemtype [Hmemcount [Hmglobaltype [Hmelemtype [Hmdatatype [Hstarttype [Hmimptype [Hmexptype [Hexpunique Htags]]]]]]]]]]]]]]]]]].
-  rewrite Hexpectedtags /= in Hmfunctype Hstarttype Hmimptype Hmexptype.
+  rewrite -Htagparameters in Hmfunctype Hstarttype Hmimptype Hmexptype.
 
-  remember (Build_t_context (List.concat mod_types) (ext_t_funcs t_imps ++ fts) (ext_t_tables t_imps ++ tts) (ext_t_mems t_imps ++ mts) (ext_t_globals t_imps ++ gts) rts dts nil nil None (iota_N 0 (length inst.(inst_funcs))) (map (gen_tag_instance (List.concat mod_types)) mod_tags)) as C.
+  remember (Build_t_context (List.concat mod_types) (ext_t_funcs t_imps ++ fts) (ext_t_tables t_imps ++ tts) (ext_t_mems t_imps ++ mts) (ext_t_globals t_imps ++ gts) rts dts nil nil None (iota_N 0 (length inst.(inst_funcs))) (ext_t_tags t_imps ++ map (gen_tag_instance (List.concat mod_types)) mod_tags)) as C.
 
   assert (inst_typing s' f.(f_inst) = Some C) as HIT.
   {
@@ -379,7 +387,10 @@ Proof.
         move => n' vref Hnthref.
         eapply Forall2_nth_impl' in Hreduce as [be [Hnthinit Hreduce]]; eauto.
         eapply Forall_lookup in Hconstbet as [Hconst Hbet]; eauto.
-         change (value_typing (upd_s_types s6 registry) (VAL_ref vref)
+         change (value_typing
+           (upd_s_types (upd_s_tag_ids s6
+             (s.(s_tag_ids) ++ tag_defined_ids inst_defined_types mod_tags)) registry)
+           (VAL_ref vref)
            (T_ref modelem_type) = true).
          eapply init_value_typing; eauto.
         { move => m addr /= Hnth'.
@@ -448,8 +459,14 @@ Proof.
     }
 
     assert (those (map (lookup_N (s_tags s6)) inst_tags) =
-            Some (map (gen_tag_instance (List.concat mod_types)) mod_tags)) as Hjit.
+            Some (ext_t_tags t_imps ++ map (gen_tag_instance (List.concat mod_types)) mod_tags)) as Hjit.
     { subst inst_tags.
+      rewrite map_cat; apply those_cat.
+      { eapply tag_parameters_transport;
+          last by eapply external_typing_tag_parameters; eauto.
+        move => a ps Hlookup.
+        exact (store_extension_lookup_tag Hstoreext Hlookup).
+      }
       apply those_spec.
       { by rewrite List.length_map iota_N_length List.length_map. }
       move => n ps Hnth.
@@ -479,7 +496,7 @@ Proof.
       by subst; simpl. }
     extract_premise.
     destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
-    destruct HST as [Htypes [Hsfunctype [Hstabletype [Hsmemtype [Hsglobaltype [Hselemtype [Hsdatatype Hsexnstype]]]]]]].
+    destruct HST as [Htypes [Hsfunctype [Hstabletype [Hsmemtype [Hsglobaltype [Hselemtype [Hsdatatype [Hsexnstype Htagidslength]]]]]]]].
     repeat split => //.
     (* Functions *)
     {
@@ -733,6 +750,8 @@ Proof.
     }
     (* Existing exceptions retain identity, tag type and well-typed fields. *)
     { by eapply store_extension_exns_typing; eauto. }
+    { rewrite !List.length_app /tag_defined_ids !List.length_map.
+      by rewrite Htagidslength. }
   }
   repeat split => //.
   exists C.
@@ -740,4 +759,39 @@ Proof.
   exists nil; subst; by split.
 Qed.
   
+Theorem instantiated_tag_canonical_signature s m imports s' f expressions n index ps :
+  store_typing s ->
+  instantiate s m imports (s', f, expressions) ->
+  List.nth_error m.(mod_tags) n = Some index ->
+  lookup_function_type (List.concat m.(mod_types)) index = Some (Tf ps nil) ->
+  exists address id closed_ps,
+    List.nth_error f.(f_inst).(inst_tags) (length (ext_tags imports) + n) = Some address /\
+    lookup_N s'.(s_tag_ids) address = Some id /\
+    gc_type_context.close_function_type f.(f_inst).(inst_defined_types) 0 (Tf ps nil) =
+      Some (Closed_ft closed_ps nil) /\
+    gc_type_context.expand_function_type s'.(s_types) id =
+      Some (Closed_ft closed_ps nil).
+Proof.
+  move => Store Instantiated Nth Source.
+  have [_ [_ [C FrameTyped]]] := instantiation_sound Store Instantiated.
+  unfold frame_typing in FrameTyped.
+  destruct (inst_typing s' f.(f_inst)) as [C0|] eqn:Typed => //.
+  destruct Instantiated as [impts [actual [expts [hs [inst [globals [elements
+    [Module [Imports [Matches [Nominal [Allocated [Globals [Elements [Frame Expr]]]]]]]]]]]]]]].
+  subst f; simpl in *.
+  have Sources := alloc_module_source_types Allocated.
+  rewrite -Sources in Source.
+  destruct (gc_runtime_type_properties.inst_typing_function_expansion_agreement
+    _ _ _ _ _ Typed Source) as [id [signature [Resolved [Closed Expanded]]]].
+  have Closing := Closed.
+  unfold gc_type_context.close_function_type in Closing.
+  destruct (those0 (List.map
+    (gc_type_context.close_value_type (inst_defined_types inst) 0) ps))
+    as [closed_ps|] eqn:Parameters => //.
+  simpl in Closing; injection Closing as <-.
+  destruct (alloc_module_tag_defined_identity Store Allocated Nth Resolved)
+    as [address [Address Identity]].
+  exists address, id, closed_ps; by repeat split.
+Qed.
+
 End Host.

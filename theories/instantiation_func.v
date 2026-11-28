@@ -310,7 +310,8 @@ Definition interp_alloc_module (s : store_record) (m : module) (imps : list exte
   let '(s5, i_es) := alloc_elems s4 m.(mod_elems) rvs in
    let '(s6, i_ds) := alloc_datas s5 m.(mod_datas) in
    let '(s', i_tags) := alloc_tags s6 (List.concat m.(mod_types)) m.(mod_tags) in
-  (upd_s_types s' registry, inst).
+  (upd_s_types
+    (upd_s_tag_ids s' (s.(s_tag_ids) ++ tag_defined_ids typeids m.(mod_tags))) registry, inst).
 
 (* Use a monad for error reporting at some point? *)
 Definition interp_instantiate (hs: host_state) (s : store_record) (m : module) (v_imps : list extern_value) : option (host_state * store_record * frame * list basic_instruction) * string :=
@@ -323,7 +324,8 @@ Definition interp_instantiate (hs: host_state) (s : store_record) (m : module) (
       if source_type_identitiesb registry typeids (List.concat m.(mod_types)) typeids then
       match those (map (external_type_checker s) v_imps) with
       | Some t_imps =>
-          if all2 import_subtyping t_imps t_imps_mod then
+          if all2 import_subtyping t_imps t_imps_mod &&
+             tag_imports_matching s registry typeids m.(mod_imports) v_imps then
             let inst_init :=
               {|
                 inst_defined_types := nil;

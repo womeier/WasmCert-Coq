@@ -325,8 +325,8 @@ Inductive extern_type : Set :=
 | ET_mem : memory_type -> extern_type
 | ET_global : global_type -> extern_type
 (* Source-validation signature/cache only, NOT a canonical tag identity.
-   Concrete tag import matching must use defined_type_equiv at the closed
-   boundary; import_subtyping deliberately does not match these caches. *)
+   Concrete tag import matching uses defined_type_equiv at the mandatory
+   closed boundary; portable cache compatibility alone cannot link a tag. *)
 | ET_tag : result_type -> extern_type
 .
 
@@ -1139,6 +1139,9 @@ Record store_record : Type := (* s *) {
   s_exns : list exninst;
   (* Append-only canonical groups shared by instantiated modules. *)
   s_types : canonical_registry;
+  (** Canonical defined identity at each tag address. Payload signatures in
+      s_tags are compatibility caches, never identities. *)
+  s_tag_ids : list defined_type;
 }.
 
                             

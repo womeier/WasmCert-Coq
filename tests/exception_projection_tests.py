@@ -41,6 +41,18 @@ def module(body, result=b"\x7f", imports=b"", tags=False):
         + sec(10, vec([u32(len(body) + 2) + b"\0" + body + b"\x0b"]))
     )
 
+def tag_module(types, *, local=None, imported=None, export=True):
+    data = b"\0asm\x01\0\0\0" + sec(1, vec(types))
+    if imported is not None:
+        provider, index = imported
+        provider = provider.encode()
+        data += sec(2, vec([u32(len(provider)) + provider + b"\x04main\x04\0" + u32(index)]))
+    if local is not None:
+        data += sec(13, vec([b"\0" + u32(local)]))
+    if export:
+        data += sec(7, b"\x01\x04main\x04\0")
+    return data
+
 
 def literal(n):
     return {"type": "i32", "value": str(n)}
@@ -163,6 +175,19 @@ def main(exe):
         "tag-export.wasm": (
             b"\0asm\x01\0\0\0" + sec(1, b"\x01\x60\0\0")
             + sec(13, b"\x01\0\0") + sec(7, b"\x01\x04main\x04\0")),
+        # All three signatures have identical expanded i32 payloads. Their
+        # canonical defined identities/finality/declared edges differ.
+        "nonfinal-tag.wasm": tag_module([b"\x50\0\x60\x01\x7f\0"], local=0),
+        "final-tag-import.wasm": tag_module([b"\x60\x01\x7f\0"],
+                                           imported=("nominal", 0)),
+        "child-tag.wasm": tag_module(
+            [b"\x50\0\x60\x01\x7f\0", b"\x4f\x01\0\x60\x01\x7f\0"], local=1),
+        "parent-tag-import.wasm": tag_module([b"\x50\0\x60\x01\x7f\0"],
+                                            imported=("child", 0)),
+        "same-tag-reexport.wasm": tag_module([b"\x50\0\x60\x01\x7f\0"],
+                                            imported=("nominal", 0)),
+        "same-tag-import-again.wasm": tag_module([b"\x50\0\x60\x01\x7f\0"],
+                                                imported=("reexport", 0)),
     }
     positive = [
         load("seven.wasm", "A"), {"type": "register", "name": "A", "as": "a"},
@@ -181,6 +206,17 @@ def main(exe):
         {"type": "register", "name": "T", "as": "a"},
         # An exported tag is a distinct extern kind, not a same-number func.
         {"type": "assert_unlinkable", "filename": "import.wasm"},
+        load("nonfinal-tag.wasm", "Nominal"),
+        {"type": "register", "name": "Nominal", "as": "nominal"},
+        # Same source index and expanded payload do NOT establish identity.
+        {"type": "assert_unlinkable", "filename": "final-tag-import.wasm"},
+        load("child-tag.wasm", "Child"),
+        {"type": "register", "name": "Child", "as": "child"},
+        # Directed child <: parent matching is insufficient for a tag import.
+        {"type": "assert_unlinkable", "filename": "parent-tag-import.wasm"},
+        load("same-tag-reexport.wasm", "Reexport"),
+        {"type": "register", "name": "Reexport", "as": "reexport"},
+        load("same-tag-import-again.wasm"),
     ]
     check_driver(exe, files, positive, len(positive))
     negative = [

@@ -2041,6 +2041,11 @@ Proof.
   move => Hext1 Hext2.
   unfold store_extension, operations.store_extension in *.
   remove_bools_options.
+  apply/andP; split; last first.
+  { eapply component_extension_trans; eauto.
+    move => x y z Hxy Hyz.
+    apply gc_type_context_properties.defined_type_eqb_correct in Hxy, Hyz.
+    subst; apply gc_type_context_properties.defined_type_eqb_correct; reflexivity. }
   apply/andP; split; last by eapply gc_type_context_properties.canonical_registry_prefixb_trans; eauto.
   apply/andP; split; last first.
   { eapply component_extension_trans; eauto.
@@ -2072,6 +2077,8 @@ Proof.
   + by apply all2_data_extension_same.
   + apply reflexive_all2_same; move => x; by rewrite eq_refl.
   + apply reflexive_all2_same; move => x; by rewrite eq_refl.
+  + apply reflexive_all2_same; move => x.
+    by apply gc_type_context_properties.defined_type_eqb_correct.
 Qed.
 
 Lemma component_extension_lookup {T: Type} (l1 l2: list T) f n x:
@@ -2093,8 +2100,27 @@ Qed.
 Lemma store_extension_type_groups s s' :
   store_extension s s' -> exists suffix, s'.(s_types) = s.(s_types) ++ suffix.
 Proof.
-  unfold store_extension. move/andP => [_ Prefix].
+  unfold store_extension. move/andP => [/andP [_ Prefix] _].
   now apply canonical_registry_prefixb_correct.
+Qed.
+
+Lemma store_extension_lookup_tag_id s s' address id :
+  store_extension s s' ->
+  lookup_N s.(s_tag_ids) address = Some id ->
+  lookup_N s'.(s_tag_ids) address = Some id.
+Proof.
+  unfold store_extension; move/andP => [_ Ids] Lookup.
+  destruct (component_extension_lookup Ids Lookup) as [other [Found Same]].
+  apply gc_type_context_properties.defined_type_eqb_correct in Same.
+  by subst other.
+Qed.
+
+Lemma store_typing_tag_ids_length s :
+  store_typing s ->
+  List.length s.(s_tag_ids) = List.length s.(s_tags).
+Proof.
+  unfold store_typing; destruct s => /=.
+  tauto.
 Qed.
 
 Lemma store_extension_host_identity s s' source :
@@ -2147,6 +2173,7 @@ Proof.
   unfold store_extension in Hext.
   move/andP in Hext; destruct Hext as [Hext _].
   move/andP in Hext; destruct Hext as [Hext _].
+  move/andP in Hext; destruct Hext as [Hext _].
   move/andP in Hext; destruct Hext as [_ Htags].
   destruct (component_extension_lookup Htags Hlookup) as [ps' [Hlookup' Heq]].
   move/eqP in Heq; by subst ps'.
@@ -2160,9 +2187,26 @@ Proof.
   move => s s' n e Hext Hlookup.
   unfold store_extension in Hext.
   move/andP in Hext; destruct Hext as [Hext _].
+  move/andP in Hext; destruct Hext as [Hext _].
   move/andP in Hext; destruct Hext as [_ Hexns].
   destruct (component_extension_lookup Hexns Hlookup) as [e' [Hlookup' Heq]].
   move/eqP in Heq; by subst e'.
+Qed.
+
+Lemma tag_parameters_transport (old_tags new_tags : list result_type) addresses parameters :
+  (forall a ps, lookup_N old_tags a = Some ps ->
+                lookup_N new_tags a = Some ps) ->
+  those (map (lookup_N old_tags) addresses) = Some parameters ->
+  those (map (lookup_N new_tags) addresses) = Some parameters.
+Proof.
+  move => Lookup.
+  rewrite -!those_those0.
+  move: parameters; induction addresses as [|a addresses IH]; move => ps => /=.
+  - by move => [<-].
+  - destruct (lookup_N old_tags a) as [p|] eqn:Head => //.
+    destruct (those0 (map (lookup_N old_tags) addresses)) as [tail|] eqn:Tail => //.
+    move => [<-].
+    by rewrite (Lookup _ _ Head) (IH _ (Logic.eq_refl _)).
 Qed.
 
 Lemma store_extension_lookup_func: forall s s' n cl,
@@ -2515,7 +2559,7 @@ Lemma store_typing_exn_lookup: forall s n e,
 Proof.
   move => s n e Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [_ [_ [_ [_ [_ [_ [_ Hexns]]]]]]]; simpl in *.
+  destruct Hst as [_ [_ [_ [_ [_ [_ [_ [Hexns _]]]]]]]]; simpl in *.
   by eapply Forall_lookup in Hexns; eauto.
 Qed.
 

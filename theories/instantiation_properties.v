@@ -4,6 +4,7 @@ From mathcomp Require Import ssreflect eqtype seq ssrbool ssrfun ssrnat.
 From Stdlib Require Import Program.Equality NArith.
 Require Export instantiation_spec.
 Require Export type_preservation properties.
+From Wasm Require Import gc_runtime_type_properties.
 
 (* see common.v *)
 Set SsrOldRewriteGoalsOrder.
@@ -11,6 +12,141 @@ Set SsrOldRewriteGoalsOrder.
 Set Implicit Arguments.
 Unset Strict Implicit.
 Unset Printing Implicit Defensive.
+
+Section CanonicalTags.
+Context `{hfc : host_function_class} `{memory : BlockUpdateMemory}.
+
+(** Canonical tag matching is equivalence, not directed function subtyping and
+    not equality of expanded payloads. The cache check is a separate portable
+    source-runtime boundary, and is not used as the nominal identity. *)
+Definition tag_import_agreement s registry names index value : Prop :=
+  exists address actual expected parameters actual_ps expected_ps,
+    value = EV_tag address /\
+    lookup_N s.(s_tag_ids) address = Some actual /\
+    lookup_N names index = Some expected /\
+    lookup_N s.(s_tags) address = Some parameters /\
+    gc_type_context.expand_function_type s.(s_types) actual =
+      Some (Closed_ft actual_ps nil) /\
+    gc_type_context.expand_function_type registry expected =
+      Some (Closed_ft expected_ps nil) /\
+    gc_type_context.close_function_type nil 0 (Tf parameters nil) =
+      Some (Closed_ft actual_ps nil) /\
+    gc_type_context.defined_type_matches registry actual expected = true /\
+    gc_type_context.defined_type_matches registry expected actual = true.
+
+Theorem tag_import_matching_correct s registry names index value :
+  tag_import_matching s registry names index value = true <->
+  tag_import_agreement s registry names index value.
+Proof.
+  split.
+  - unfold tag_import_matching; destruct value => //.
+    destruct (lookup_N (s_tag_ids s) t) as [actual|] eqn:Actual => //.
+    destruct (lookup_N names index) as [expected|] eqn:Expected => //.
+    destruct (lookup_N (s_tags s) t) as [parameters|] eqn:Parameters => //.
+    destruct (gc_type_context.expand_function_type (s_types s) actual)
+      as [[actual_ps actual_rs]|] eqn:A => //.
+    destruct actual_rs => //.
+    destruct (gc_type_context.expand_function_type registry expected)
+      as [[expected_ps expected_rs]|] eqn:E => //.
+    destruct expected_rs => //.
+    destruct (gc_type_context.close_function_type nil 0 (Tf parameters nil))
+      as [cache|] eqn:Cache => //.
+    destruct (gc_type_context.closed_function_type_eq_dec cache
+      (Closed_ft actual_ps nil)) as [Same|] => //.
+    subst cache.
+    rewrite /gc_type_context.defined_type_equiv /= => /andP [Forward Backward].
+    exists t, actual, expected, parameters, actual_ps, expected_ps.
+    by repeat split.
+  - move => [address [actual [expected [parameters [actual_ps [expected_ps
+      [-> [Actual [Expected [Parameters [A [E [Cache [Forward Backward]]]]]]]]]]]]]].
+    unfold tag_import_matching.
+    rewrite Actual Expected Parameters A E Cache.
+    destruct (gc_type_context.closed_function_type_eq_dec
+      (Closed_ft actual_ps nil) (Closed_ft actual_ps nil)) => //.
+    by rewrite /gc_type_context.defined_type_equiv Forward Backward.
+Qed.
+
+Theorem tag_import_matching_store_extension s s' registry names index value :
+  store_extension s s' ->
+  tag_import_matching s registry names index value = true ->
+  tag_import_matching s' registry names index value = true.
+Proof.
+  move => Extension /tag_import_matching_correct
+    [address [actual [expected [parameters [actual_ps [expected_ps
+      [-> [Actual [Expected [Parameters [A [E [Cache [Forward Backward]]]]]]]]]]]]]].
+  apply/tag_import_matching_correct.
+  exists address, actual, expected, parameters, actual_ps, expected_ps.
+  repeat split => //.
+  - exact (store_extension_lookup_tag_id Extension Actual).
+  - exact (store_extension_lookup_tag Extension Parameters).
+  - by eapply store_extension_function_expansion; eauto.
+Qed.
+
+Theorem tag_import_matching_registry_extension s registry suffix names index value :
+  gc_type_context_properties.canonical_registry_super_wf registry ->
+  tag_import_matching s registry names index value = true ->
+  tag_import_matching s (registry ++ suffix) names index value = true.
+Proof.
+  move => WF /tag_import_matching_correct
+    [address [actual [expected [parameters [actual_ps [expected_ps
+      [-> [Actual [Expected [Parameters [A [E [Cache [Forward Backward]]]]]]]]]]]]]].
+  have Equivalent: gc_type_context.defined_type_equiv registry actual expected = true.
+  { by rewrite /gc_type_context.defined_type_equiv Forward Backward. }
+  have Same := proj1 (gc_type_context_properties.defined_type_equiv_eq _ _ _ WF) Equivalent.
+  have Expanded:
+      gc_type_context.expand_function_type (registry ++ suffix) expected =
+        Some (Closed_ft expected_ps nil).
+  { rewrite gc_type_context_properties.expand_function_type_extension; first exact E.
+    unfold gc_type_context.expand_function_type, gc_type_context.expand_defined_type in E.
+    destruct (gc_type_context.lookup_defined_type registry expected) eqn:Lookup => //.
+    unfold gc_type_context.lookup_defined_type in Lookup.
+    destruct (List.nth_error registry (N.to_nat (defined_group expected))) eqn:Group => //.
+    by apply gc_type_context_properties.nth_error_index_bound in Group.
+  }
+  apply/tag_import_matching_correct.
+  exists address, actual, expected, parameters, actual_ps, expected_ps.
+  repeat split => //; subst expected; apply gc_type_context_properties.defined_type_matches_refl.
+Qed.
+
+Theorem tag_import_matching_closed_signature_agreement
+    s registry names index address :
+  gc_type_context_properties.canonical_registry_super_wf registry ->
+  (exists suffix, registry = s.(s_types) ++ suffix) ->
+  tag_import_matching s registry names index (EV_tag address) = true ->
+  exists actual expected parameters closed_ps,
+    lookup_N s.(s_tag_ids) address = Some actual /\
+    lookup_N names index = Some expected /\
+    lookup_N s.(s_tags) address = Some parameters /\
+    gc_type_context.expand_function_type s.(s_types) actual =
+      Some (Closed_ft closed_ps nil) /\
+    gc_type_context.expand_function_type registry expected =
+      Some (Closed_ft closed_ps nil) /\
+    gc_type_context.close_function_type nil 0 (Tf parameters nil) =
+      Some (Closed_ft closed_ps nil).
+Proof.
+  move => WF [suffix Prefix] /tag_import_matching_correct
+    [a [actual [expected [parameters [actual_ps [expected_ps
+      [Value [Actual [Expected [Parameters [A [E [Cache [Forward Backward]]]]]]]]]]]]]].
+  injection Value as <-.
+  have Equivalent: gc_type_context.defined_type_equiv registry actual expected = true.
+  { by rewrite /gc_type_context.defined_type_equiv Forward Backward. }
+  have Same := proj1 (gc_type_context_properties.defined_type_equiv_eq _ _ _ WF) Equivalent.
+  have Expanded: gc_type_context.expand_function_type registry actual =
+      Some (Closed_ft actual_ps nil).
+  { rewrite Prefix gc_type_context_properties.expand_function_type_extension; first exact A.
+    unfold gc_type_context.expand_function_type, gc_type_context.expand_defined_type in A.
+    destruct (gc_type_context.lookup_defined_type (s_types s) actual) eqn:Lookup => //.
+    unfold gc_type_context.lookup_defined_type in Lookup.
+    destruct (List.nth_error (s_types s) (N.to_nat (defined_group actual))) eqn:Group => //.
+    by apply gc_type_context_properties.nth_error_index_bound in Group.
+  }
+  rewrite Same E in Expanded.
+  injection Expanded as Equal; subst expected_ps.
+  exists actual, expected, parameters, actual_ps.
+  by repeat split.
+Qed.
+
+End CanonicalTags.
 
 (* Some of the proofs were adapted from the Iris branch -- therefore the stdpp notations *)
 
@@ -258,6 +394,55 @@ Proof.
   by move => st x; unfold alloc_func, add_func.
 Qed.
 
+Lemma alloc_funcs_tag_ids s fs inst s' addrs :
+  alloc_funcs s fs inst = (s', addrs) -> s_tag_ids s' = s_tag_ids s.
+Proof.
+  unfold alloc_funcs; apply alloc_Xs_preserves.
+  by move => st x; unfold alloc_func, add_func.
+Qed.
+
+Lemma alloc_tabs_tag_ids s ts s' addrs :
+  alloc_tabs s ts = (s', addrs) -> s_tag_ids s' = s_tag_ids s.
+Proof.
+  unfold alloc_tabs; apply alloc_Xs_preserves.
+  by move => st [lim rt]; destruct lim.
+Qed.
+
+Lemma alloc_mems_tag_ids s ms s' addrs :
+  alloc_mems s ms = (s', addrs) -> s_tag_ids s' = s_tag_ids s.
+Proof.
+  unfold alloc_mems; apply alloc_Xs_preserves.
+  by move => st [lo hi].
+Qed.
+
+Lemma alloc_globs_tag_ids s gs vs s' addrs :
+  alloc_globs s gs vs = (s', addrs) -> s_tag_ids s' = s_tag_ids s.
+Proof.
+  unfold alloc_globs; apply alloc_Xs_preserves.
+  by move => st [g v]; unfold alloc_glob, add_glob.
+Qed.
+
+Lemma alloc_elems_tag_ids s es vs s' addrs :
+  alloc_elems s es vs = (s', addrs) -> s_tag_ids s' = s_tag_ids s.
+Proof.
+  unfold alloc_elems; apply alloc_Xs_preserves.
+  by move => st [e rs]; unfold alloc_elem, add_elem.
+Qed.
+
+Lemma alloc_datas_tag_ids s ds s' addrs :
+  alloc_datas s ds = (s', addrs) -> s_tag_ids s' = s_tag_ids s.
+Proof.
+  unfold alloc_datas; apply alloc_Xs_preserves.
+  by move => st d; unfold alloc_data, add_data.
+Qed.
+
+Lemma alloc_tags_tag_ids s types tags s' addrs :
+  alloc_tags s types tags = (s', addrs) -> s_tag_ids s' = s_tag_ids s.
+Proof.
+  unfold alloc_tags; apply alloc_Xs_preserves.
+  by move => st d; unfold alloc_tag, upd_s_tags.
+Qed.
+
 Lemma alloc_tabs_tags s ts s' addrs :
   alloc_tabs s ts = (s', addrs) -> s_tags s' = s_tags s.
 Proof.
@@ -441,6 +626,66 @@ Proof.
   rewrite List.nth_error_app2; last by lias.
   replace (length (ext_tags imps) + n - length (ext_tags imps))%coq_nat with n by lias.
   by eapply alloc_tags_lookup; eauto.
+Qed.
+
+Lemma alloc_module_tag_defined_identity s m imps gvs rvs s' inst n x id :
+  store_typing s ->
+  alloc_module s m imps gvs rvs (s', inst) ->
+  List.nth_error m.(mod_tags) n = Some x ->
+  lookup_N inst.(inst_defined_types) x = Some id ->
+  exists a,
+    List.nth_error inst.(inst_tags) (length (ext_tags imps) + n) = Some a /\
+    lookup_N s'.(s_tag_ids) a = Some id.
+Proof.
+  move => Typed.
+  have Size := store_typing_tag_ids_length Typed.
+  unfold alloc_module.
+  move => [registry [names [Closed [Identity [Names Allocated]]]]].
+  destruct (alloc_funcs _ _ _) as [s1 fs] eqn:F.
+  destruct (alloc_tabs _ _) as [s2 ts] eqn:T.
+  destruct (alloc_mems _ _) as [s3 ms] eqn:M.
+  destruct (alloc_globs _ _ _) as [s4 gs] eqn:G.
+  destruct (alloc_elems _ _ _) as [s5 es] eqn:E.
+  destruct (alloc_datas _ _) as [s6 ds] eqn:D.
+  destruct (alloc_tags _ _ _) as [s7 tags] eqn:J.
+  move => Nth Lookup.
+  have HT1 := alloc_funcs_tags F.
+  have HT2 := alloc_tabs_tags T.
+  have HT3 := alloc_mems_tags M.
+  have HT4 := alloc_globs_tags G.
+  have HT5 := alloc_elems_tags E.
+  have HT6 := alloc_datas_tags D.
+  have Before: s_tags s6 = s_tags s by rewrite HT6 HT5 HT4 HT3 HT2 HT1.
+  destruct (alloc_tags_iota_N J) as [Addresses _].
+  destruct Allocated as [End [_ [_ [_ [_ [_ [_ [_ [_ TagAddresses]]]]]]]]].
+  exists (N.of_nat (length s.(s_tags) + n)); split.
+  - rewrite TagAddresses List.nth_error_app2; last by lias.
+    replace (length (ext_tags imps) + n - length (ext_tags imps))%coq_nat with n by lias.
+    rewrite Addresses Before; apply iota_N_lookup.
+    apply nth_error_Some_length in Nth; by lias.
+  - subst s'; simpl.
+    unfold lookup_N; rewrite Nnat.Nat2N.id List.nth_error_app2; last by rewrite Size; lias.
+    replace (length (s_tags s) + n - length (s_tag_ids s))%coq_nat with n
+      by (rewrite Size; lias).
+    rewrite /tag_defined_ids nth_error_map' Nth => /=.
+    rewrite Names in Lookup; unfold lookup_N in Lookup.
+    f_equal; by eapply List.nth_error_nth; eauto.
+Qed.
+
+Lemma alloc_module_source_types s m imps gvs rvs s' inst :
+  alloc_module s m imps gvs rvs (s', inst) ->
+  inst.(inst_types) = List.concat m.(mod_types).
+Proof.
+  unfold alloc_module.
+  move => [registry [names [Closed [Identity [Names Allocated]]]]].
+  destruct (alloc_funcs _ _ _) as [s1 fs].
+  destruct (alloc_tabs _ _) as [s2 ts].
+  destruct (alloc_mems _ _) as [s3 ms].
+  destruct (alloc_globs _ _ _) as [s4 gs].
+  destruct (alloc_elems _ _ _) as [s5 es].
+  destruct (alloc_datas _ _) as [s6 ds].
+  destruct (alloc_tags _ _ _) as [s7 tags].
+  by destruct Allocated as [_ [Types _]].
 Qed.
 
 Lemma alloc_mem_iota_N modmems ws ws' l:

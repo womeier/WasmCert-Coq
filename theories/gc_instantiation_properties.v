@@ -50,7 +50,7 @@ Theorem instantiate_canonical_types s m imports s' f expressions :
 Proof.
   unfold instantiate.
   intros [impts [actual [expts [hs [inst [globals [elements
-    [Typed [Imports [Matches [Allocated [Globals [Elements [Frame Expr]]]]]]]]]]]]]].
+    [Typed [Imports [Matches [TagMatches [Allocated [Globals [Elements [Frame Expr]]]]]]]]]]]]]]].
   subst f.
   apply alloc_module_closed_types in Allocated.
   apply close_and_validate_type_groups_sound in Allocated.

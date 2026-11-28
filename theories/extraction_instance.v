@@ -218,6 +218,7 @@ Definition lookup_function_type := lookup_func_defined_type.
 Definition instance_context := inst_typing.
 
 Definition empty_store_record : store_record := {|
+    s_tag_ids := nil;
     s_funcs := nil;
     s_types := nil;
     s_tables := nil;

@@ -308,7 +308,11 @@ Proof.
   destruct (source_type_identitiesb registry typeids (List.concat (mod_types m)) typeids)
     eqn:Hidentity => //.
   destruct (those _) as [t_imps | ] eqn:Hextcheck => //.
-  destruct (all2 import_subtyping _ _) eqn:Hextsubtyping => //.
+   destruct (all2 import_subtyping _ _ &&
+     tag_imports_matching s registry typeids (mod_imports m) v_imps) eqn:Hchecks => //.
+   move/andP in Hchecks; destruct Hchecks as [Hextsubtyping Htagmatching].
+   have Hnominal: module_tag_imports_matching s m v_imps = true.
+   { by unfold module_tag_imports_matching; rewrite Hclosed. }
   destruct (get_global_inits _ _ (mod_globals m)) as [g_inits |] eqn:Hglobinit => //.
   destruct (get_elem_inits _ _ (mod_elems m)) as [r_inits |] eqn:Heleminit => //.
   destruct (interp_alloc_module s m v_imps g_inits r_inits registry typeids) as [s' inst'] eqn:Halloc => //.

@@ -61,7 +61,7 @@ Context `{hfc : host_function_class} `{memory : BlockUpdateMemory}.
 Definition payload_bridge_store : store_record :=
   {| s_funcs := []; s_tables := []; s_mems := []; s_globals := [];
      s_elems := []; s_datas := []; s_tags := []; s_exns := [];
-     s_types := payload_registry |}.
+     s_types := payload_registry; s_tag_ids := [] |}.
 
 Example payload_bridge_store_is_typed : store_typing payload_bridge_store.
 Proof. split; [reflexivity |]; repeat split; constructor. Qed.

@@ -42,6 +42,7 @@ Definition globals_of_externals (evs : list extern_value) : list globaladdr :=
   seq.pmap (fun ev => match ev with | EV_global ta => Some ta | _ => None end) evs.
 
 Definition add_func (s : store_record) funcinst := {|
+  s_tag_ids := s.(s_tag_ids);
   s_exns := s.(s_exns);
   s_tags := s.(s_tags);
   s_types := s.(s_types);
@@ -73,6 +74,7 @@ Definition alloc_funcs (s : store_record) (m_fs : list module_func) (mi : module
   alloc_Xs (fun s m_f => alloc_func s m_f mi) s m_fs.
 
 Definition add_table (s : store_record) (ti : tableinst) : store_record := {|
+  s_tag_ids := s.(s_tag_ids);
   s_exns := s.(s_exns);
   s_tags := s.(s_tags);
   s_types := s.(s_types);
@@ -109,6 +111,7 @@ Definition gen_mem_instance (lim : limits) : meminst :=
   |}.
 
 Definition add_mem (s : store_record) (m_m : meminst) : store_record := {|
+  s_tag_ids := s.(s_tag_ids);
   s_exns := s.(s_exns);
   s_tags := s.(s_tags);
   s_types := s.(s_types);
@@ -130,6 +133,7 @@ Definition alloc_mems (s : store_record) (m_mts : list memory_type) : store_reco
   alloc_Xs alloc_mem s m_mts.
 
 Definition add_glob (s : store_record) (m_g : globalinst) : store_record := {|
+  s_tag_ids := s.(s_tag_ids);
   s_exns := s.(s_exns);
   s_tags := s.(s_tags);
   s_types := s.(s_types);
@@ -157,6 +161,7 @@ Definition alloc_globs s m_gs vs :=
   alloc_Xs alloc_glob s (List.combine m_gs vs).
 
 Definition add_elem (s : store_record) (m_e : eleminst) : store_record := {|
+  s_tag_ids := s.(s_tag_ids);
   s_exns := s.(s_exns);
   s_tags := s.(s_tags);
   s_types := s.(s_types);
@@ -179,6 +184,7 @@ Definition alloc_elems (s : store_record) (m_es : list module_element) (elem_ini
   alloc_Xs alloc_elem s (List.combine m_es elem_inits).
 
 Definition add_data (s : store_record) (m_d : datainst) : store_record := {|
+  s_tag_ids := s.(s_tag_ids);
   s_exns := s.(s_exns);
   s_tags := s.(s_tags);
   s_types := s.(s_types);
@@ -210,6 +216,9 @@ Definition alloc_tag (s : store_record) (ps : result_type) : store_record * taga
 Definition alloc_tags (s : store_record) (types : type_context)
     (tags : list typeidx) : store_record * list tagaddr :=
   alloc_Xs (fun s x => alloc_tag s (gen_tag_instance types x)) s tags.
+
+Definition tag_defined_ids (names : list defined_type) (tags : list typeidx) :=
+  map (fun x => List.nth (N.to_nat x) names (Def_type 0 0)) tags.
 
 Definition export_get_v_ext (inst : moduleinst) (exp : module_export_desc) : extern_value :=
   (* we circumvent partiality by providing 0 as a default. This is fine as the module_typing
@@ -310,7 +319,8 @@ Definition alloc_module (s : store_record) (m : module) (imps : list extern_valu
   let '(s5, i_es) := alloc_elems s4 m.(mod_elems) rvs in
    let '(s6, i_ds) := alloc_datas s5 m.(mod_datas) in
    let '(s', i_tags) := alloc_tags s6 (List.concat m.(mod_types)) m.(mod_tags) in
-  (s'_goal = upd_s_types s' registry) /\
+  (s'_goal = upd_s_types
+    (upd_s_tag_ids s' (s.(s_tag_ids) ++ tag_defined_ids typeids m.(mod_tags))) registry) /\
   (inst.(inst_types) = List.concat m.(mod_types)) /\
   (inst.(inst_funcs) = ((ext_funcs imps) ++ i_fs)) /\
   (inst.(inst_tables) = ((ext_tables imps) ++ i_ts)) /\
@@ -682,6 +692,103 @@ Definition import_mem_subtyping (t1 t2: memory_type) : bool :=
 Definition import_global_subtyping (t1 t2: global_type) : bool :=
   t1 == t2.
 
+(** Compatibility of the current source-typed runtime's payload caches. This
+    closes with NO module-local names and compares CLOSED types, so indexed
+    payloads cannot pass by coincident source index numbers. It is not nominal
+    tag identity; the mandatory check below supplies that independently. *)
+Definition portable_tag_parameters (a b : result_type) : bool :=
+  match gc_type_context.close_function_type nil 0 (Tf a nil),
+        gc_type_context.close_function_type nil 0 (Tf b nil) with
+  | Some x, Some y =>
+      if gc_type_context.closed_function_type_eq_dec x y then true else false
+  | _, _ => false
+  end.
+
+Definition portable_source_value (t : closed_value_type) : option value_type :=
+  match t with
+  | CV_num n => Some (T_num n)
+  | CV_vec v => Some (T_vec v)
+  | CV_ref n (CH_abstract h) => Some (T_ref (Ref_type n h))
+  | _ => None
+  end.
+
+Lemma portable_source_value_inverse t ct :
+  gc_type_context.close_value_type nil 0 t = Some ct ->
+  portable_source_value ct = Some t.
+Proof.
+  destruct t as [n|v|[n h]|]; simpl.
+  - by move => [<-].
+  - by move => [<-].
+  - destruct h; simpl; try (by move => E; injection E as <-).
+    unfold gc_type_context.close_type_index => /=.
+    by destruct t.
+  - discriminate.
+Qed.
+
+Lemma portable_source_parameters_inverse ps cps :
+  those0 (List.map (gc_type_context.close_value_type nil 0) ps) = Some cps ->
+  those0 (List.map portable_source_value cps) = Some ps.
+Proof.
+  move: cps; induction ps as [|p ps IH]; move => cps => /=.
+  - by move => [<-].
+  - destruct (gc_type_context.close_value_type nil 0 p) as [cp|] eqn:Head => //.
+    destruct (those0 (List.map (gc_type_context.close_value_type nil 0) ps))
+      as [cps'|] eqn:Tail => //.
+    move => [<-] => /=.
+    by rewrite (portable_source_value_inverse p cp Head) (IH _ (Logic.eq_refl _)).
+Qed.
+
+Lemma portable_tag_parameters_equal a b :
+  portable_tag_parameters a b -> a = b.
+Proof.
+  unfold portable_tag_parameters, gc_type_context.close_function_type => /=.
+  destruct (those0 (List.map (gc_type_context.close_value_type nil 0) a))
+    as [ca|] eqn:A => //.
+  destruct (those0 (List.map (gc_type_context.close_value_type nil 0) b))
+    as [cb|] eqn:B => //.
+  destruct (gc_type_context.closed_function_type_eq_dec
+    (Closed_ft ca nil) (Closed_ft cb nil)) as [E|] => //.
+  injection E as Eps; subst cb.
+  move => _.
+  have IA := portable_source_parameters_inverse a ca A.
+  have IB := portable_source_parameters_inverse b ca B.
+  by rewrite IA in IB; injection IB.
+Qed.
+
+Definition tag_import_matching (s : store_record) registry names index value : bool :=
+  match value with
+  | EV_tag address =>
+      match lookup_N s.(s_tag_ids) address, lookup_N names index,
+            lookup_N s.(s_tags) address with
+      | Some actual, Some expected, Some parameters =>
+          match gc_type_context.expand_function_type s.(s_types) actual,
+                gc_type_context.expand_function_type registry expected,
+                gc_type_context.close_function_type nil 0 (Tf parameters nil) with
+          | Some (Closed_ft actual_ps nil), Some (Closed_ft _ nil), Some cache =>
+              (if gc_type_context.closed_function_type_eq_dec
+                    cache (Closed_ft actual_ps nil) then true else false) &&
+              gc_type_context.defined_type_equiv registry actual expected
+          | _, _, _ => false
+          end
+      | _, _, _ => false
+      end
+  | _ => false
+  end.
+
+Definition tag_imports_matching (s : store_record) registry names imports values :=
+  all2 (fun imp value =>
+    match imp.(imp_desc) with
+    | MID_tag index => tag_import_matching s registry names index value
+    | _ => true
+    end) imports values.
+
+Definition module_tag_imports_matching (s : store_record) (m : module) values :=
+  match close_and_validate_type_groups s.(s_types) (module_type_groups m) with
+  | Some (registry, names) =>
+      tag_imports_matching s registry names m.(mod_imports) values
+  | None => false
+  end.
+
 Definition import_subtyping (t1 t2: extern_type) : bool :=
   match t1, t2 with
   | ET_func tf1, ET_func tf2 =>
@@ -692,31 +799,32 @@ Definition import_subtyping (t1 t2: extern_type) : bool :=
       import_mem_subtyping tm1 tm2
   | ET_global tg1, ET_global tg2 =>
       import_global_subtyping tg1 tg2
-  (* ET_tag is a source signature/cache, not a closed tag identity. Do not
-     match it here by payload equality. Final tag linking needs the shared
-     canonical boundary and its closed runtime payload preservation law. *)
+  | ET_tag a, ET_tag b => portable_tag_parameters a b
+  (* This cache-compatibility predicate is not a complete tag link check.
+     instantiate additionally requires module_tag_imports_matching. *)
   | _, _ => false
   end.
 
-Lemma import_subtyping_no_source_tags ts1 ts2 :
+Lemma import_subtyping_tag_parameters ts1 ts2 :
   List.Forall2 import_subtyping ts1 ts2 ->
-  ext_t_tags ts1 = nil /\ ext_t_tags ts2 = nil.
-Proof.
-  move => H; induction H => /=; first by split.
-  destruct x, y; simpl in * => //.
-Qed.
-
-Lemma external_typing_no_source_tags s vs ts :
-  List.Forall2 (external_typing s) vs ts ->
-  ext_t_tags ts = nil -> ext_tags vs = nil.
+  ext_t_tags ts1 = ext_t_tags ts2.
 Proof.
   move => H; induction H => /=; first done.
-  destruct x, y; simpl in * => //;
-    try by move => E; apply IHForall2.
-  all: unfold external_typing, ext_typing in H; simpl in H.
-  all: match type of H with
-       | option_map _ ?lookup = _ => destruct lookup; discriminate H
-       end.
+  destruct x, y; simpl in * => //.
+  by rewrite (portable_tag_parameters_equal r r0 H) IHForall2.
+Qed.
+
+Lemma external_typing_tag_parameters s vs ts :
+  List.Forall2 (external_typing s) vs ts ->
+  those (map (lookup_N s.(s_tags)) (ext_tags vs)) = Some (ext_t_tags ts).
+Proof.
+  move => H; induction H => /=; first done.
+  destruct x, y; unfold external_typing, ext_typing in H; simpl in *;
+    try by remove_bools_options.
+  all: try exact IHForall2.
+  all: remove_bools_options.
+  all: rewrite -those_those0 in IHForall2.
+  all: by rewrite -those_those0 /= IHForall2.
 Qed.
 
 (* In Wasm 2.0, the module exports are now a part of the module instance. *)
@@ -727,6 +835,7 @@ Definition instantiate (s : store_record) (m : module) (v_imps : list extern_val
     module_typing m t_imps_mod t_exps /\
     List.Forall2 (external_typing s) v_imps t_imps /\
     List.Forall2 import_subtyping t_imps t_imps_mod /\
+    module_tag_imports_matching s m v_imps = true /\
     alloc_module s m v_imps g_inits r_inits (s_end, inst) /\
     let inst_init := Build_moduleinst nil inst.(inst_funcs) nil nil (ext_globals v_imps) nil nil nil nil nil in
     let f_init := Build_frame nil inst_init in

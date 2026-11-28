@@ -10,7 +10,7 @@ Context `{hfc: host_function_class} `{memory: BlockUpdateMemory}.
 Definition tag_test_store : store_record :=
   {| s_funcs := []; s_tables := []; s_mems := []; s_globals := [];
      s_elems := []; s_datas := []; s_tags := [[T_num T_i32]]; s_exns := [];
-     s_types := [] |}.
+     s_types := []; s_tag_ids := [Def_type 0 0] |}.
 
 Definition tag_test_instance (addrs : list tagaddr) : moduleinst :=
   {| inst_types := []; inst_funcs := []; inst_tables := []; inst_mems := [];
@@ -113,8 +113,13 @@ Example tag_import_unknown_type_rejected :
   module_import_desc_typer [] (MID_tag 0%N) = None.
 Proof. reflexivity. Qed.
 
-Example source_tag_caches_are_not_link_identities ps :
-  import_subtyping (ET_tag ps) (ET_tag ps) = false.
+Example source_tag_caches_are_not_link_identities :
+  module_tag_imports_matching tag_test_store tag_import_export_module [EV_tag 0%N] = false.
+Proof. vm_compute. reflexivity. Qed.
+
+Example equal_source_indices_cannot_bypass_closed_payload_boundary :
+  portable_tag_parameters [T_ref (Ref_type true (HT_type 0%N))]
+    [T_ref (Ref_type true (HT_type 0%N))] = false.
 Proof. reflexivity. Qed.
 
 End SourceValidation.
