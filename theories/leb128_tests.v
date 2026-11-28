@@ -1,4 +1,5 @@
 From Wasm Require Import leb128 check_toks.
+From Wasm Require Import binary_format_parser leb128_properties.
 From Stdlib Require Import Init.Byte ZArith List.
 From parseque Require Import Running Induction.
 Import ListNotations.
@@ -61,3 +62,18 @@ Proof. vm_compute. reflexivity. Qed.
 Lemma encode_signed_minus8192 :
   encode_signed (-8192)%Z = (x80 :: x40 :: nil).
 Proof. vm_compute. reflexivity. Qed.
+
+(** Use the general parser/grammar theorem, rather than evaluating a second
+    decoder, to establish a GC heap-index boundary. *)
+Lemma heap_index_128_from_encoding :
+  run_parse_heap_typeidx (x80 :: x01 :: nil) = Some 128%N.
+Proof.
+  apply run_heap_typeidx_leb_complete.
+  - change (signed_leb (x80 :: x01 :: nil)
+      (Z.of_N (Byte.to_N x80) - 128 + 128 * Z.of_N (Byte.to_N x01))).
+    apply sleb_more.
+    + vm_compute. congruence.
+    + apply sleb_end_pos. vm_compute. reflexivity.
+  - vm_compute. congruence.
+  - repeat constructor.
+Qed.

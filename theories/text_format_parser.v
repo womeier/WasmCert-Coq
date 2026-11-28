@@ -344,8 +344,8 @@ Definition parse_addr_text {n} : byte_parser addr n :=
   parse_num.
 
 Definition parse_ref {n} : byte_parser value_ref n :=
-  exact_string "ref.null func" $> VAL_ref_null T_funcref <|>
-    exact_string "ref.null extern" $> VAL_ref_null T_externref <|>
+  exact_string "ref.null func" $> VAL_ref_null HT_func <|>
+    exact_string "ref.null extern" $> VAL_ref_null HT_extern <|>
     exact_string "ref.func " &> ((fun a => VAL_ref_func a) <$> parse_addr_text) <|>
     exact_string "ref.extern " &> ((fun a => VAL_ref_extern a) <$> parse_addr_text).
 

@@ -3,3 +3,36 @@
      (package coq-wasm)
      (glob_files *.wasm))
 )
+
+(rule
+ (alias runtest)
+ (deps run_wast_tests.sh ../run_wast.sh)
+ (action (run bash %{dep:run_wast_tests.sh} %{dep:../run_wast.sh})))
+
+(rule
+ (alias runtest)
+ (deps function_references_binary.py)
+ (action
+  (run python3 %{dep:function_references_binary.py}
+    %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps local_initialization_projection.py)
+ (action
+  (run python3 %{dep:local_initialization_projection.py}
+    %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps gc_i31_binary.py)
+ (action
+  (run python3 %{dep:gc_i31_binary.py}
+   %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps gc_declarations_binary.py)
+ (action
+  (run python3 %{dep:gc_declarations_binary.py}
+   %{exe:../src/wasm_coq_interpreter.exe})))
