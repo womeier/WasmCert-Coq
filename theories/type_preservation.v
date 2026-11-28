@@ -534,16 +534,36 @@ Proof.
     + apply IHHetype1; by rewrite_context_agree.
     + apply IHHetype2; by rewrite_context_agree.
   (* call_indirect *)
-  - rewrite_context_agree.
-    econstructor; eauto.
-    + by congruence.
+  - destruct (context_agree_table_type Hext H) as [tabt [Hnth Hagree]].
+    unfold table_agree in Hagree; move/andP in Hagree.
+    destruct Hagree as [Helem Haddr].
+    move/eqP in Helem; move/eqP in Haddr.
+    rewrite Haddr. eapply bet_call_indirect with (tabtype := tabt).
+    + exact Hnth.
+    + congruence.
     + by rewrite_context_agree.
   (* return_call_indirect *)
-  - rewrite_context_agree.
-    econstructor; eauto.
-    + by congruence.
+  - destruct (context_agree_table_type Hext H) as [tabt' [Hnth Hagree]].
+    unfold table_agree in Hagree; move/andP in Hagree.
+    destruct Hagree as [Helem Haddr].
+    move/eqP in Helem; move/eqP in Haddr.
+    rewrite Haddr. eapply bet_return_call_indirect with (tabt := tabt').
+    + exact Hnth.
+    + congruence.
     + by rewrite_context_agree.
     + by rewrite_context_agree.
+  (* table get *)
+  - destruct (context_agree_table_type Hext H) as [tabt [Hnth Hagree]].
+    unfold table_agree in Hagree; move/andP in Hagree.
+    destruct Hagree as [Helem Haddr].
+    move/eqP in Helem; move/eqP in Haddr.
+    rewrite Haddr. eapply bet_table_get; eauto. congruence.
+  (* table set *)
+  - destruct (context_agree_table_type Hext H) as [tabt [Hnth Hagree]].
+    unfold table_agree in Hagree; move/andP in Hagree.
+    destruct Hagree as [Helem Haddr].
+    move/eqP in Helem; move/eqP in Haddr.
+    rewrite Haddr. eapply bet_table_set; eauto. congruence.
   (* table size: context agreement preserves the address width. *)
   - destruct (context_agree_table_type Hext H) as [tabt [Hnth Hagree]].
     unfold table_agree in Hagree; move/andP in Hagree.
@@ -555,22 +575,29 @@ Proof.
     destruct Hagree as [Helem Haddr].
     move/eqP in Helem; move/eqP in Haddr.
     rewrite Haddr. eapply bet_table_grow; eauto. congruence.
-  (* table_copy *)
-  - rewrite_context_agree.
-    eapply context_agree_table_type in H as [tabt [Hnth Hagree]]; eauto.
+  (* table fill *)
+  - destruct (context_agree_table_type Hext H) as [tabt [Hnth Hagree]].
     unfold table_agree in Hagree; move/andP in Hagree.
-    destruct Hagree as [Hagree Haddr].
-    move/eqP in Hagree; move/eqP in Haddr.
-    econstructor.
-    + by apply Hnth.
-    + reflexivity.
-    + by apply Hnth_ctxext.
-    + by rewrite - Hagree - H2.
+    destruct Hagree as [Helem Haddr].
+    move/eqP in Helem; move/eqP in Haddr.
+    rewrite Haddr. eapply bet_table_fill; eauto. congruence.
+  (* table copy *)
+  - destruct (context_agree_table_type Hext H) as [td [Hd Hagreed]].
+    destruct (context_agree_table_type Hext H1) as [ts [Hs Hagrees]].
+    unfold table_agree in Hagreed, Hagrees.
+    move/andP in Hagreed; move/andP in Hagrees.
+    destruct Hagreed as [Hed Had]; destruct Hagrees as [Hes Has].
+    move/eqP in Hed; move/eqP in Had; move/eqP in Hes; move/eqP in Has.
+    rewrite Had Has. eapply bet_table_copy; eauto; congruence.
   (* table init *)
-  - rewrite_context_agree.
-    econstructor; first by eauto.
-    + by eauto.
-     + rewrite_context_agree. congruence.
+  - destruct (context_agree_table_type Hext H) as [tabt [Hnth Hagree]].
+    unfold table_agree in Hagree; move/andP in Hagree.
+    destruct Hagree as [Helem Haddr].
+    move/eqP in Helem; move/eqP in Haddr.
+    rewrite Haddr. eapply bet_table_init with (tabtype := tabt) (t := t).
+    + exact Hnth.
+    + congruence.
+    + by rewrite_context_agree.
   (* Memory accesses retain both address width and offset validity. *)
   - destruct (context_agree_mem_type Hext H) as [mt [Hnth Hagree]].
     unfold mem_agree in Hagree; move/eqP in Hagree. rewrite Hagree.
@@ -1785,16 +1812,18 @@ Qed.
 
 Lemma r_return_call_indirect_invert: forall hs s f v x y hs' s' f' a,
     reduce hs s f [:: $V v; AI_basic (BI_call_indirect x y)] hs' s' f' [:: AI_invoke a] ->
-    exists cl i,
-      $V v = $VN (VAL_int32 i) /\
+    exists cl i index tab,
+      $V v = $VN i /\
+        stab s (f_inst f) x = Some tab /\
+        Addressing.address_of_value tab.(tableinst_type).(tt_address_type) i = Some index /\
         lookup_N (s_funcs s) a = Some cl /\
         lookup_N (inst_types (f_inst f)) y = Some (cl_type cl) /\
-        stab_elem s (f_inst f) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_func a).
+        stab_elem s (f_inst f) x index = Some (VAL_ref_func a).
 Proof.
   move => hs s f v x y hs' s' f' a Hreduce.
   dependent induction Hreduce => //.
   - by inversion H.
-  - by exists cl, i.
+  - by exists cl, i, index, tab.
   - by repeat (destruct ves => //).
   - destruct (lfill_singleton_invert H x) as [[? Hlheq] [-> ->]] => //.
     + by do 2 (destruct v as [v|v|v] => //=).
@@ -1875,7 +1904,7 @@ Proof.
     destruct Hft as [<- ?].
     apply ety_invoke.
     { unfold ext_func_typing.
-      by rewrite H0 -Hinj => //=.
+      by rewrite H2 -Hinj => //=.
     }
   - (* Return_call *)
     (* Due to the opsem being defined based on the corresponding reduction
@@ -1886,7 +1915,7 @@ Proof.
     by eapply ety_return_invoke; eauto.
   - (* Return_call_indirect *)
     apply r_return_call_indirect_invert in HReduce.
-    destruct HReduce as [cl [i [Hveq [Hnthfunc [Hnthinsttype Hstab]]]]].
+     destruct HReduce as [cl [i [index [tab [Hveq [Htable [Haddress [Hnthfunc [Hnthinsttype Hstab]]]]]]]]].
     replace (size extr1 + (size extr + 1) - 1) with (size extr1 + size extr); last by lias.
     rewrite catA take_size_cat; last by rewrite size_cat.
     unfold stab_elem in Hstab.
@@ -1985,7 +2014,9 @@ derived from the two transitive pairs on the suffixes. Stated as an individual l
   - (* Table copy 1 *)
     destruct taby; simpl in *.
     remove_bools_options.
-    rewrite -cat1s; apply et_composition' with (t2s := [::T_num T_i32; T_ref (tt_elem_type extr)]).
+    rewrite -cat1s; apply et_composition' with
+      (t2s := [::Addressing.address_value_type tabx.(tableinst_type).(tt_address_type);
+                 T_ref tabx.(tableinst_type).(tt_elem_type)]).
     { resolve_e_typing.
       simplify_lists.
       apply instr_subtyping_weaken; reflexivity.
@@ -1994,7 +2025,9 @@ derived from the two transitive pairs on the suffixes. Stated as an individual l
   - (* Table copy 2 *)
     destruct taby; simpl in *.
     remove_bools_options.
-    rewrite -cat1s; apply et_composition' with (t2s := [::T_num T_i32; T_ref (tt_elem_type extr)]).
+    rewrite -cat1s; apply et_composition' with
+      (t2s := [::Addressing.address_value_type tabx.(tableinst_type).(tt_address_type);
+                 T_ref tabx.(tableinst_type).(tt_elem_type)]).
     { resolve_e_typing.
       simplify_lists.
       apply instr_subtyping_weaken; reflexivity.
@@ -2004,7 +2037,7 @@ derived from the two transitive pairs on the suffixes. Stated as an individual l
     destruct tab; simpl in *.
     remove_bools_options.
     specialize (inst_typing_elem_lookup HIT1 Hoption0) as [elemt [ei [Hselem [Helemt Hnthet]]]].
-    specialize (store_typing_elem_lookup HST1 H0) as [et Het].
+    specialize (store_typing_elem_lookup HST1 H1) as [et Het].
     simplify_multieq.
     unfold eleminst_typing in Helemt.
     destruct ei.

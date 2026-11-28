@@ -276,7 +276,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
               if tabt.(tt_elem_type) == T_funcref then
                 match lookup_N (tc_types C) y with
                 | Some (Tf tn tm) =>
-                    type_update ts ((T_num T_i32 :: tn)) tm
+                    type_update ts (Addressing.address_value_type tabt.(tt_address_type) :: tn) tm
                 | None => None 
                 end
               else None
@@ -303,7 +303,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
                     match lookup_N (tc_types C) y with
                     | Some (Tf tn tm) =>
                         if (t2s == tm) then
-                          type_update_top ts ((T_num T_i32 :: tn)) nil
+                          type_update_top ts (Addressing.address_value_type tabt.(tt_address_type) :: tn) nil
                         else None
                     | None => None 
                     end
@@ -344,13 +344,13 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           match lookup_N (tc_tables C) x with
           | None => None 
           | Some tabt =>
-              type_update ts [::(T_num T_i32)] [::T_ref tabt.(tt_elem_type)]
+              type_update ts [::Addressing.address_value_type tabt.(tt_address_type)] [::T_ref tabt.(tt_elem_type)]
           end
       | BI_table_set x =>
           match lookup_N (tc_tables C) x with
           | None => None 
           | Some tabt =>
-              type_update ts [::(T_ref tabt.(tt_elem_type)); (T_num T_i32)] nil
+              type_update ts [::T_ref tabt.(tt_elem_type); Addressing.address_value_type tabt.(tt_address_type)] nil
           end
       | BI_table_size x =>
           match lookup_N (tc_tables C) x with
@@ -370,7 +370,8 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           match lookup_N (tc_tables C) x with
           | None => None 
           | Some tabt =>
-              type_update ts [::(T_num T_i32); (T_ref tabt.(tt_elem_type)); (T_num T_i32)] nil
+              type_update ts [::Addressing.address_value_type tabt.(tt_address_type);
+                T_ref tabt.(tt_elem_type); Addressing.address_value_type tabt.(tt_address_type)] nil
           end
       | BI_table_copy x y =>
           match lookup_N (tc_tables C) x with
@@ -379,7 +380,11 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
               match lookup_N (tc_tables C) y with
               | Some tabt2 =>
                   if tabt1.(tt_elem_type) == tabt2.(tt_elem_type)
-                  then type_update ts [::(T_num T_i32); (T_num T_i32); (T_num T_i32)] nil
+                  then type_update ts
+                    [::Addressing.address_value_type
+                         (Addressing.copy_address_type tabt1.(tt_address_type) tabt2.(tt_address_type));
+                       Addressing.address_value_type tabt2.(tt_address_type);
+                       Addressing.address_value_type tabt1.(tt_address_type)] nil
                   else None
               | None => None
               end
@@ -391,7 +396,8 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
               match lookup_N (tc_elems C) y with
               | Some t =>
                   if tabt.(tt_elem_type) == t
-                  then type_update ts [::(T_num T_i32); (T_num T_i32); (T_num T_i32)] nil
+                  then type_update ts [::T_num T_i32; T_num T_i32;
+                    Addressing.address_value_type tabt.(tt_address_type)] nil
                   else None
               | None => None
               end

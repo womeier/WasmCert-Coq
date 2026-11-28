@@ -265,7 +265,8 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   lookup_N (tc_tables C) x = Some tabtype ->
   tabtype.(tt_elem_type) = T_funcref ->
   lookup_N (tc_types C) y = Some (Tf t1s t2s) ->
-  be_typing C [::BI_call_indirect x y] (Tf (t1s ++ [::T_num T_i32]) t2s)
+  be_typing C [::BI_call_indirect x y]
+    (Tf (t1s ++ [::Addressing.address_value_type tabtype.(tt_address_type)]) t2s)
 | bet_return_call : forall C x t1s t2s t3s t4s,
   lookup_N (tc_funcs C) x = Some (Tf t1s t2s) ->
   tc_return C = Some t2s ->
@@ -275,7 +276,8 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   tabt.(tt_elem_type) = T_funcref ->
   lookup_N (tc_types C) y = Some (Tf t1s t2s) -> 
   tc_return C = Some t2s ->
-  be_typing C [::BI_return_call_indirect x y] (Tf (t3s ++ t1s ++ [::T_num T_i32]) t4s)
+  be_typing C [::BI_return_call_indirect x y]
+    (Tf (t3s ++ t1s ++ [::Addressing.address_value_type tabt.(tt_address_type)]) t4s)
 | bet_local_get : forall C x t,
   lookup_N (tc_locals C) x = Some t ->
   be_typing C [::BI_local_get x] (Tf [::] [::t])
@@ -297,11 +299,11 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 | bet_table_get : forall C x tabtype t,
   lookup_N (tc_tables C) x = Some tabtype ->
   tabtype.(tt_elem_type) = t ->
-  be_typing C [::BI_table_get x] (Tf [::T_num T_i32] [::T_ref t])
+  be_typing C [::BI_table_get x] (Tf [::Addressing.address_value_type tabtype.(tt_address_type)] [::T_ref t])
 | bet_table_set : forall C x tabtype t,
   lookup_N (tc_tables C) x = Some tabtype ->
   tabtype.(tt_elem_type) = t ->
-  be_typing C [::BI_table_set x] (Tf [::T_num T_i32; T_ref t] [::])
+  be_typing C [::BI_table_set x] (Tf [::Addressing.address_value_type tabtype.(tt_address_type); T_ref t] [::])
 | bet_table_size : forall C x tabtype,
   lookup_N (tc_tables C) x = Some tabtype ->
   be_typing C [::BI_table_size x] (Tf [::] [::Addressing.address_value_type tabtype.(tt_address_type)])
@@ -314,18 +316,25 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 | bet_table_fill : forall C x tabtype t,
   lookup_N (tc_tables C) x = Some tabtype ->
   tabtype.(tt_elem_type) = t ->
-  be_typing C [::BI_table_fill x] (Tf [::T_num T_i32; T_ref t; T_num T_i32] [::])
+  be_typing C [::BI_table_fill x]
+    (Tf [::Addressing.address_value_type tabtype.(tt_address_type); T_ref t;
+           Addressing.address_value_type tabtype.(tt_address_type)] [::])
 | bet_table_copy : forall C x y tabtype1 tabtype2 t,
   lookup_N (tc_tables C) x = Some tabtype1 ->
   tabtype1.(tt_elem_type) = t ->
   lookup_N (tc_tables C) y = Some tabtype2 ->
   tabtype2.(tt_elem_type) = t ->
-  be_typing C [::BI_table_copy x y] (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::])
+  be_typing C [::BI_table_copy x y]
+    (Tf [::Addressing.address_value_type tabtype1.(tt_address_type);
+           Addressing.address_value_type tabtype2.(tt_address_type);
+           Addressing.address_value_type
+             (Addressing.copy_address_type tabtype1.(tt_address_type) tabtype2.(tt_address_type))] [::])
 | bet_table_init : forall C x y tabtype t,
   lookup_N (tc_tables C) x = Some tabtype ->
   tabtype.(tt_elem_type) = t ->
   lookup_N (tc_elems C) y = Some t ->
-  be_typing C [::BI_table_init x y] (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::])
+  be_typing C [::BI_table_init x y]
+    (Tf [::Addressing.address_value_type tabtype.(tt_address_type); T_num T_i32; T_num T_i32] [::])
 | bet_elem_drop : forall C x t,
   lookup_N (tc_elems C) x = Some t ->
   be_typing C [::BI_elem_drop x] (Tf [::] [::])

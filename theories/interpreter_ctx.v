@@ -548,6 +548,59 @@ Notation "$zou32 v" := (Wasm_int.Z_of_uint i32m v) (at level 90).
 Notation "$nou32 v" := (Wasm_int.N_of_uint i32m v) (at level 90).
 
 (* One step of execution; does not perform the context update in the end to shift to the new instruction nor the validity check. *)
+Ltac lookup_table s fc x tab Htable :=
+  destruct (stab s fc.(FC_frame).(f_inst) x) as [tab|] eqn:Htable;
+  [ idtac |
+    resolve_invalid_typing;
+    match goal with Hframe: frame_typing _ _ _ |- _ => unfold_frame_type Hframe end;
+    match goal with
+    | Hit: inst_typing s _ = Some ?C,
+      Hlookup: lookup_N (tc_tables ?C) x = Some ?tt |- _ =>
+        destruct (inst_typing_table_lookup_inv Hit Hlookup) as [a [Htype Hindex]];
+        unfold stab in Htable; rewrite Hindex in Htable;
+        unfold ext_table_typing in Htype;
+        destruct (lookup_N (s_tables s) a); discriminate
+    end ].
+
+Ltac decode_table_address s fc x tab v Htable index Haddress :=
+  destruct (Addressing.address_of_value tab.(tableinst_type).(tt_address_type) v)
+    as [index|] eqn:Haddress;
+  [ idtac |
+    resolve_invalid_typing;
+    match goal with Hframe: frame_typing _ _ _ |- _ => unfold_frame_type Hframe end;
+    match goal with
+    | Hit: inst_typing s _ = Some ?C,
+      Hlookup: lookup_N (tc_tables ?C) x = Some ?tt |- _ =>
+        pose proof (stab_type_context Hit Hlookup Htable) as Htt;
+        subst tt
+    end;
+    destruct (tt_address_type (tableinst_type tab)); destruct v;
+      cbn [Addressing.address_of_value] in Haddress; try discriminate;
+      unfold Addressing.address_value_type in *; resolve_invalid_value ].
+
+Ltac decode_table_copy_length s fc x y tab_dst tab_src v Hdst Hsrc count Hcount :=
+  destruct (Addressing.address_of_value
+    (Addressing.copy_address_type tab_dst.(tableinst_type).(tt_address_type)
+                                 tab_src.(tableinst_type).(tt_address_type)) v)
+    as [count|] eqn:Hcount;
+  [ idtac |
+    resolve_invalid_typing;
+    match goal with Hframe: frame_typing _ _ _ |- _ => unfold_frame_type Hframe end;
+    match goal with
+    | Hit: inst_typing s _ = Some ?C,
+      Hd: lookup_N (tc_tables ?C) x = Some ?tt_dst,
+      Hs: lookup_N (tc_tables ?C) y = Some ?tt_src |- _ =>
+        pose proof (stab_type_context Hit Hd Hdst) as Htt_dst;
+        pose proof (stab_type_context Hit Hs Hsrc) as Htt_src;
+        try subst tt_dst; try subst tt_src
+    end;
+    destruct (tt_address_type (tableinst_type tab_dst));
+    destruct (tt_address_type (tableinst_type tab_src)); destruct v;
+      cbn [Addressing.address_of_value Addressing.copy_address_type] in Hcount;
+      try discriminate;
+      unfold Addressing.address_value_type, Addressing.copy_address_type in *;
+      resolve_invalid_value ].
+
 Definition run_one_step_ctx (hs: host_state) (cfg: cfg_tuple_ctx) (d: N): run_step_ctx_result hs cfg d.
 Proof.
   destruct cfg as [[[s ccs] [vs0 es0]] oe].
@@ -975,32 +1028,35 @@ the condition that all values should live in the operand stack. *)
 
     (* AI_basic (BI_table_get x) *)
     - destruct vs0 as [|v vs0]; first by no_args.
-      assert_i32 v.
-      destruct (stab_elem s fc.(FC_frame).(f_inst) x ($nou32 v)) as [tabv|] eqn:Hstab.
+      assert_value_num v.
+      lookup_table s fc x selected_tab Htable.
+      decode_table_address s fc x selected_tab v Htable table_index Haddress.
+      destruct (stab_elem s fc.(FC_frame).(f_inst) x table_index) as [tabv|] eqn:Hstab.
       (* Some xx *)
       + apply <<hs, (s, (fc, lcs) :: ccs', ((VAL_ref tabv) :: vs0, es0), None), d>> => //.
         resolve_reduce_ctx vs0 es0.
-        by apply r_table_get_success.
+        by eapply r_table_get_success; eauto.
       (* None *)
       (* Note that the stab_elem specification in the opsem matches the spec for typed expressions only -- it produces traps in some untyped scenarios which is undefined in spec. But that is not a problem anyway for now. Maybe this should be changed in the future. *)
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
         resolve_reduce_ctx vs0 es0.
-        by apply r_table_get_failure.
+        by eapply r_table_get_failure; eauto.
 
     (* AI_basic (BI_table_set x) *)
     - destruct vs0 as [|v2 [|v1 vs0]]; try by no_args.
-      (* v2 needs to be a ref and v1 needs to be a i32 num *)
       assert_value_ref v2.
-      assert_i32 v1.
-      destruct (stab_update s fc.(FC_frame).(f_inst) x ($nou32 v1) v2) as [s'|] eqn:Hsupdate.
+      assert_value_num v1.
+      lookup_table s fc x selected_tab Htable.
+      decode_table_address s fc x selected_tab v1 Htable table_index Haddress.
+      destruct (stab_update s fc.(FC_frame).(f_inst) x table_index v2) as [s'|] eqn:Hsupdate.
       (* Some xx *)
       + apply <<hs, (s', (fc, lcs) :: ccs', (vs0, es0), None), d>> => //.
         resolve_reduce_ctx vs0 es0.
-        by apply r_table_set_success.
+        by eapply r_table_set_success; eauto.
       (* None *)
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
         resolve_reduce_ctx vs0 es0.
-        by apply r_table_set_failure.
+        by eapply r_table_set_failure; eauto.
         
     (* AI_basic (BI_table_size x) *)
     - destruct (stab s fc.(FC_frame).(f_inst) x) as [tab|] eqn:Hstab.
@@ -1065,18 +1121,18 @@ the condition that all values should live in the operand stack. *)
 
     (* AI_basic (BI_table_fill x) *)
     - destruct vs0 as [|v3 [|v2 [|v1 vs0]]]; try by no_args.
-      (* Takes i32; ref; i32 *)
-      assert_i32 v3.
+      assert_value_num v3.
       assert_value_ref v2.
-      assert_i32 v1.
-      destruct (stab s fc.(FC_frame).(f_inst) x) as [tab|] eqn:Hstab.
-      (* Some xx *)
-      + destruct (Z.ltb (Z.of_nat (tab_size tab)) (($zou32 v1) + ($zou32 v3))) eqn:Hbound; move/Z.ltb_spec0 in Hbound.
+      assert_value_num v1.
+      lookup_table s fc x selected_tab Hstab.
+      decode_table_address s fc x selected_tab v1 Hstab table_index Haddress.
+      decode_table_address s fc x selected_tab v3 Hstab element_count Hcount.
+      destruct (Z.ltb (Z.of_nat (tab_size selected_tab)) (Z.of_N table_index + Z.of_N element_count)) eqn:Hbound; move/Z.ltb_spec0 in Hbound.
         (* Out of bound *)
         * apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
           resolve_reduce_ctx vs0 es0.
           by eapply r_table_fill_bound; eauto; lias.
-        * destruct (($zou32 v3) == 0)%Z eqn:Hn0; move/eqP in Hn0; simpl in *; subst.
+        * destruct (Z.of_N element_count == 0)%Z eqn:Hn0; move/eqP in Hn0; simpl in *; subst.
           (* Return *)
           { apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), None), d>> => //.
             resolve_reduce_ctx vs0 es0.
@@ -1084,102 +1140,86 @@ the condition that all values should live in the operand stack. *)
           }
           (* Step *)
           { apply <<hs, (s, (fc, lcs) :: ccs',
-                          ((VAL_ref v2) :: (VAL_num (VAL_int32 v1)) :: vs0,
-                            [::($VN (VAL_int32 ($u32oz (Z.add ($zou32 v1) 1)))); ($V (VAL_ref v2)); ($VN (VAL_int32 ($u32oz (Z.sub ($zou32 v3) 1)))); (AI_basic (BI_table_fill x))] ++ es0),
+                          ((VAL_ref v2) :: (VAL_num v1) :: vs0,
+                            [::$VN (Addressing.value_of_address selected_tab.(tableinst_type).(tt_address_type) (N.succ table_index));
+                               $V (VAL_ref v2);
+                               $VN (Addressing.value_of_address selected_tab.(tableinst_type).(tt_address_type) (N.pred element_count));
+                               AI_basic (BI_table_fill x)] ++ es0),
                           Some (AI_basic (BI_table_set x))), d>> => //.
             resolve_reduce_ctx vs0 es0; simpl in *.
             by eapply r_table_fill_step; eauto; lias.
           }
-      (* None *)
-      + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        * inst_typing_lookup.
-          by rewrite Hstab in Hexttabt.
-        * eapply inst_typing_table_lookup_inv in Hconjl0 as [? [? Hnthtab]]; eauto.
-          by simplify_multieq.
           
     (* AI_basic (BI_table_copy x y) *)
     - destruct vs0 as [|n [|src [|dst vs0]]]; try by no_args.
-      (* Takes i32; i32; i32 *)
-      assert_i32 n.
-      assert_i32 src.
-      assert_i32 dst.
-      destruct (stab s fc.(FC_frame).(f_inst) x) as [tabx|] eqn:Hstabx.
-      (* Some xx *)
-      + destruct (stab s fc.(FC_frame).(f_inst) y) as [taby|] eqn:Hstaby.
-        (* Some xx *)
-        * destruct (Z.ltb (Z.of_nat (tab_size taby)) (($zou32 src) + ($zou32 n))) eqn:Hboundy; move/Z.ltb_spec0 in Hboundy.
+      assert_value_num n.
+      assert_value_num src.
+      assert_value_num dst.
+      lookup_table s fc x tabx Hstabx.
+      lookup_table s fc y taby Hstaby.
+      decode_table_address s fc x tabx dst Hstabx destination Hdst.
+      decode_table_address s fc y taby src Hstaby source Hsrc.
+      decode_table_copy_length s fc x y tabx taby n Hstabx Hstaby element_count Hcount.
+      destruct (Z.ltb (Z.of_nat (tab_size taby)) (Z.of_N source + Z.of_N element_count)) eqn:Hboundy; move/Z.ltb_spec0 in Hboundy.
           (* taby Out of bound *)
           { apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
             resolve_reduce_ctx vs0 es0.
             by eapply r_table_copy_bound; eauto; lias.
           }
-          destruct (Z.ltb (Z.of_nat (tab_size tabx)) (($zou32 dst) + ($zou32 n))) eqn:Hboundx; move/Z.ltb_spec0 in Hboundx.
+          destruct (Z.ltb (Z.of_nat (tab_size tabx)) (Z.of_N destination + Z.of_N element_count)) eqn:Hboundx; move/Z.ltb_spec0 in Hboundx.
           (* tabx Out of bound *)
           { apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
             resolve_reduce_ctx vs0 es0.
             by eapply r_table_copy_bound; eauto; lias.
           }
           (* In bound for both tables *)
-          { destruct (($zou32 n) == 0)%Z eqn:Hn0; move/eqP in Hn0; simpl in *; subst.
+          { destruct (Z.of_N element_count == 0)%Z eqn:Hn0; move/eqP in Hn0; simpl in *; subst.
             (* Return *)
             { apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), None), d>> => //.
               resolve_reduce_ctx vs0 es0.
               by eapply r_table_copy_return; eauto; simpl in *; lias.
             }
-            destruct (Z.leb ($zou32 dst) ($zou32 src)) eqn:Hdir; move/Z.leb_spec0 in Hdir.
+            destruct (Z.leb (Z.of_N destination) (Z.of_N source)) eqn:Hdir; move/Z.leb_spec0 in Hdir.
             (* copy -- forward *)
             { apply <<hs, (s, (fc, lcs) :: ccs',
-                            ((VAL_num (VAL_int32 src)) :: (VAL_num (VAL_int32 dst)) :: vs0,
-                              [::(AI_basic (BI_table_set x)); $VN (VAL_int32 ($u32oz (Z.add ($zou32 dst) 1))); $VN (VAL_int32 ($u32oz (Z.add ($zou32 src) 1))); $VN (VAL_int32 ($u32oz (Z.sub ($zou32 n) 1))); AI_basic (BI_table_copy x y)] ++ es0),
+                            ((VAL_num src) :: (VAL_num dst) :: vs0,
+                              [::AI_basic (BI_table_set x);
+                                 $VN (Addressing.value_of_address tabx.(tableinst_type).(tt_address_type) (N.succ destination));
+                                 $VN (Addressing.value_of_address taby.(tableinst_type).(tt_address_type) (N.succ source));
+                                 $VN (Addressing.value_of_address
+                                   (Addressing.copy_address_type tabx.(tableinst_type).(tt_address_type)
+                                                                taby.(tableinst_type).(tt_address_type)) (N.pred element_count));
+                                 AI_basic (BI_table_copy x y)] ++ es0),
                             Some (AI_basic (BI_table_get y))), d>> => //.
               resolve_reduce_ctx vs0 es0.
               by eapply r_table_copy_forward; eauto; simpl in *; lias.
             }
             (* copy -- backward *)
             { apply <<hs, (s, (fc, lcs) :: ccs',
-                            ((VAL_num (VAL_int32 ($u32oz (Z.sub (Z.add ($zou32 src) ($zou32 n)) 1)))) ::
-                            (VAL_num (VAL_int32 ($u32oz (Z.sub (Z.add ($zou32 dst) ($zou32 n)) 1)))) ::
-                            vs0,
-                              [::(AI_basic (BI_table_set x)); $VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 ($u32oz (Z.sub ($zou32 n) 1))); AI_basic (BI_table_copy x y)] ++ es0),
+                            ((VAL_num (Addressing.value_of_address taby.(tableinst_type).(tt_address_type) (N.pred (N.add source element_count)))) ::
+                            (VAL_num (Addressing.value_of_address tabx.(tableinst_type).(tt_address_type) (N.pred (N.add destination element_count)))) ::
+                             vs0,
+                              [::AI_basic (BI_table_set x); $VN dst; $VN src;
+                                 $VN (Addressing.value_of_address
+                                   (Addressing.copy_address_type tabx.(tableinst_type).(tt_address_type)
+                                                                taby.(tableinst_type).(tt_address_type)) (N.pred element_count));
+                                 AI_basic (BI_table_copy x y)] ++ es0),
                             Some (AI_basic (BI_table_get y))), d>> => //.
               resolve_reduce_ctx vs0 es0.
               eapply r_table_copy_backward; eauto; simpl in *; try by lias.
             }
           }
 
-        (* staby = None *)
-        * resolve_invalid_typing.
-          unfold_frame_type Hftype.
-          unfold_store_operations.
-          {  inst_typing_lookup.
-             by rewrite Hstaby in Hexttabt.
-          }
-          { eapply inst_typing_table_lookup_inv in Hconjl2 as [? [? Hnthtab]]; eauto.
-            by simplify_multieq.
-          }
-          
-      (* stabx = None *)
-      + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        {  inst_typing_lookup.
-           by rewrite Hstabx in Hexttabt.
-        }
-        { eapply inst_typing_table_lookup_inv in Hconjl0 as [? [? Hnthtab]]; eauto.
-          by simplify_multieq.
-        }
         
     (* AI_basic (BI_table_init x y) *)
     - destruct vs0 as [|n [|src [|dst vs0]]]; try by no_args.
       (* Takes i32; i32; i32 *)
       assert_i32 n.
       assert_i32 src.
-      assert_i32 dst.
-      destruct (stab s fc.(FC_frame).(f_inst) x) as [tab|] eqn:Hstab.
-      (* Some xx *)
-      + destruct (selem s fc.(FC_frame).(f_inst) y) as [elem|] eqn:Hselem.
+      assert_value_num dst.
+      lookup_table s fc x selected_tab Hstab.
+      decode_table_address s fc x selected_tab dst Hstab destination Hdst.
+      destruct (selem s fc.(FC_frame).(f_inst) y) as [elem|] eqn:Hselem.
         (* Some xx *)
         * destruct (Z.ltb (Z.of_nat (elem_size elem)) (($zou32 src) + ($zou32 n))) eqn:Hboundy; move/Z.ltb_spec0 in Hboundy.
           (* elem Out of bound *)
@@ -1187,7 +1227,7 @@ the condition that all values should live in the operand stack. *)
             resolve_reduce_ctx vs0 es0.
             by eapply r_table_init_bound; eauto; lias.
           }
-          destruct (Z.ltb (Z.of_nat (tab_size tab)) (($zou32 dst) + ($zou32 n))) eqn:Hboundx; move/Z.ltb_spec0 in Hboundx.
+          destruct (Z.ltb (Z.of_nat (tab_size selected_tab)) (Z.of_N destination + ($zou32 n))) eqn:Hboundx; move/Z.ltb_spec0 in Hboundx.
           (* tab Out of bound *)
           { apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
             resolve_reduce_ctx vs0 es0.
@@ -1204,8 +1244,8 @@ the condition that all values should live in the operand stack. *)
             { destruct (lookup_N elem.(eleminst_elem) ($nou32 src)) as [v | ] eqn:Hnthelem.
               (* Step *)
               { apply <<hs, (s, (fc, lcs) :: ccs',
-                              ((VAL_ref v) :: (VAL_num (VAL_int32 dst)) :: vs0,
-                                [::$VN (VAL_int32 ($u32oz (Z.add ($zou32 dst) 1)));
+                              ((VAL_ref v) :: (VAL_num dst) :: vs0,
+                                [::$VN (Addressing.value_of_address selected_tab.(tableinst_type).(tt_address_type) (N.succ destination));
                                  $VN (VAL_int32 ($u32oz (Z.add ($zou32 src) 1)));
                                  $VN (VAL_int32 ($u32oz (Z.sub ($zou32 n) 1)));
                                  AI_basic (BI_table_init x y)
@@ -1241,16 +1281,6 @@ the condition that all values should live in the operand stack. *)
           unfold_frame_type Hftype.
           unfold_store_operations; eapply inst_typing_elem_lookup_inv in Hconjr as [? [? [? [??]]]]; eauto; by simplify_multieq.
           
-      (* stab = None *)
-      + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        {  inst_typing_lookup.
-           by rewrite Hstab in Hexttabt.
-        }
-        { eapply inst_typing_table_lookup_inv in Hconjl0 as [? [??]]; eauto.
-          by simplify_multieq.
-        }
         
     (* AI_basic BI_elem_drop x *)
     - destruct (selem_drop s fc.(FC_frame).(f_inst) x) as [s'|] eqn:Hs'.
@@ -1766,8 +1796,10 @@ the condition that all values should live in the operand stack. *)
 
     (* AI_basic (BI_call_indirect x y) *)
     - destruct vs0 as [|v vs0]; first by no_args.
-      assert_i32 v.
-      destruct (stab_elem s fc.(FC_frame).(f_inst) x ($nou32 v)) as [vref|] eqn:?.
+      assert_value_num v.
+      lookup_table s fc x selected_tab Htable.
+      decode_table_address s fc x selected_tab v Htable table_index Haddress.
+      destruct (stab_elem s fc.(FC_frame).(f_inst) x table_index) as [vref|] eqn:?.
       (* Some a *)
       + destruct vref as [t | a | a].
         (* ref_null *)
@@ -1813,7 +1845,7 @@ the condition that all values should live in the operand stack. *)
       (* None *)
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_trap)), d>> => //.
         resolve_reduce_ctx vs0 es0.
-        by eapply r_call_indirect_failure_bound; subst.
+        by eapply r_call_indirect_failure_bound; subst; eauto.
 
     (* Return_call and return_call indirect are basically the same as the non-tail-call versions. *)
     (* AI_basic (BI_return_call x) *)
@@ -1830,14 +1862,16 @@ the condition that all values should live in the operand stack. *)
 
     (* AI_basic (BI_return_call_indirect x y) *)
     - destruct vs0 as [|v vs0]; first by no_args.
-      assert_i32 v.
-      destruct (stab_elem s fc.(FC_frame).(f_inst) x ($nou32 v)) as [vref|] eqn:?.
+      assert_value_num v.
+      lookup_table s fc x selected_tab Htable.
+      decode_table_address s fc x selected_tab v Htable table_index Haddress.
+      destruct (stab_elem s fc.(FC_frame).(f_inst) x table_index) as [vref|] eqn:?.
       (* Some a *)
       + destruct vref as [t | a | a].
         (* ref_null *)
         * apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
           resolve_reduce_ctx vs0 es0.
-          replace ($VN VAL_int32 v) with ($V (VAL_num (VAL_int32 v))); last done.
+          replace ($VN v) with ($V (VAL_num v)); last done.
           by eapply r_return_call_indirect_failure, r_call_indirect_failure_null_ref; eauto.
         (* funcref *)
         * destruct (lookup_N s.(s_funcs) a) as [cl | ] eqn:Hnthcl.
@@ -1846,12 +1880,12 @@ the condition that all values should live in the operand stack. *)
             (* true *)
             ++ apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_return_invoke a)), d>> => //.
               resolve_reduce_ctx vs0 es0.
-              replace ($VN VAL_int32 v) with ($V (VAL_num (VAL_int32 v))); last done.
+              replace ($VN v) with ($V (VAL_num v)); last done.
               by eapply r_return_call_indirect_success, r_call_indirect_success; subst; eauto.
             (* false *)
             ++ apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_trap)), d>> => //.
               resolve_reduce_ctx vs0 es0.
-              replace ($VN VAL_int32 v) with ($V (VAL_num (VAL_int32 v))); last done.
+              replace ($VN v) with ($V (VAL_num v)); last done.
               by eapply r_return_call_indirect_failure, r_call_indirect_failure_mismatch; subst; eauto.
           (* None *)
           -- resolve_invalid_typing.
@@ -1880,8 +1914,8 @@ the condition that all values should live in the operand stack. *)
       (* None *)
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_trap)), d>> => //.
         resolve_reduce_ctx vs0 es0.
-        replace ($VN VAL_int32 v) with ($V (VAL_num (VAL_int32 v))); last done.
-        by eapply r_return_call_indirect_failure, r_call_indirect_failure_bound; subst.
+        replace ($VN v) with ($V (VAL_num v)); last done.
+        by eapply r_return_call_indirect_failure, r_call_indirect_failure_bound; subst; eauto.
         
     (* AI_trap *)
     - destruct ((vs0 == nil) && (es0 == nil)) eqn:Hscnil; move/andP in Hscnil.

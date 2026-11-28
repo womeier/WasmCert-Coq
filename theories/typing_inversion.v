@@ -168,7 +168,7 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
         lookup_N (tc_funcs C) n = Some tf0
   | BI_call_indirect x y =>
       exists ts1 ts2 tabt,
-      tf = (Tf (ts1 ++ [::T_num T_i32]) ts2)/\
+      tf = (Tf (ts1 ++ [::Addressing.address_value_type tabt.(tt_address_type)]) ts2)/\
         lookup_N (tc_tables C) x = Some tabt /\
         tabt.(tt_elem_type) = T_funcref /\
         lookup_N (tc_types C) y = Some (Tf ts1 ts2)
@@ -179,7 +179,7 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
         tc_return C = Some ts2
   | BI_return_call_indirect x y =>
       exists ts1 ts2 ts3 ts4 tabt,
-      tf = (Tf (ts3 ++ ts1 ++ [::T_num T_i32]) ts4)/\
+      tf = (Tf (ts3 ++ ts1 ++ [::Addressing.address_value_type tabt.(tt_address_type)]) ts4)/\
         lookup_N (tc_tables C) x = Some tabt /\
         tabt.(tt_elem_type) = T_funcref /\
         lookup_N (tc_types C) y = Some (Tf ts1 ts2) /\
@@ -209,12 +209,12 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
         is_mut gt
   | BI_table_get x =>
       exists tabt t,
-      tf = (Tf [::T_num T_i32] [::T_ref t]) /\
+      tf = (Tf [::Addressing.address_value_type tabt.(tt_address_type)] [::T_ref t]) /\
         lookup_N (tc_tables C) x = Some tabt /\
         tabt.(tt_elem_type) = t
   | BI_table_set x =>
       exists tabt t,
-      tf = (Tf [::T_num T_i32; T_ref t] [::]) /\
+      tf = (Tf [::Addressing.address_value_type tabt.(tt_address_type); T_ref t] [::]) /\
         lookup_N (tc_tables C) x = Some tabt /\
         tabt.(tt_elem_type) = t
   | BI_table_size x =>
@@ -229,19 +229,23 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
         tabt.(tt_elem_type) = t
   | BI_table_fill x =>
       exists tabt t,
-      tf = (Tf [::T_num T_i32; T_ref t; T_num T_i32] nil) /\
+      tf = (Tf [::Addressing.address_value_type tabt.(tt_address_type); T_ref t;
+                   Addressing.address_value_type tabt.(tt_address_type)] nil) /\
         lookup_N (tc_tables C) x = Some tabt /\
         tabt.(tt_elem_type) = t
   | BI_table_copy x y =>
       exists tabt1 tabt2 t,
-      tf = (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::]) /\
+      tf = (Tf [::Addressing.address_value_type tabt1.(tt_address_type);
+                   Addressing.address_value_type tabt2.(tt_address_type);
+                   Addressing.address_value_type
+                     (Addressing.copy_address_type tabt1.(tt_address_type) tabt2.(tt_address_type))] [::]) /\
         lookup_N (tc_tables C) x = Some tabt1 /\
         tabt1.(tt_elem_type) = t /\
         lookup_N (tc_tables C) y = Some tabt2 /\
         tabt2.(tt_elem_type) = t
   | BI_table_init x y =>
       exists tabt t,
-      tf = (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::]) /\
+      tf = (Tf [::Addressing.address_value_type tabt.(tt_address_type); T_num T_i32; T_num T_i32] [::]) /\
         lookup_N (tc_tables C) x = Some tabt /\
         tabt.(tt_elem_type) = t /\
         lookup_N (tc_elems C) y = Some t

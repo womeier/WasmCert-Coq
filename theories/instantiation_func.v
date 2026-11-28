@@ -112,7 +112,8 @@ Definition module_elem_mode_checker (c: t_context) (emode: module_elemmode) (ref
       match lookup_N c.(tc_tables) x with
       | Some tab =>
           (tab.(tt_elem_type) == reftype) &&
-          type_checker.b_e_type_checker c offset (Tf nil [::T_num T_i32]) &&
+          type_checker.b_e_type_checker c offset
+            (Tf nil [::Addressing.address_value_type tab.(tt_address_type)]) &&
             const_exprs c offset
       | None => false
       end

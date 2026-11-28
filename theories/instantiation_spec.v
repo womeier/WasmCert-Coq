@@ -321,7 +321,7 @@ Definition elemmode_valid (c: t_context) (emode: module_elemmode) (t: reference_
       lookup_N c.(tc_tables) tidx = Some tabtype /\
       let '{| tt_limits := t_lim; tt_elem_type := rt |} := tabtype in
       rt = t /\
-      typing.be_typing c es (Tf nil [::T_num T_i32]) /\
+      typing.be_typing c es (Tf nil [::Addressing.address_value_type tabtype.(tt_address_type)]) /\
       const_exprs c es
   | ME_declarative => True
   end.

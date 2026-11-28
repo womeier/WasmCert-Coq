@@ -47,26 +47,31 @@ let storage_program result_type memories tables instructions : module0 =
 let storage_module result_type memories tables instruction =
   storage_program result_type memories tables [instruction]
 
-let execute_storage_module module_ =
+let storage_module_outcome module_ =
   let host_state = Obj.repr () in
   let instantiated, message =
     Runner.interp_instantiate_wrapper host_state Runner.empty_store_record module_ []
   in
-  let store, (frame, _) = match instantiated with
+  let store, (frame, init) = match instantiated with
     | Some cfg -> cfg
     | None -> failwith ("core storage module instantiation: " ^ message)
   in
-  let cfg = Runner.interp_cfg_of_wasm (store, (frame, [AI_invoke z])) in
+  let cfg = Runner.interp_cfg_of_wasm (store, (frame, init @ [AI_invoke z])) in
   let rec step fuel hs cfg depth =
     if fuel = 0 then failwith "core storage module did not terminate";
     match Runner.run_one_step hs cfg depth with
     | RSC_normal (hs', cfg', depth') -> step (fuel - 1) hs' cfg' depth'
-    | RSC_value (_, _, values) -> values
-    | RSC_trap _ -> failwith "core storage module unexpectedly trapped"
+    | RSC_value (_, _, values) -> `Values values
+    | RSC_trap _ -> `Trap
     | RSC_invalid -> failwith "core storage module became invalid"
     | RSC_error -> failwith "core storage module execution error"
   in
   step 100 host_state cfg (n "100")
+
+let execute_storage_module module_ =
+  match storage_module_outcome module_ with
+  | `Values values -> values
+  | `Trap -> failwith "core storage module unexpectedly trapped"
 
 let () =
   check "core lookup retains in-range values" (lookup_N [7; 8] one = Some 8);
@@ -279,6 +284,70 @@ let () =
          [BI_ref_null T_externref; delta64 "1"; BI_table_grow z]) []
   in
   check "core table64.grow retains reference-type checks" (bad_table_init = None);
+  let core_tt64 = { core_tt64 with tt_limits = limits "2" (Some "3") } in
+  let index64 s = BI_const_num (value A.AT_i64 s) in
+  let index32 s = BI_const_num (value A.AT_i32 s) in
+  let table_program tables body = storage_program T_i32 [] tables body in
+  let check_table name tables body expected =
+    check name (execute_storage_module (table_program tables body) =
+      [Utility.vali32_of_Z (n expected)]) in
+  check_table "core table64.get accepts i64 index" [core_tt64]
+    [index64 "1"; BI_table_get z; BI_ref_is_null] "1";
+  check_table "core table64.set accepts i64 index" [core_tt64]
+    [index64 "1"; BI_ref_null T_funcref; BI_table_set z;
+     index64 "1"; BI_table_get z; BI_ref_is_null] "1";
+  check_table "core table64.fill uses i64 count" [core_tt64]
+    [index64 "0"; BI_ref_null T_funcref; index64 "2"; BI_table_fill z;
+     index64 "1"; BI_table_get z; BI_ref_is_null] "1";
+  let core_tt32 = { core_tt64 with tt_address_type = A.AT_i32 } in
+  check_table "core mixed table copy 32 to 64 uses i32 length" [core_tt64; core_tt32]
+    [index64 "0"; index32 "0"; index32 "2"; BI_table_copy (z, one);
+     index64 "1"; BI_table_get z; BI_ref_is_null] "1";
+  check_table "core mixed table copy 64 to 32 uses i32 length" [core_tt64; core_tt32]
+    [index32 "0"; index64 "0"; index32 "2"; BI_table_copy (one, z);
+     index32 "1"; BI_table_get one; BI_ref_is_null] "1";
+  List.iter (fun address ->
+    check ("core table64 high index traps: " ^ address)
+      (storage_module_outcome (table_program [core_tt64]
+        [index64 address; BI_table_get z; BI_ref_is_null]) = `Trap))
+    ["2"; "4294967296"; "18446744073709551615"];
+  List.iter (fun (name, tables, body) ->
+    let result, _ = Runner.interp_instantiate_wrapper (Obj.repr ())
+      Runner.empty_store_record (table_program tables body) [] in
+    check name (result = None))
+    ["core table64.get rejects i32", [core_tt64],
+       [index32 "0"; BI_table_get z; BI_ref_is_null];
+     "core table64.fill rejects i32 count", [core_tt64],
+       [index64 "0"; BI_ref_null T_funcref; index32 "0"; BI_table_fill z; index32 "0"];
+     "core mixed table copy rejects i64 length", [core_tt64; core_tt32],
+       [index64 "0"; index32 "0"; index64 "0"; BI_table_copy (z, one); index32 "0"]];
+  let with_active_element offset body =
+    let m = table_program [core_tt64] body in
+    { m with
+      mod_funcs = m.mod_funcs @
+        [{ modfunc_type = z; modfunc_locals = [];
+           modfunc_body = [index32 "42"] }];
+      mod_elems = [{ modelem_type = T_funcref;
+                     modelem_init = [[BI_ref_func one]];
+                     modelem_mode = ME_active (z, [offset]) }] } in
+  List.iter (fun (name, call) ->
+    check name (execute_storage_module
+      (with_active_element (index64 "1") [index64 "1"; call]) =
+        [Utility.vali32_of_Z (n "42")]))
+    ["core table64 indirect call with active i64 element offset", BI_call_indirect (z, z);
+     "core table64 tail indirect call with active i64 element offset", BI_return_call_indirect (z, z)];
+  let invalid_offset, _ = Runner.interp_instantiate_wrapper (Obj.repr ())
+    Runner.empty_store_record
+      (with_active_element (index32 "1") [index64 "1"; BI_call_indirect (z, z)]) [] in
+  check "core active table64 offset rejects i32" (invalid_offset = None);
+  let passive = { (table_program [core_tt64]
+    [index64 "1"; index32 "0"; index32 "1"; BI_table_init (z, z);
+     index64 "1"; BI_table_get z; BI_ref_is_null]) with
+      mod_elems = [{ modelem_type = T_funcref;
+                     modelem_init = [[BI_ref_null T_funcref]];
+                     modelem_mode = ME_passive }] } in
+  check "core table64.init uses i64 destination and i32 segment operands"
+    (execute_storage_module passive = [Utility.vali32_of_Z one]);
   let byte s = Byte.repr (n s) in
   let fill_one data at b = some "memory64 fill"
       (U.fill memory_instance data (value A.AT_i64 at)

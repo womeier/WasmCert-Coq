@@ -209,25 +209,33 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
         lookup_N f.(f_inst).(inst_funcs) i = Some a ->
         reduce hs s f [::AI_basic (BI_call i)] hs s f [::AI_invoke a]
   | r_call_indirect_success :
-      forall s f x (y: typeidx) a cl i hs,
-        stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_func a) ->
+      forall s f x (y: typeidx) a cl i index tab hs,
+        stab s f.(f_inst) x = Some tab ->
+        Addressing.address_of_value tab.(tableinst_type).(tt_address_type) i = Some index ->
+        stab_elem s f.(f_inst) x index = Some (VAL_ref_func a) ->
         lookup_N s.(s_funcs) a = Some cl ->
         lookup_N f.(f_inst).(inst_types) y = Some (cl_type cl) ->
-        reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_call_indirect x y)] hs s f [::AI_invoke a]
+        reduce hs s f [::$VN i; AI_basic (BI_call_indirect x y)] hs s f [::AI_invoke a]
   | r_call_indirect_failure_mismatch :
-      forall s f x (y: typeidx) a cl i hs,
-        stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_func a) ->
+      forall s f x (y: typeidx) a cl i index tab hs,
+        stab s f.(f_inst) x = Some tab ->
+        Addressing.address_of_value tab.(tableinst_type).(tt_address_type) i = Some index ->
+        stab_elem s f.(f_inst) x index = Some (VAL_ref_func a) ->
         lookup_N s.(s_funcs) a = Some cl ->
         lookup_N f.(f_inst).(inst_types) y <> Some (cl_type cl) ->
-        reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_call_indirect x y)] hs s f [::AI_trap]
+        reduce hs s f [::$VN i; AI_basic (BI_call_indirect x y)] hs s f [::AI_trap]
   | r_call_indirect_failure_bound :
-      forall s f x (y: typeidx) i hs,
-        stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = None ->
-        reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_call_indirect x y)] hs s f [::AI_trap]
+      forall s f x (y: typeidx) i index tab hs,
+        stab s f.(f_inst) x = Some tab ->
+        Addressing.address_of_value tab.(tableinst_type).(tt_address_type) i = Some index ->
+        stab_elem s f.(f_inst) x index = None ->
+        reduce hs s f [::$VN i; AI_basic (BI_call_indirect x y)] hs s f [::AI_trap]
   | r_call_indirect_failure_null_ref :
-      forall s f x (y: typeidx) i hs t,
-        stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_null t) ->
-        reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_call_indirect x y)] hs s f [::AI_trap]
+      forall s f x (y: typeidx) i index tab hs t,
+        stab s f.(f_inst) x = Some tab ->
+        Addressing.address_of_value tab.(tableinst_type).(tt_address_type) i = Some index ->
+        stab_elem s f.(f_inst) x index = Some (VAL_ref_null t) ->
+        reduce hs s f [::$VN i; AI_basic (BI_call_indirect x y)] hs s f [::AI_trap]
 (* https://webassembly.github.io/tail-call/core/exec/instructions.html#xref-syntax-instructions-syntax-instr-control-mathsf-return-call-x *)
   | r_return_call :
       forall s f i a hs,
@@ -310,21 +318,29 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
 
 (** table **)
 | r_table_get_success :
-  forall x i tabv s f hs,
-    stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = Some tabv ->
-    reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_table_get x)] hs s f [::v_to_e (VAL_ref tabv)]
+  forall x i index tab tabv s f hs,
+    stab s f.(f_inst) x = Some tab ->
+    Addressing.address_of_value tab.(tableinst_type).(tt_address_type) i = Some index ->
+    stab_elem s f.(f_inst) x index = Some tabv ->
+    reduce hs s f [::$VN i; AI_basic (BI_table_get x)] hs s f [::v_to_e (VAL_ref tabv)]
 | r_table_get_failure :
-  forall x i s f hs,
-    stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = None ->
-    reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_table_get x)] hs s f [::AI_trap]
+  forall x i index tab s f hs,
+    stab s f.(f_inst) x = Some tab ->
+    Addressing.address_of_value tab.(tableinst_type).(tt_address_type) i = Some index ->
+    stab_elem s f.(f_inst) x index = None ->
+    reduce hs s f [::$VN i; AI_basic (BI_table_get x)] hs s f [::AI_trap]
 | r_table_set_success :
-  forall x i tabv s s' f hs,
-    stab_update s f.(f_inst) x (Wasm_int.N_of_uint i32m i) tabv = Some s' ->
-    reduce hs s f [::$VN (VAL_int32 i); v_to_e (VAL_ref tabv); AI_basic (BI_table_set x)] hs s' f [::]
+  forall x i index tab tabv s s' f hs,
+    stab s f.(f_inst) x = Some tab ->
+    Addressing.address_of_value tab.(tableinst_type).(tt_address_type) i = Some index ->
+    stab_update s f.(f_inst) x index tabv = Some s' ->
+    reduce hs s f [::$VN i; v_to_e (VAL_ref tabv); AI_basic (BI_table_set x)] hs s' f [::]
 | r_table_set_failure :
-  forall x i tabv s f hs,
-    stab_update s f.(f_inst) x (Wasm_int.N_of_uint i32m i) tabv = None ->
-    reduce hs s f [::$VN (VAL_int32 i); v_to_e (VAL_ref tabv); AI_basic (BI_table_set x)] hs s f [::AI_trap]
+  forall x i index tab tabv s f hs,
+    stab s f.(f_inst) x = Some tab ->
+    Addressing.address_of_value tab.(tableinst_type).(tt_address_type) i = Some index ->
+    stab_update s f.(f_inst) x index tabv = None ->
+    reduce hs s f [::$VN i; v_to_e (VAL_ref tabv); AI_basic (BI_table_set x)] hs s f [::AI_trap]
 | r_table_size :
   forall x tab sz s f hs,
     stab s f.(f_inst) x = Some tab ->
@@ -346,120 +362,153 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
     reduce hs s f [::v_to_e (VAL_ref tabinit); $VN v; AI_basic (BI_table_grow x)]
       hs s f [::$VN (Addressing.grow_failure tab.(tableinst_type).(tt_address_type))]
 | r_table_fill_bound :
-  forall x i n tab tabv s f hs,
-    let i_z := Wasm_int.Z_of_uint i32m i in
-    let n_z := Wasm_int.Z_of_uint i32m n in
+  forall x i n index count tab tabv s f hs,
+    let i_z := Z.of_N index in
+    let n_z := Z.of_N count in
     stab s f.(f_inst) x = Some tab ->
+    Addressing.address_of_value tab.(tableinst_type).(tt_address_type) i = Some index ->
+    Addressing.address_of_value tab.(tableinst_type).(tt_address_type) n = Some count ->
     (Z.add i_z n_z > Z.of_nat (tab_size tab))%Z ->
-    reduce hs s f [::$VN (VAL_int32 i); v_to_e (VAL_ref tabv); $VN (VAL_int32 n); AI_basic (BI_table_fill x)]
+    reduce hs s f [::$VN i; v_to_e (VAL_ref tabv); $VN n; AI_basic (BI_table_fill x)]
       hs s f [::AI_trap]
 | r_table_fill_return :
-  forall x i n tab tabv s f hs,
-    let i_z := Wasm_int.Z_of_uint i32m i in
-    let n_z := Wasm_int.Z_of_uint i32m n in
+  forall x i n index count tab tabv s f hs,
+    let i_z := Z.of_N index in
+    let n_z := Z.of_N count in
     stab s f.(f_inst) x = Some tab ->
+    Addressing.address_of_value tab.(tableinst_type).(tt_address_type) i = Some index ->
+    Addressing.address_of_value tab.(tableinst_type).(tt_address_type) n = Some count ->
     (Z.add i_z n_z <= Z.of_nat (tab_size tab))%Z ->
     (n_z = 0)%Z ->
-    reduce hs s f [::$VN (VAL_int32 i); v_to_e (VAL_ref tabv); $VN (VAL_int32 n); AI_basic (BI_table_fill x)]
+    reduce hs s f [::$VN i; v_to_e (VAL_ref tabv); $VN n; AI_basic (BI_table_fill x)]
       hs s f [::]
 | r_table_fill_step :
-  forall x i n tab tabv n' i' s f hs,
-    let i_z := Wasm_int.Z_of_uint i32m i in
-    let n_z := Wasm_int.Z_of_uint i32m n in
+  forall x i n index count tab tabv n' i' s f hs,
+    let i_z := Z.of_N index in
+    let n_z := Z.of_N count in
     stab s f.(f_inst) x = Some tab ->
+    Addressing.address_of_value tab.(tableinst_type).(tt_address_type) i = Some index ->
+    Addressing.address_of_value tab.(tableinst_type).(tt_address_type) n = Some count ->
     (Z.add i_z n_z <= Z.of_nat (tab_size tab))%Z ->
     (n_z <> 0)%Z ->
-    n' = Wasm_int.int_of_Z i32m (Z.sub n_z 1) ->
-    i' = Wasm_int.int_of_Z i32m (Z.add i_z 1) ->
-    reduce hs s f [::$VN (VAL_int32 i); v_to_e (VAL_ref tabv); $VN (VAL_int32 n); AI_basic (BI_table_fill x)]
-      hs s f [::$VN (VAL_int32 i); v_to_e (VAL_ref tabv); AI_basic (BI_table_set x);
-              $VN (VAL_int32 i'); v_to_e (VAL_ref tabv); $VN (VAL_int32 n'); AI_basic (BI_table_fill x)]
+    n' = Addressing.value_of_address tab.(tableinst_type).(tt_address_type) (N.pred count) ->
+    i' = Addressing.value_of_address tab.(tableinst_type).(tt_address_type) (N.succ index) ->
+    reduce hs s f [::$VN i; v_to_e (VAL_ref tabv); $VN n; AI_basic (BI_table_fill x)]
+      hs s f [::$VN i; v_to_e (VAL_ref tabv); AI_basic (BI_table_set x);
+              $VN i'; v_to_e (VAL_ref tabv); $VN n'; AI_basic (BI_table_fill x)]
 | r_table_copy_bound :
-  forall x y src dst n tabx taby s f hs,
-    let n_z := Wasm_int.Z_of_uint i32m n in
-    let src_z := Wasm_int.Z_of_uint i32m src in
-    let dst_z := Wasm_int.Z_of_uint i32m dst in
+  forall x y src dst n source destination count tabx taby s f hs,
+    let n_z := Z.of_N count in
+    let src_z := Z.of_N source in
+    let dst_z := Z.of_N destination in
     stab s f.(f_inst) x = Some tabx ->
     stab s f.(f_inst) y = Some taby ->
+    Addressing.address_of_value tabx.(tableinst_type).(tt_address_type) dst = Some destination ->
+    Addressing.address_of_value taby.(tableinst_type).(tt_address_type) src = Some source ->
+    Addressing.address_of_value
+      (Addressing.copy_address_type tabx.(tableinst_type).(tt_address_type)
+                                   taby.(tableinst_type).(tt_address_type)) n = Some count ->
     ((src_z + n_z > Z.of_nat (tab_size taby))%Z \/
      (dst_z + n_z > Z.of_nat (tab_size tabx))%Z) ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_table_copy x y)]
+    reduce hs s f [::$VN dst; $VN src; $VN n; AI_basic (BI_table_copy x y)]
       hs s f [::AI_trap]
 | r_table_copy_return :
-  forall x y src dst n tabx taby s f hs,
-    let n_z := Wasm_int.Z_of_uint i32m n in
-    let src_z := Wasm_int.Z_of_uint i32m src in
-    let dst_z := Wasm_int.Z_of_uint i32m dst in
+  forall x y src dst n source destination count tabx taby s f hs,
+    let n_z := Z.of_N count in
+    let src_z := Z.of_N source in
+    let dst_z := Z.of_N destination in
     stab s f.(f_inst) x = Some tabx ->
     stab s f.(f_inst) y = Some taby ->
+    Addressing.address_of_value tabx.(tableinst_type).(tt_address_type) dst = Some destination ->
+    Addressing.address_of_value taby.(tableinst_type).(tt_address_type) src = Some source ->
+    Addressing.address_of_value
+      (Addressing.copy_address_type tabx.(tableinst_type).(tt_address_type)
+                                   taby.(tableinst_type).(tt_address_type)) n = Some count ->
     (src_z + n_z <= Z.of_nat (tab_size taby))%Z ->
     (dst_z + n_z <= Z.of_nat (tab_size tabx))%Z ->
     (n_z = 0)%Z ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_table_copy x y)]
+    reduce hs s f [::$VN dst; $VN src; $VN n; AI_basic (BI_table_copy x y)]
       hs s f [::]
 | r_table_copy_forward :
-  forall x y src dst n tabx taby src' dst' n' s f hs,
-    let n_z := Wasm_int.Z_of_uint i32m n in
-    let src_z := Wasm_int.Z_of_uint i32m src in
-    let dst_z := Wasm_int.Z_of_uint i32m dst in
+  forall x y src dst n source destination count tabx taby src' dst' n' s f hs,
+    let n_z := Z.of_N count in
+    let src_z := Z.of_N source in
+    let dst_z := Z.of_N destination in
     stab s f.(f_inst) x = Some tabx ->
     stab s f.(f_inst) y = Some taby ->
+    Addressing.address_of_value tabx.(tableinst_type).(tt_address_type) dst = Some destination ->
+    Addressing.address_of_value taby.(tableinst_type).(tt_address_type) src = Some source ->
+    Addressing.address_of_value
+      (Addressing.copy_address_type tabx.(tableinst_type).(tt_address_type)
+                                   taby.(tableinst_type).(tt_address_type)) n = Some count ->
     (src_z + n_z <= Z.of_nat (tab_size taby))%Z ->
     (dst_z + n_z <= Z.of_nat (tab_size tabx))%Z ->
     (n_z <> 0)%Z ->
     (dst_z <= src_z)%Z ->
-    n' = Wasm_int.int_of_Z i32m (Z.sub n_z 1) ->
-    src' = Wasm_int.int_of_Z i32m (Z.add src_z 1) ->
-    dst' = Wasm_int.int_of_Z i32m (Z.add dst_z 1) ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_table_copy x y)]
-      hs s f [:: $VN (VAL_int32 dst); $VN (VAL_int32 src); AI_basic (BI_table_get y); AI_basic (BI_table_set x);
-              $VN (VAL_int32 dst'); $VN (VAL_int32 src'); $VN (VAL_int32 n'); AI_basic (BI_table_copy x y)]
+    n' = Addressing.value_of_address
+      (Addressing.copy_address_type tabx.(tableinst_type).(tt_address_type)
+                                   taby.(tableinst_type).(tt_address_type)) (N.pred count) ->
+    src' = Addressing.value_of_address taby.(tableinst_type).(tt_address_type) (N.succ source) ->
+    dst' = Addressing.value_of_address tabx.(tableinst_type).(tt_address_type) (N.succ destination) ->
+    reduce hs s f [::$VN dst; $VN src; $VN n; AI_basic (BI_table_copy x y)]
+      hs s f [:: $VN dst; $VN src; AI_basic (BI_table_get y); AI_basic (BI_table_set x);
+              $VN dst'; $VN src'; $VN n'; AI_basic (BI_table_copy x y)]
 | r_table_copy_backward :
-  forall x y src dst n tabx taby src' dst' n' s f hs,
-    let n_z := Wasm_int.Z_of_uint i32m n in
-    let src_z := Wasm_int.Z_of_uint i32m src in
-    let dst_z := Wasm_int.Z_of_uint i32m dst in
+  forall x y src dst n source destination count tabx taby src' dst' n' s f hs,
+    let n_z := Z.of_N count in
+    let src_z := Z.of_N source in
+    let dst_z := Z.of_N destination in
     stab s f.(f_inst) x = Some tabx ->
     stab s f.(f_inst) y = Some taby ->
+    Addressing.address_of_value tabx.(tableinst_type).(tt_address_type) dst = Some destination ->
+    Addressing.address_of_value taby.(tableinst_type).(tt_address_type) src = Some source ->
+    Addressing.address_of_value
+      (Addressing.copy_address_type tabx.(tableinst_type).(tt_address_type)
+                                   taby.(tableinst_type).(tt_address_type)) n = Some count ->
     (src_z + n_z <= Z.of_nat (tab_size taby))%Z ->
     (dst_z + n_z <= Z.of_nat (tab_size tabx))%Z ->
     (n_z <> 0)%Z ->
     (dst_z > src_z)%Z ->
-    n' = Wasm_int.int_of_Z i32m (Z.sub n_z 1) ->
-    src' = Wasm_int.int_of_Z i32m (Z.sub (Z.add src_z n_z) 1) ->
-    dst' = Wasm_int.int_of_Z i32m (Z.sub (Z.add dst_z n_z) 1) ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_table_copy x y)]
-      hs s f [:: $VN (VAL_int32 dst'); $VN (VAL_int32 src'); AI_basic (BI_table_get y); AI_basic (BI_table_set x);
-              $VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n'); AI_basic (BI_table_copy x y)]
+    n' = Addressing.value_of_address
+      (Addressing.copy_address_type tabx.(tableinst_type).(tt_address_type)
+                                   taby.(tableinst_type).(tt_address_type)) (N.pred count) ->
+    src' = Addressing.value_of_address taby.(tableinst_type).(tt_address_type) (N.pred (N.add source count)) ->
+    dst' = Addressing.value_of_address tabx.(tableinst_type).(tt_address_type) (N.pred (N.add destination count)) ->
+    reduce hs s f [::$VN dst; $VN src; $VN n; AI_basic (BI_table_copy x y)]
+      hs s f [:: $VN dst'; $VN src'; AI_basic (BI_table_get y); AI_basic (BI_table_set x);
+              $VN dst; $VN src; $VN n'; AI_basic (BI_table_copy x y)]
 | r_table_init_bound :
-  forall x y src dst n tab elem s f hs,
+  forall x y src dst destination n tab elem s f hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let src_z := Wasm_int.Z_of_uint i32m src in
-    let dst_z := Wasm_int.Z_of_uint i32m dst in
+    let dst_z := Z.of_N destination in
     stab s f.(f_inst) x = Some tab ->
+    Addressing.address_of_value tab.(tableinst_type).(tt_address_type) dst = Some destination ->
     selem s f.(f_inst) y = Some elem ->
     ((src_z + n_z > Z.of_nat (elem_size elem))%Z \/
      (dst_z + n_z > Z.of_nat (tab_size tab))%Z) ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_table_init x y)]
+    reduce hs s f [::$VN dst; $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_table_init x y)]
       hs s f [::AI_trap]
 | r_table_init_return :
-  forall x y src dst n tab elem s f hs,
+  forall x y src dst destination n tab elem s f hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let src_z := Wasm_int.Z_of_uint i32m src in
-    let dst_z := Wasm_int.Z_of_uint i32m dst in
+    let dst_z := Z.of_N destination in
     stab s f.(f_inst) x = Some tab ->
+    Addressing.address_of_value tab.(tableinst_type).(tt_address_type) dst = Some destination ->
     selem s f.(f_inst) y = Some elem ->
     (src_z + n_z <= Z.of_nat (elem_size elem))%Z ->
     (dst_z + n_z <= Z.of_nat (tab_size tab))%Z ->
     (n_z = 0)%Z ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_table_init x y)]
+    reduce hs s f [::$VN dst; $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_table_init x y)]
       hs s f [::]
 | r_table_init_step :
-  forall x y src dst n tab elem src' dst' n' v s f hs,
+  forall x y src dst destination n tab elem src' dst' n' v s f hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let src_z := Wasm_int.Z_of_uint i32m src in
-    let dst_z := Wasm_int.Z_of_uint i32m dst in
+    let dst_z := Z.of_N destination in
     stab s f.(f_inst) x = Some tab ->
+    Addressing.address_of_value tab.(tableinst_type).(tt_address_type) dst = Some destination ->
     selem s f.(f_inst) y = Some elem ->
     (src_z + n_z <= Z.of_nat (elem_size elem))%Z ->
     (dst_z + n_z <= Z.of_nat (tab_size tab))%Z ->
@@ -467,10 +516,10 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
     lookup_N elem.(eleminst_elem) (Wasm_int.N_of_uint i32m src) = Some v ->
     n' = Wasm_int.int_of_Z i32m (Z.sub n_z 1) ->
     src' = Wasm_int.int_of_Z i32m (Z.add src_z 1) ->
-    dst' = Wasm_int.int_of_Z i32m (Z.add dst_z 1) ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_table_init x y)]
-      hs s f [:: $VN (VAL_int32 dst); v_to_e (VAL_ref v); AI_basic (BI_table_set x);
-              $VN (VAL_int32 dst'); $VN (VAL_int32 src'); $VN (VAL_int32 n'); AI_basic (BI_table_init x y)]
+    dst' = Addressing.value_of_address tab.(tableinst_type).(tt_address_type) (N.succ destination) ->
+    reduce hs s f [::$VN dst; $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_table_init x y)]
+      hs s f [:: $VN dst; v_to_e (VAL_ref v); AI_basic (BI_table_set x);
+              $VN dst'; $VN (VAL_int32 src'); $VN (VAL_int32 n'); AI_basic (BI_table_init x y)]
 | r_elem_drop:
   forall x hs s f s',
     selem_drop s f.(f_inst) x = Some s' ->
