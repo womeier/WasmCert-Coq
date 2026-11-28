@@ -66,9 +66,9 @@ reference codec is substituted.
 Source heap/reference/value/global prefixes, catch/tag/custom composition and
 their earlier wire-bounded printer contracts remain available unchanged.
 
-## Exact open instruction-completeness obligations
+## Actual recursive expression iff: discharged
 
-The following are **not yet exported proofs**:
+The remaining combined atom contract is now proved:
 
 ```coq
 forall n
@@ -77,17 +77,20 @@ forall n
   parser_complete (parse_be_layer body if_body) wasm_atomic_encoding
 ```
 
-This combined contract must still connect the proved concrete control/table/
-EH/GC/memory/numeric families, including **cross-family** disjointness for shared
-`fc` and `fd` prefixes. The separate numeric and memory family theorems alone
-do not imply it. Control and bulk atoms already have actual layer completeness;
-memory/numeric layer connection and cross-family dispatch remain open.
+`wasm_parse_be_layer_atomic_complete` connects all actual families with
+**cross-family** disjointness for shared `fc` and `fd` prefixes. Rejection proofs
+use the production parsers and independent byte grammars, not another decoder.
 
-Then the actual four-component recursive language completeness invariant must
-be proved, with the additional `try_table` induction case and concrete catch
-vector. In particular **`wasm_run_parse_expr_sound` is not an iff**.
-The exact remaining gap is completeness, not an undisclosed `PrimitiveSound`
-assumption.
+`wasm_production_language_complete` proves all four components of the actual
+recursive parser simultaneously, including the additional `instruction_try_table`
+case and concrete catch vector. `wasm_production_parse_expr_complete` has no
+primitive/block/catch/memory correctness hypotheses.
+
+The public `wasm_run_parse_expr_correct` is now an **unconditional exact-input
+iff**, and `wasm_parse_expr_prefix_correct` is its arbitrary-suffix iff.
+The grammar remains independent of parser execution. Padded `fc` numeric and
+`fd` vector constants under an EH handler are regression-tested in both
+directions, including an exact trailing suffix.
 
 ## Exact open module composition obligations
 
@@ -109,6 +112,20 @@ conceal these gaps. GC's closed administrative-stack migration remains a
 separate runtime dependency and is not an explanation for these open proofs.
 
 ## Validation of this increment
+
+Follow-up combined dispatch and recursive expression iff: full exact-tree
+build, forced tests and relevant kernel checks pass. The audit prints the
+unconditional public theorem types and discloses the inherited classical
+real-decision/extensionality assumptions; no new axioms are added.
+The module composition obligations above remain open; expression iff does
+not establish module/string iff or printer round trips. No runtime or test
+expectation changes: the preceding official **489/489 + 18 text deferrals**
+and indexed **7 PASS / 3 FAIL** accounting remains unchanged.
+
+Logs: `/tmp/opencode/eh-expression-iff-final-build.log`,
+`/tmp/opencode/eh-expression-iff-final-tests.log`,
+`/tmp/opencode/eh-expression-iff-final-coqchk.log`,
+`/tmp/opencode/eh-expression-iff-assumptions.log`.
 
 Follow-up memory/control completeness: full exact-tree build, forced tests and
 kernel checks of the new lookahead, memory/control completeness and regression

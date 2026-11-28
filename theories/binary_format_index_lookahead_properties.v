@@ -131,6 +131,28 @@ Proof.
   rewrite <- app_assoc in Equal; symmetry; exact Equal.
 Qed.
 
+Lemma parser_extended_mismatch {A n}
+    (p : Parser (SizedList byte) byte option A n) tag previous actual :
+  parser_initial_extended p tag previous -> previous <> actual ->
+  forall m (bound : m <= n) input header rest,
+    input_bytes input = tag :: header ++ rest ->
+    index_encoding header actual -> runParser p bound input = None.
+Proof.
+  intros Initial Different m bound input target tail Bytes Target.
+  destruct (runParser p bound input) as [s|] eqn:Run; [|reflexivity].
+  destruct (Initial _ _ _ _ Run) as [header [rest [Input Index]]].
+  exfalso; apply Different.
+  eapply index_encoding_prefix_injective; [exact Index |exact Target |].
+  rewrite Bytes in Input; inversion Input as [Equal]; symmetry; exact Equal.
+Qed.
+
+Lemma parser_alt_failure {A n}
+    (p q : Parser (SizedList byte) byte option A n)
+    m (bound : m <= n) input :
+  runParser p bound input = None -> runParser q bound input = None ->
+  runParser (Combinators.alt p q) bound input = None.
+Proof. intros Left Right; now rewrite run_alt_option, Left, Right. Qed.
+
 Definition parser_initial_extended_set {A n}
     (p : Parser (SizedList byte) byte option A n) tag Allowed :=
   forall m (bound : m <= n) input s,
