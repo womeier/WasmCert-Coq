@@ -165,46 +165,22 @@ let require_valid_module m =
   | (Some _, _) -> pure ()
   | (None, _) -> error "Expected a valid module before linking/instantiation"
 
-let load_wast_module verbosity hs s ovar moddef mod_counter =
-  begin try
-  match moddef.it with 
-  | Textual ast_module ->
-    let bin_module = Wasm.Encode.encode ast_module in
-    let* m = Parse.parse_module verbosity false bin_module in
-    let modname = "default_module_" ^ (string_of_int mod_counter) in
-    let* varname = begin match ovar with
-    | Some v -> 
-      let (_, varmap) = hs in
-      begin match StringMap.find_opt v.it varmap with
-      | Some _ -> error ("Module variable name " ^ v.it ^ " already exists")
-      | None -> pure v.it
-      end
-    | None -> pure ""
-    end in
-    let* (hs', s', inst_res) = Execute.instantiate_host verbosity hs s modname m in
-    debug_info verbosity stage (fun _ -> "Successfully instantiated module " ^ modname ^ ".\n");
-    if varname != "" then
-      let (exts, varmap) = hs' in
-      let varmap' = StringMap.add varname modname varmap in
-        debug_info verbosity stage (fun _ -> "Module registered to module variable " ^ varname ^ ".\n");
-        pure ((exts, varmap'), s', inst_res, mod_counter+1, modname)
-    else 
-      pure (hs', s', inst_res, mod_counter+1, modname)
-  | Encoded (modnamestr, bin_module) -> 
-    let* m = Parse.parse_module verbosity false bin_module in
-    let modname = if modnamestr = "" then ("default_module_" ^ (string_of_int mod_counter)) else modnamestr in
-    let* (hs', s', inst_res) = Execute.instantiate_host verbosity hs s modname m in
-      debug_info verbosity stage (fun _ -> "Successfully instantiated module " ^ modname ^ ".\n");
-      pure (hs', s', inst_res, mod_counter+1, modname)
-  | Quoted (modnamestr, text_module) -> 
-    let* m = Parse.parse_module verbosity true text_module in
-    let modname = if modnamestr = "" then ("default_module_" ^ (string_of_int mod_counter)) else modnamestr in
-    let* (hs', s', inst_res) = Execute.instantiate_host verbosity hs s modname m in
-      debug_info verbosity stage (fun _ -> "Successfully instantiated module " ^ modname ^ ".\n");
-      pure (hs', s', inst_res, mod_counter+1, modname)
-  with
-  | _ -> error "Exception raised in loading module"
-  end
+let instantiate_wast_module verbosity hs s ovar m mod_counter =
+  let modname = "default_module_" ^ string_of_int mod_counter in
+  let* varname = match ovar with
+    | None -> pure None
+    | Some v ->
+        let (_, varmap) = hs in
+        if StringMap.mem v.it varmap then
+          error ("Module variable name " ^ v.it ^ " already exists")
+        else pure (Some v.it) in
+  let* (hs', s', inst_res) = Execute.instantiate_host verbosity hs s modname m in
+  let hs' = match varname with
+    | None -> hs'
+    | Some name ->
+        let (exts, varmap) = hs' in
+        (exts, StringMap.add name modname varmap) in
+  pure (hs', s', inst_res, mod_counter + 1, modname)
 
 let print_wast_command cmd = 
   let cmd_sexpr = Wasm.Arrange.script `Textual [cmd] in
@@ -235,21 +211,59 @@ type verdict_detail =
   | Verdict_OK
   | Verdict_inst_trap
 
-let run_wast_command verbosity max_call_depth cmd hs s mod_counter default_module_name test_counter =
+type binary_definitions = {
+  mutable named_definitions : Extract.module0 StringMap.t;
+  mutable latest_definition : Extract.module0 option;
+}
+
+let remember_definition definitions name m =
+  definitions.latest_definition <- Some m;
+  match name with
+  | None -> ()
+  | Some name ->
+      definitions.named_definitions <- StringMap.add name m definitions.named_definitions
+
+let finish_instantiation (hs, s, inst_res, counter, name) =
+  match inst_res with
+  | Cfg_trap _ -> pure (hs, s, counter, name, Verdict_inst_trap)
+  | Cfg_res _ -> pure (hs, s, counter, name, Verdict_OK)
+  | _ -> error "Post instantiation execution resulted in unexpected error"
+
+let run_wast_command verbosity max_call_depth definitions (directive, cmd) hs s mod_counter default_module_name test_counter =
   debug_info verbosity stage 
   (fun _ -> 
     "\n\n----------\nTest " ^ string_of_int test_counter ^ "\n----------\n" ^ print_wast_command cmd ^ "\n"
     );
  begin try
+  begin match directive with
+  | Wast_binary_script.Define name ->
+      begin match cmd.it with
+      | Module (_, ({it = Encoded _; _} as moddef)) ->
+          let* m = parse_wast_module verbosity moddef in
+          let* () = require_valid_module m in
+          remember_definition definitions name m;
+          pure (hs, s, mod_counter, default_module_name, Verdict_OK)
+      | _ -> error "Expected a binary module definition"
+      end
+  | Wast_binary_script.Instantiate target ->
+      let found = match target with
+        | None -> definitions.latest_definition
+        | Some name -> StringMap.find_opt name definitions.named_definitions in
+      begin match cmd.it, found with
+      | Module (ovar, _), Some m ->
+          let* result = instantiate_wast_module verbosity hs s ovar m mod_counter in
+          finish_instantiation result
+      | _, None -> error "Unknown binary module definition"
+      | _ -> error "Expected a binary module instance directive"
+      end
+  | Wast_binary_script.Ordinary ->
   begin match cmd.it with
   | Module (ovar, moddef) -> 
-    let* (hs', s', inst_res, modc, defname) = load_wast_module verbosity hs s ovar moddef mod_counter in
-    (* OK with Cfg_trap needs to be counted as an error, but also needs to update the store *)
-      begin match inst_res with
-      | Cfg_trap _ -> pure (hs', s', modc, defname, Verdict_inst_trap)
-      | Cfg_res _ -> pure (hs', s', modc, defname, Verdict_OK)
-      | _ -> error "Post instantiation execution resulted in unexpected error"
-    end
+    let* m = parse_wast_module verbosity moddef in
+    let* () = require_valid_module m in
+    remember_definition definitions (Option.map (fun v -> v.it) ovar) m;
+    let* result = instantiate_wast_module verbosity hs s ovar m mod_counter in
+    finish_instantiation result
   | Action act ->
     begin match act.it with
     | Invoke (ovar, funcname_utf8, val_args) ->
@@ -396,18 +410,19 @@ let run_wast_command verbosity max_call_depth cmd hs s mod_counter default_modul
       pure ((exts', varmap'), s, mod_counter, newname, Verdict_OK)
   | _ -> error "Unsupported wast command"
   end
+  end
   with 
   | _ -> error "Unknown exception"
 end
 
-let rec run_wast_commands verbosity timeout max_call_depth cmds hs s mod_counter default_module_name assert_ok assert_total =
+let rec run_wast_commands verbosity timeout max_call_depth definitions cmds hs s mod_counter default_module_name assert_ok assert_total =
   match cmds with
   | [] -> 
     pure (assert_ok, assert_total)
   | cmd :: cmds' ->
       let verdict = 
         try
-          (with_timeout timeout (fun _ -> run_wast_command verbosity max_call_depth cmd hs s mod_counter default_module_name (assert_total+1))) with
+          (with_timeout timeout (fun _ -> run_wast_command verbosity max_call_depth definitions cmd hs s mod_counter default_module_name (assert_total+1))) with
           | Timeout -> error "Execution exceeded time limit"
          in
         begin match to_out verdict with
@@ -419,14 +434,14 @@ let rec run_wast_commands verbosity timeout max_call_depth cmds hs s mod_counter
             let new_total = assert_total + 1 in
               Printf.printf "\rTests passed: %d/%d (%.2f%%) " new_ok new_total (float_of_int new_ok *. 100.0 /. float_of_int new_total);
               flush stdout;
-              run_wast_commands verbosity timeout max_call_depth cmds' hs' s' mod_counter' default_module_name' new_ok new_total
+              run_wast_commands verbosity timeout max_call_depth definitions cmds' hs' s' mod_counter' default_module_name' new_ok new_total
           | Verdict_inst_trap ->
             let new_ok = assert_ok in
             let new_total = assert_total + 1 in
               debug_info verbosity stage (fun _ -> "Successfully loaded module, but post-instantiation initialisation trapped\n");
               Printf.printf "\rTests failed: %d/%d (%.2f%%) " new_ok new_total (float_of_int new_ok *. 100.0 /. float_of_int new_total);
               flush stdout;
-              run_wast_commands verbosity timeout max_call_depth cmds' hs' s' mod_counter' default_module_name' new_ok new_total
+              run_wast_commands verbosity timeout max_call_depth definitions cmds' hs' s' mod_counter' default_module_name' new_ok new_total
           end
         | Error msg ->
             debug_info verbosity stage ~style:red (fun _ -> "Test failed: " ^ msg ^ "\n");
@@ -434,7 +449,7 @@ let rec run_wast_commands verbosity timeout max_call_depth cmds hs s mod_counter
             let new_total = assert_total + 1 in
             Printf.printf "\rTests passed: %d/%d (%.2f%%) " new_ok new_total (float_of_int new_ok *. 100.0 /. float_of_int new_total);
             flush stdout;
-            run_wast_commands verbosity timeout max_call_depth cmds' hs s mod_counter default_module_name new_ok new_total
+            run_wast_commands verbosity timeout max_call_depth definitions cmds' hs s mod_counter default_module_name new_ok new_total
           end
 
 (* SpecTest host module for Wast test suite *)
@@ -469,7 +484,8 @@ let run_wast_script verbosity timeout max_call_depth script =
   let starting_host_store = (StringMap.empty, StringMap.empty) in
   let starting_store = empty_store_record in
   let* (hs, s) = register_spectest_host verbosity starting_host_store starting_store in
-  let* ret = run_wast_commands verbosity timeout max_call_depth script hs s 0 "" 0 0 in
+  let definitions = {named_definitions = StringMap.empty; latest_definition = None} in
+  let* ret = run_wast_commands verbosity timeout max_call_depth definitions script hs s 0 "" 0 0 in
   match ret with
     | (assert_ok, assert_total) -> 
       debug_info verbosity result (fun _ -> "\n");
@@ -479,5 +495,5 @@ let run_wast_script verbosity timeout max_call_depth script =
     
 
 let run_wast_string verbosity timeout max_call_depth scriptstr = 
-  let script = Parse.parse_wast scriptstr in
+  let script = Parse.parse_wast_dispatch scriptstr in
   run_wast_script verbosity timeout max_call_depth script

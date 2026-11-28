@@ -20,3 +20,6 @@ val parse_args: string list -> (Execute.Interpreter.value list) Execute.Host.hos
 
 (* Parsing a wast script from a string. *)
 val parse_wast: string -> Wasm.Script.script
+
+val parse_wast_dispatch:
+  string -> (Wast_binary_script.directive * Wasm.Script.command) list

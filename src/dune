@@ -8,12 +8,12 @@
 (library
   (name wasmcert_extracted)
   (wrapped false)
-  (modules extract SIMD_ops utils)
+  (modules extract SIMD_ops utils wast_binary_script)
   (libraries wasm parray zarith))
 
 (executable
   (name wasm_coq_interpreter)
-  (modules (:standard \ extract SIMD_ops utils))
+  (modules (:standard \ extract SIMD_ops utils wast_binary_script))
   (libraries cmdliner wasm unix parray zarith wasmcert_extracted)
   (modes (best exe))
   (public_name wasm_coq_interpreter)
