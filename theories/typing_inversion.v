@@ -837,6 +837,10 @@ End Typing_inversion_e.
 Ltac invert_e_typing :=
   repeat match goal with
   | H: thread_typing _ _ _ _ |- _ =>
+    let Hinit := fresh "Hinitialization" in
+    assert (Hinit : ltac:(match type of H with
+      | thread_typing _ _ (?f, ?es) _ => exact (frame_initialization f es)
+      end)) by (inversion H; subst; assumption);
     let C := fresh "C" in
     let H1 := fresh "Hframetype" in
     let H2 := fresh "Hetype" in

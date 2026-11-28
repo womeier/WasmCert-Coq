@@ -95,7 +95,6 @@ Definition module_func_type_checker (c : t_context) (m : module_func) : bool :=
       tc_refs := c.(tc_refs)
     |} in
     type_checker.b_e_type_checker c' b_es (Tf [::] tm) &&
-      (default_vals t_locs != None) &&
       (check_local_init_sequence b_es (initial_local_state tn t_locs) != None)
   end.
 

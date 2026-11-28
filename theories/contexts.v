@@ -6,6 +6,7 @@ From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From HB Require Import structures.
 From Stdlib Require Import Program NArith ZArith Wf_nat.
 From Wasm Require Export common operations datatypes_properties properties opsem typing_inversion tactic.
+From Wasm Require Import local_initialization_properties.
 From Stdlib Require Import FunInd Recdef.
 
 (* see common.v *)
@@ -1015,6 +1016,81 @@ Definition ctx_cfg_typing (cfg: cfg_tuple_ctx) (ts: result_type) : Prop :=
       config_typing s th ts
   | None => False
   end.
+
+Lemma closure_initialization_focus cc es I O :
+  check_administrative_local_init_sequence (cc ⦃ es ⦄) I = Some O ->
+  exists J, check_administrative_local_init_sequence es
+    (initialized_slots (f_locs (FC_frame cc.1))) = Some J.
+Proof.
+  destruct cc as [[vs arity f suffix] labels]; simpl.
+  move => Hcheck.
+  apply administrative_local_init_frame_context in Hcheck as [J Hbody].
+  change (check_administrative_local_init_sequence (labels ⦃ es ⦄)
+    (initialized_slots (f_locs f)) = Some J) in Hbody.
+  have Efill : lfill (projT2 (ctx_to_lh (nil, nil) labels)) es = labels ⦃ es ⦄.
+  { by apply lh_ctx_fill. }
+  rewrite -Efill in Hbody.
+  by eapply administrative_local_init_lfill; eauto.
+Qed.
+
+Lemma closures_initialization_focus cc ccs es I O :
+  check_administrative_local_init_sequence ((cc :: ccs) ⦃ es ⦄) I = Some O ->
+  exists J, check_administrative_local_init_sequence es
+    (initialized_slots (f_locs (FC_frame cc.1))) = Some J.
+Proof.
+  move: cc es I O; induction ccs as [|outer ccs IH]; move => cc es I O Hcheck.
+  - by apply closure_initialization_focus in Hcheck.
+  - change (check_administrative_local_init_sequence
+      ((outer :: ccs) ⦃ cc ⦃ es ⦄ ⦄) I = Some O) in Hcheck.
+    apply IH in Hcheck as [J Hinner].
+    by apply closure_initialization_focus in Hinner.
+Qed.
+
+Lemma ctx_local_get_initialized s fc labels ccs vs suffix x ts :
+  ctx_cfg_typing
+    (s, (fc, labels) :: ccs, (vs, suffix), Some (AI_basic (BI_local_get x))) ts ->
+  lookup_N (initialized_slots (f_locs (FC_frame fc))) x = Some true.
+Proof.
+  unfold ctx_cfg_typing, ctx_to_cfg.
+  destruct (rev ((fc, labels) :: ccs)) as [|[root labels0] rest] eqn:Erev;
+    first by apply (f_equal rev) in Erev; rewrite revK /= in Erev.
+  rewrite Erev /=.
+  destruct root as [rootvs rootarity rootframe rootpost].
+  simpl.
+  move => [_ Hthread].
+  inversion Hthread; subst.
+  match goal with Hinit : frame_initialization _ _ |- _ =>
+    destruct Hinit as [O Hcheck]
+  end.
+  change (check_administrative_local_init_sequence
+    (labels0 ⦃ (rev rest) ⦃ (vs, suffix) ⦃ [::AI_basic (BI_local_get x)] ⦄ ⦄ ⦄)
+    (initialized_slots (f_locs rootframe)) = Some O) in Hcheck.
+  have Efill : lfill (projT2 (ctx_to_lh (nil, nil) labels0))
+      ((rev rest) ⦃ (vs, suffix) ⦃ [::AI_basic (BI_local_get x)] ⦄ ⦄) =
+    labels0 ⦃ (rev rest) ⦃ (vs, suffix) ⦃ [::AI_basic (BI_local_get x)] ⦄ ⦄ ⦄.
+  { by apply lh_ctx_fill. }
+  rewrite -Efill in Hcheck.
+  apply administrative_local_init_lfill in Hcheck as [M Hinner].
+  have Eorig : (fc, labels) :: ccs = rev rest ++
+    [::(Build_frame_ctx rootvs rootarity rootframe rootpost, labels0)].
+  { apply (f_equal rev) in Erev. by rewrite revK rev_cons -cats1 in Erev. }
+  have Hfocus : exists J,
+    check_administrative_local_init_sequence
+      ((vs, suffix) ⦃ [::AI_basic (BI_local_get x)] ⦄)
+      (initialized_slots (f_locs (FC_frame fc))) = Some J.
+  { destruct (rev rest) as [|current rest'] eqn:Erest.
+    - simpl in Eorig, Hinner. inversion Eorig; subst.
+      eexists. exact Hinner.
+    - inversion Eorig; subst.
+      apply closures_initialization_focus in Hinner.
+      exact Hinner. }
+  destruct Hfocus as [J Hfocus].
+  change (check_administrative_local_init_sequence
+    (lfill (LH_base (rev vs) suffix) [::AI_basic (BI_local_get x)])
+    (initialized_slots (f_locs (FC_frame fc))) = Some J) in Hfocus.
+  apply administrative_local_init_lfill in Hfocus as [K Hget].
+  by apply administrative_local_init_get in Hget.
+Qed.
 
 Lemma config_typing_inv: forall s (f: frame) es ts,
     config_typing s (f, es) ts ->

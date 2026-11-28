@@ -861,15 +861,10 @@ the condition that all values should live in the operand stack. *)
         resolve_reduce_ctx vs0 es0.
         by eapply r_local_get; subst.
       (* None *)
-      + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        erewrite inst_t_context_local_empty in Hconjr; eauto.
-        rewrite cats0 in Hconjr.
-        unfold local_values_typing, lookup_N in *.
-        match goal with Hlocals : is_true (all2 (local_value_typing _) _ _) |- _ =>
-          eapply all2_projection in Hlocals; eauto
-        end.
-        done.
+      + apply RSC_error; move => ts Htyped.
+        have Hready := ctx_local_get_initialized Htyped.
+        unfold initialized_slots, lookup_N in Hready, Heqo.
+        by rewrite nth_error_map' Heqo in Hready.
       (* Out of range *)
       + resolve_invalid_typing.
         unfold_frame_type Hftype.

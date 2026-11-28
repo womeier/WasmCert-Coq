@@ -11,7 +11,8 @@ import sys
 import tempfile
 
 
-def module(body, table=None, declare=True, imports=None, globals=None, locals=None):
+def module(body, table=None, declare=True, imports=None, globals=None, locals=None,
+           callee_body="412a", callee_locals="00"):
     prefix = bytes.fromhex(
         "0061736d01000000 0105016000017f"
     )
@@ -31,7 +32,8 @@ def module(body, table=None, declare=True, imports=None, globals=None, locals=No
     prefix += bytes.fromhex("070801046d61696e0001")
     if declare:
         prefix += bytes.fromhex("09050103000100")
-    first = bytes.fromhex("0400412a0b")
+    callee = bytes.fromhex(callee_locals + callee_body + "0b")
+    first = bytes([len(callee)]) + callee
     declarations = b"\x00" if locals is None else bytes.fromhex(locals)
     second = bytes([len(body) + len(declarations) + 1]) + declarations + body + b"\x0b"
     code = b"\x02" + first + second
@@ -147,9 +149,11 @@ table_cases = [
 exe = str(pathlib.Path(sys.argv[1]).resolve())
 
 
-def check_case(directory, name, body, status, expected, *, table=None, declare=True, locals=None):
+def check_case(directory, name, body, status, expected, *, table=None, declare=True, locals=None,
+               callee_body="412a", callee_locals="00"):
     path = pathlib.Path(directory) / (name + ".wasm")
-    path.write_bytes(module(bytes.fromhex(body), table, declare, locals=locals))
+    path.write_bytes(module(bytes.fromhex(body), table, declare, locals=locals,
+                            callee_body=callee_body, callee_locals=callee_locals))
     result = subprocess.run(
         [exe, str(path), "-r", "main"], capture_output=True, text=True
     )
@@ -206,6 +210,36 @@ def check_exported_reference_argument(directory):
         raise AssertionError(f"exported_reference_argument: exit {result.returncode}; {output!r}")
 
 
+initialization_cases = [
+    ("nonnull_unused_slot", "4107", 0, "i32.const 7"),
+    ("nonnull_set_get", "d20021002000d1", 0, "i32.const 0"),
+    ("nonnull_tee_get", "d2002200d11a2000d1", 0, "i32.const 0"),
+    ("nonnull_read_before_write", "2000d1", 123, "Module type checking failure:"),
+    ("nonnull_unreachable_read", "002000d1", 123, "Module type checking failure:"),
+    ("nonnull_null_write", "d07021004107", 123, "Module type checking failure:"),
+    ("nonnull_block_internal_write_read", "0240d200210020001a0b4107",
+     0, "i32.const 7"),
+    ("nonnull_block_forgets_write", "0240d20021000b2000d1",
+     123, "Module type checking failure:"),
+    ("nonnull_parent_write_survives_block", "d2002100024020001a0b2000d1",
+     0, "i32.const 0"),
+    ("nonnull_loop_internal_write_read", "0340d200210020001a0b4107",
+     0, "i32.const 7"),
+    ("nonnull_loop_reads_before_write", "034020001ad20021000b4107",
+     123, "Module type checking failure:"),
+    ("nonnull_loop_forgets_write", "0340d20021000b2000d1",
+     123, "Module type checking failure:"),
+    ("nonnull_if_arms_independent", "41010440d20021000520001a0b4107",
+     123, "Module type checking failure:"),
+    ("nonnull_if_forgets_both_writes", "41010440d200210005d20021000b2000d1",
+     123, "Module type checking failure:"),
+    ("nonnull_parent_write_visible_in_if", "d20021004101044020001a0520001a0b2000d1",
+     0, "i32.const 0"),
+    ("nonnull_null_refinement_traps_before_write", "d070d421002000d1",
+     0, "Execution returned a trap"),
+]
+
+
 with tempfile.TemporaryDirectory() as directory:
     for name, body, status, expected in cases:
         check_case(directory, name, body, status, expected)
@@ -221,6 +255,12 @@ with tempfile.TemporaryDirectory() as directory:
                locals="01017f")
     check_case(directory, "nullable_local_slot", "2000d1", 0, "i32.const 1",
                locals="010170")
+    for name, body, status, expected in initialization_cases:
+        check_case(directory, name, body, status, expected, locals="01016470")
+    for opcode, name in [("10", "native"), ("12", "tail_native")]:
+        check_case(directory, name + "_nonnull_callee_slots", opcode + "00",
+                   0, "i32.const 42", callee_locals="01016470",
+                   callee_body="d20021002000d11a412a")
 
-total = len(cases) + len(table_cases) + 6
+total = len(cases) + len(table_cases) + len(initialization_cases) + 8
 print(f"function-reference binary runtime regressions: {total}/{total}")

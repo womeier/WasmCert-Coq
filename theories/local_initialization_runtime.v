@@ -39,11 +39,12 @@ Qed.
 
 Lemma initialized_locals_from_values s slots ts :
   local_values_typing s slots ts ->
-  initialized_locals_typing s slots ts (List.repeat true (length ts)).
+  initialized_locals_typing s slots ts (initialized_slots slots).
 Proof.
   move: ts; induction slots as [|[v|] slots IH]; destruct ts => //=.
   - move => _. constructor.
   - move/andP => [Hv Hrest]. constructor => //. by apply IH.
+  - move/andP => [/eqP Hv Hrest]. constructor => //. by apply IH.
 Qed.
 
 Lemma initialized_local_get s slots ts I x t :

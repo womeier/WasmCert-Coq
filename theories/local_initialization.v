@@ -105,3 +105,50 @@ Fixpoint check_local_init_sequence (es : list basic_instruction)
 Definition initial_local_state (params locals : list value_type) : local_init_state :=
   List.repeat true (List.length params) ++
     List.map (fun t => default_val t != None) locals.
+
+Section Administrative.
+Context `{hfc : host_function_class}.
+
+(* Administrative labels restore the enclosing static state. A nested frame
+   checks against its own slots, never the caller's initialized-local bits.
+   Trap is terminal; its unreachable suffix may assume all slots initialized. *)
+Fixpoint check_administrative_local_init (e : administrative_instruction)
+    (I : local_init_state) : option local_init_state :=
+  let check_sequence :=
+    fix check_sequence (es : list administrative_instruction) I :=
+      match es with
+      | nil => Some I
+      | e :: es =>
+          match check_administrative_local_init e I with
+          | Some J => check_sequence es J
+          | None => None
+          end
+      end in
+  match e with
+  | AI_basic e => check_local_init_instruction e I
+  | AI_trap => Some (List.repeat true (List.length I))
+  | AI_label _ continuation body =>
+      match check_sequence body I, check_sequence continuation I with
+      | Some _, Some _ => Some I
+      | _, _ => None
+      end
+  | AI_frame _ f body =>
+      match check_sequence body (initialized_slots f.(f_locs)) with
+      | Some _ => Some I
+      | None => None
+      end
+  | _ => Some I
+  end.
+
+Fixpoint check_administrative_local_init_sequence (es : list administrative_instruction)
+    (I : local_init_state) : option local_init_state :=
+  match es with
+  | nil => Some I
+  | e :: es =>
+      match check_administrative_local_init e I with
+      | Some J => check_administrative_local_init_sequence es J
+      | None => None
+      end
+  end.
+
+End Administrative.

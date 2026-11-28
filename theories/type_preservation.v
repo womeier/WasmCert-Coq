@@ -2,6 +2,7 @@
 
 From Wasm Require Export typing_inversion tactic.
 From Wasm Require Import gc_declaration_typing_properties.
+From Wasm Require Import local_initialization_semantics local_initialization_properties.
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From Stdlib Require Import Program.Equality ZArith.
 
@@ -412,9 +413,12 @@ Lemma local_values_typing_extension s s' slots ts :
 Proof.
   move => Hext.
   move: ts; induction slots as [|[v|] slots IH]; destruct ts => //=.
-  move/andP => [Hv Hvs].
-  apply/andP; split; last by apply IH.
-  by eapply value_typing_extension; eauto.
+  - move/andP => [Hv Hvs].
+    apply/andP; split; last by apply IH.
+    by eapply value_typing_extension; eauto.
+  - move/andP => [Hv Hvs].
+    apply/andP; split; first exact Hv.
+    by apply IH.
 Qed.
 
 Lemma frame_typing_extension: forall s s' f C,
@@ -700,7 +704,7 @@ Proof.
   - move=> s C n s' HST1 HST2 Hext.
     apply ety_ref_i31.
   (* Thread *)
-  - move=> s f es rs ts C C' HFType HContext HType IHHType s' HST1 HST2 Hext.
+  - move=> s f es rs ts C C' HFType HContext HType IHHType Hinit s' HST1 HST2 Hext.
     remove_bools_options.
     eapply frame_typing_extension in HFType; eauto.
     destruct HFType as [C'' [HFType Hcext]].
@@ -1895,7 +1899,7 @@ Proof.
     destruct extr as [ts1' ts2'].
     destruct Hft as [<- [Hvalid Hftype]].
     simpl in Hftype; remove_bools_options; destruct f0.
-    destruct Hftype as [Heq [Hetype [Hdefault Hinit]]].
+    destruct Hftype as [Heq [Hetype Hinit]].
     injection Heq as <- <-.
     unfold ext_func_typing in Hconjr.
     rewrite H in Hconjr; simpl in Hconjr; injection Hconjr as <- <-.
@@ -1916,10 +1920,14 @@ Proof.
     + by erewrite -> inst_t_context_local_empty; eauto.
     + rewrite cats0.
       eapply ety_label; eauto.
-      * eapply ety_subtyping with (t1s := nil) (t2s := nil); first apply et_empty; by resolve_subtyping.
-      * apply ety_a with (s := s) in Hetype.
-        uapply Hetype => /=.
-        by erewrite inst_t_context_label_empty; eauto.
+       * eapply ety_subtyping with (t1s := nil) (t2s := nil); first apply et_empty; by resolve_subtyping.
+       * apply ety_a with (s := s) in Hetype.
+         uapply Hetype => /=.
+         by erewrite inst_t_context_label_empty; eauto.
+    + unfold frame_initialization; simpl.
+      destruct Hinit as [Oinit Hinit].
+      eapply initialized_native_body_admissible with
+        (params := ts1) (O := Oinit) (arity := size ts2); eauto.
         
   - (* Invoke host *)
     unfold ext_func_typing in Hconjr.
@@ -2138,6 +2146,13 @@ derived from the two transitive pairs on the suffixes. Stated as an individual l
       eapply IHHReduce; eauto.
       by erewrite -> inst_t_context_label_empty in *; eauto.
     }
+    unfold frame_initialization in *.
+    match goal with Hinit : exists O, check_administrative_local_init_sequence es
+      (initialized_slots (f_locs f)) = Some O |- _ =>
+      destruct Hinit as [O Hinit];
+      destruct (reduce_initialization HReduce HST1 Hinit) as [O' [Hinit' _]];
+      by exists O'
+    end.
 Qed.
 
 Theorem t_preservation: forall s f es s' f' es' ts hs hs',
@@ -2181,6 +2196,13 @@ Proof.
     erewrite -> inst_t_context_label_empty in *; eauto.
     rewrite -> cats0 in *.
     by eapply t_preservation_e; eauto.
+  - unfold frame_initialization in *.
+    match goal with Hinit : exists O, check_administrative_local_init_sequence es
+      (initialized_slots (f_locs f)) = Some O |- _ =>
+      destruct Hinit as [O Hinit];
+      destruct (reduce_initialization HReduce H Hinit) as [O' [Hinit' _]];
+      by exists O'
+    end.
 Qed.
 
 End Host.

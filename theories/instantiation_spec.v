@@ -299,8 +299,6 @@ Definition module_func_typing (c : t_context) (mf : module_func) (tf : function_
   lookup_function_type c.(tc_types) x = Some (Tf tn tm) /\
   let c' := upd_local_label_return c (tn ++ t_locs) [::tm] (Some tm) in
   be_typing c' b_es (Tf [::] tm) /\
-  (* Revise when non-defaultable types are added *)
-  default_vals t_locs <> None /\
   exists O, local_init_sequence (initial_local_state tn t_locs) b_es O.
 
 Definition module_mem_typing (c: t_context) (m : module_mem) (mt: memory_type) : bool :=

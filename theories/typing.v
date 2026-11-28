@@ -93,7 +93,7 @@ Definition values_typing (s: store_record) (vs: list value) (tf: list value_type
 
 Definition local_value_typing (s : store_record) (slot : option value)
     (t : value_type) : bool :=
-  match slot with Some v => value_typing s v t | None => false end.
+  match slot with Some v => value_typing s v t | None => default_val t == None end.
 
 Definition local_values_typing (s : store_record) (slots : list (option value))
     (ts : list value_type) : bool :=
@@ -450,7 +450,6 @@ Definition func_typing (C: t_context) (code: module_func) (tf: function_type) : 
       let C' := upd_local_label_return C (ts1 ++ ts) [:: ts2] (Some ts2) in
       expr_typing C' bes ts2 /\
       (* This is an artificial restriction added due to the implementation of subtyping from the future GC proposal, but without the implementing non-defaultable locals *)
-      default_vals ts <> None /\
       exists O, local_init_sequence (initial_local_state ts1 ts) bes O
   | None => False
   end.
@@ -573,6 +572,9 @@ Definition frame_typing_init (s : store_record) (f : frame) (C : t_context)
   | None => False
   end.
 
+Definition frame_initialization (f : frame) (es : list administrative_instruction) : Prop :=
+  exists O, check_administrative_local_init_sequence es (initialized_slots f.(f_locs)) = Some O.
+
 (** std-doc:
 Typing rules for administrative instructions are specified as follows. In addition to the context C, typing
  of these instructions is defined under a given store S. To that end, all previous typing judgements are 
@@ -624,6 +626,7 @@ with thread_typing : store_record -> option result_type -> thread -> result_type
   frame_typing s f C ->
   C' = upd_return C rs ->
   e_typing s C' es (Tf nil ts) ->
+  frame_initialization f es ->
   thread_typing s rs (f, es) ts
 .
 

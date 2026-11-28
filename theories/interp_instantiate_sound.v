@@ -69,7 +69,6 @@ Proof.
     remove_bools_options.
     split.
     { by apply/b_e_type_checker_reflects_typing. }
-    split; first by apply/eqP.
     destruct (check_local_init_sequence modfunc_body
       (initial_local_state r modfunc_locals)) eqn:Hinit.
     - eexists. by apply check_local_init_sequence_sound; eauto.

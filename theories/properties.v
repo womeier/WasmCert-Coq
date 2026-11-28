@@ -1358,17 +1358,12 @@ Proof.
 Qed.
 
 Lemma default_local_values_typing s ts :
-  default_vals ts <> None ->
   local_values_typing s (map default_val ts) ts.
 Proof.
-  unfold default_vals.
-  setoid_rewrite <- those_those0.
   induction ts as [|t ts IH] => //=.
-  destruct (default_val t) as [v|] eqn:E => //=.
-  - destruct (those0 (map default_val ts)) eqn:Es => //=.
-    move => _; apply/andP; split.
-    + by eapply default_value_typing; eauto.
-    + apply IH. discriminate.
+  destruct (default_val t) as [v|] eqn:E; apply/andP; split => //=.
+  - by eapply default_value_typing; eauto.
+  - by rewrite E.
 Qed.
 
 (* Avoid changing everything to type or making other large-scale changes *)
