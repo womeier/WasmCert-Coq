@@ -6,6 +6,11 @@ identified there has now been repaired, with canonical-context validation;
 see `source_decoder_scope_checks.md` for current contracts and remaining
 whole-module proof obligations.
 
+The concrete recursive soundness hypotheses have subsequently been discharged
+for every actual primitive family, not assumed. Current proved/open contracts
+are listed explicitly in `concrete_parser_proof_obligations.md`; soundness is
+not described there as the still-open expression/module iff.
+
 Pinned sources: `ea96c785ba6004c3994622b75b2d1312336c218f` and
 `bc7c1906d4dc86c783aa808c1bb33107013badc4`.
 Neither aggregate branch was merged. No addressing, multi-memory AST,

@@ -93,6 +93,12 @@ grammar production and the **concrete proved catch-vector grammar**.
 Its atomic and block contracts remain explicit parameters: this is not a
 discharged concrete full-expression iff or a whole-module theorem.
 
+**Follow-up:** those soundness parameters are now discharged by the concrete
+`wasm_primitive_parsers_sound` and `parse_block_type_sound` proofs.
+`wasm_production_parse_expr_sound` is unconditional. Expression completeness
+and whole-module iff/roundtrip are still open; see the exact ledger in
+`concrete_parser_proof_obligations.md`.
+
 Still open: concrete full atomic grammar/recursive completeness, recursive
 declaration/record/segment composition and the final actual module round-trip/
 general iff assembly. No generic theorem is claimed to cover those obligations.
