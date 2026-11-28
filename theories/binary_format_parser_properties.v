@@ -9,7 +9,7 @@
     Parseque execution path.  It does not yet prove the recursive LEB128
     parser's correspondence to the integer encoding grammar. *)
 From Wasm Require Import binary_format_parser binary_format_printer datatypes.
-From Stdlib Require Import ZArith Lia.
+From Stdlib Require Import ZArith Lia Strings.Byte.
 From parseque Require Import Parseque.
 
 Section OptionParsers.
@@ -17,6 +17,38 @@ Section OptionParsers.
   Context {m n : nat}.
   Variable bound : m <= n.
   Variable input : Toks m.
+
+  Lemma run_map_option {A B : Type} (f : A -> B)
+      (p : Parser Toks Byte.byte option A n) :
+    runParser (Combinators.map f p) bound input =
+    option_map (Success.map f) (runParser p bound input).
+  Proof. reflexivity. Qed.
+
+  Lemma run_bind_option_success {A B : Type}
+      (p : Parser Toks Byte.byte option A n)
+      (q : A -> Box (Parser Toks Byte.byte option B) n) s :
+    runParser (Combinators.bind p q) bound input = Some s ->
+    exists r t,
+      runParser p bound input = Some r /\
+      runParser
+        (call (q (Success.value r))
+          (Nat.le_trans _ _ _ (Success.small r) bound))
+        (Nat.le_refl _) (Success.leftovers r) = Some t /\
+      Success.value s = Success.value t /\
+      Success.size s = Success.size t.
+  Proof.
+    unfold Combinators.bind, Combinators.map, Combinators.andbind.
+    simpl.
+    destruct (runParser p bound input) as [r|] eqn:R; [|discriminate].
+    simpl.
+    destruct (runParser
+      (call (q (Success.value r))
+        (Nat.le_trans _ _ _ (Success.small r) bound))
+      (Nat.le_refl _) (Success.leftovers r)) as [t|] eqn:T;
+      [|discriminate].
+    simpl. intro E; inversion E; subst.
+    exists r, t. repeat split; assumption.
+  Qed.
 
   Lemma run_guardM_option {A B : Type} (f : A -> option B)
       (p : Parser Toks Byte.byte option A n) :
@@ -243,6 +275,42 @@ Section IntegerGuards.
   Qed.
 End IntegerGuards.
 
+Section SectionSizes.
+  Context {Toks : nat -> Type} `{Sized Toks Byte.byte}.
+  Context {A : Type} {m n : nat}.
+  Variable bound : m <= n.
+  Variable input : Toks m.
+
+  Lemma length_prefixed_payload_guards
+      (payload : Parser Toks Byte.byte option A n) s :
+    runParser
+      (Combinators.bind parse_u32_as_N
+        (fun sz => assert_sized payload (fun consumed => N.eqb sz consumed)))
+      bound input = Some s ->
+    exists r,
+      runParser parse_u32_as_N bound input = Some r /\
+      (Success.value r <= 4294967295)%N /\
+      N.of_nat (Success.size r - Success.size s) = Success.value r.
+  Proof.
+    intro R. apply run_bind_option_success in R.
+    destruct R as [r [t [R [T [V S]]]]].
+    change (runParser
+      (assert_sized payload
+        (fun consumed => N.eqb (Success.value r) consumed))
+      (Nat.le_trans _ _ _ (Nat.le_refl _)
+        (Nat.lt_le_incl _ _
+          (Nat.le_trans _ _ _ (Success.small r) bound)))
+      (Success.leftovers r) = Some t) in T.
+    apply assert_sized_option_correct in T.
+    destruct T as [_ W].
+    apply N.eqb_eq in W.
+    exists r. split; [exact R |].
+    split.
+    - now apply parse_u32_as_N_guards in R.
+    - rewrite S. symmetry. exact W.
+  Qed.
+End SectionSizes.
+
 Section VectorLengths.
   Context {Toks : nat -> Type} `{Sized Toks Byte.byte}.
   Context {A : Type} {m n : nat}.
@@ -375,8 +443,7 @@ Qed.
 (** Printing a successfully parsed module and parsing it again preserves the
     module, not necessarily the original bytes (encodings need not be canonical).
     This is a target property, not an established guarantee: parser and printer
-    bugs may need fixing before it can be proved.  One known printer issue is
-    [binary_of_load_vec]. *)
+    bugs may need fixing before it can be proved. *)
 Theorem run_parse_module_roundtrip bs m :
   run_parse_module bs = Some m ->
   run_parse_module (binary_of_module m) = Some m.
@@ -389,7 +456,9 @@ Lemma run_laneidx_byte_roundtrip b :
   @run option _ _ _ _ Byte.byte tokBytes laneidx
     (binary_of_laneidx (Byte.to_N b)) (fun _ => parse_laneidx) =
   Some (Byte.to_N b).
-Proof. destruct b; vm_compute; reflexivity. Qed.
+Proof.
+  unfold binary_of_laneidx. rewrite Byte.of_to_N. reflexivity.
+Qed.
 
 Lemma run_number_type_roundtrip t :
   @run option _ _ _ _ Byte.byte tokBytes number_type
@@ -405,3 +474,38 @@ Lemma run_reference_type_roundtrip t :
   @run option _ _ _ _ Byte.byte tokBytes reference_type
     (binary_of_reference_type t :: nil) (fun _ => parse_reference_type) = Some t.
 Proof. destruct t; vm_compute; reflexivity. Qed.
+
+Lemma run_splat_roundtrip sh :
+  run_parse_be (binary_of_be (BI_splat_vec sh)) = Some (BI_splat_vec sh).
+Proof.
+  destruct sh as [i | f]; [destruct i | destruct f]; vm_compute; reflexivity.
+Qed.
+
+(** This covers all successfully parsed single-byte instructions, not just a
+    hand-selected list of arithmetic opcodes. *)
+Lemma run_single_byte_instruction_roundtrip b be :
+  run_parse_be (b :: nil) = Some be ->
+  run_parse_be (binary_of_be be) = Some be.
+Proof.
+  destruct b; intro H; vm_compute in H; try discriminate;
+    inversion H; subst; vm_compute; reflexivity.
+Qed.
+
+Local Open Scope list_scope.
+
+Lemma binary_of_laneidx_byte b :
+  binary_of_laneidx (Byte.to_N b) = b :: nil.
+Proof. unfold binary_of_laneidx. now rewrite Byte.of_to_N. Qed.
+
+Lemma binary_of_shuffle_bytes bs :
+  binary_of_vbinop (13%N, List.map Byte.to_N bs) =
+  xfd :: x0d :: bs.
+Proof.
+  change (xfd :: x0d ::
+    List.concat (List.map binary_of_laneidx (List.map Byte.to_N bs)) =
+    xfd :: x0d :: bs).
+  f_equal. f_equal.
+  induction bs as [|b bs IH]; [reflexivity |].
+  cbn [List.map List.concat].
+  rewrite binary_of_laneidx_byte. simpl. now rewrite IH.
+Qed.

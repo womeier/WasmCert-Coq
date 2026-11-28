@@ -92,7 +92,17 @@ Definition make_msb_of_non_first_byte_one (bs : list byte) : list byte :=
 Definition encode_unsigned_aux (n : N) : list byte :=
   match n with
   | N0 => cons x00 nil
-  | Npos n' => make_msb_of_non_first_byte_one (binary_of_aux2 nil nil n')
+  | Npos n' =>
+      let bs := binary_of_aux2 nil nil n' in
+      (* A complete top group leaves an extra zero group in [binary_of_aux2].
+         Unsigned encoding needs no sign group; retaining it can make printed
+         section and function bodies larger than their parsed counterparts. *)
+      let unsigned_bs :=
+        match bs with
+        | cons x00 (cons b rest) => cons b rest
+        | _ => bs
+        end in
+      make_msb_of_non_first_byte_one unsigned_bs
   end.
 
 Definition encode_unsigned (n : N) : list byte :=
@@ -101,17 +111,7 @@ Definition encode_unsigned (n : N) : list byte :=
 Definition encode_signed_aux (z : Z) : list byte :=
   match z with
   | Z0 => cons x00 nil
-  | Zpos n' =>
-      let bs := binary_of_aux2 nil nil n' in
-      (* The most significant payload bit is the sign bit.  Unsigned
-         encodings whose top group has that bit set need a zero sign group. *)
-      let signed_bs :=
-        match bs with
-        | cons b _ =>
-            if N.leb 64 (Byte.to_N b) then cons x00 bs else bs
-        | nil => bs
-        end in
-      make_msb_of_non_first_byte_one signed_bs
+  | Zpos n' => make_msb_of_non_first_byte_one (binary_of_aux2 nil nil n')
   | Zneg n' => make_msb_of_non_first_byte_one
                 (bytes_of_bits
                    (complement_of_one_two

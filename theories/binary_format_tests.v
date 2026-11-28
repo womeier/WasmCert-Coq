@@ -35,6 +35,22 @@ Lemma overflowing_type_vector_length_rejected :
       (x01 :: x05 :: x80 :: x80 :: x80 :: x80 :: x10 :: nil)) = None.
 Proof. vm_compute. reflexivity. Qed.
 
+Lemma undersized_type_section_rejected :
+  run_parse_module
+    (empty_module_header ++ (x01 :: x00 :: x00 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma oversized_type_section_rejected :
+  run_parse_module
+    (empty_module_header ++ (x01 :: x02 :: x00 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma type_section_cannot_consume_next_section :
+  run_parse_module
+    (empty_module_header ++
+     (x01 :: x02 :: x00 :: x03 :: x01 :: x00 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
 (** Heap indices are unsigned indices encoded with signed LEB128. *)
 Lemma heap_index_64 :
   run_parse_heap_typeidx (xc0 :: x00 :: nil) = Some 64%N.
@@ -116,6 +132,13 @@ Lemma signed_positive_boundaries :
   ((x3f :: nil) :: (xc0 :: x00 :: nil) :: (xff :: x00 :: nil) ::
    (x80 :: x01 :: nil) :: (xff :: x3f :: nil) ::
    (x80 :: xc0 :: x00 :: nil) :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma unsigned_group_boundaries_are_minimal :
+  List.map leb128.encode_unsigned
+    (127%N :: 128%N :: 16383%N :: 16384%N :: nil) =
+  ((x7f :: nil) :: (x80 :: x01 :: nil) ::
+   (xff :: x7f :: nil) :: (x80 :: x80 :: x01 :: nil) :: nil).
 Proof. vm_compute. reflexivity. Qed.
 
 Lemma signed_negative_boundaries :
@@ -316,3 +339,94 @@ Definition module_tableops := {|
 Lemma module_tableops_exported_round_trip :
   run_parse_module (binary_of_module module_tableops) = Some module_tableops.
 Proof. vm_compute. reflexivity. Qed.
+
+(** Whole-module witnesses exercise both the premise and the conclusion of the
+    module roundtrip target.  In particular, bulk-memory code needs a data-count
+    section even though that section is forgotten by the module AST. *)
+Definition raw_single_function_module (body : list Byte.byte) : list Byte.byte :=
+  empty_module_header ++
+  (x03 :: x02 :: x01 :: x00 :: nil) ++
+  (x0c :: x01 :: x00 :: nil) ++
+  (x0a :: with_length (x01 :: with_length (x00 :: body))).
+
+Definition single_function_module (body : expr) : module := {|
+  mod_types := nil;
+  mod_funcs := {| modfunc_type := 0%N;
+                  modfunc_locals := nil;
+                  modfunc_body := body |} :: nil;
+  mod_tables := nil;
+  mod_mems := nil;
+  mod_globals := nil;
+  mod_elems := nil;
+  mod_datas := nil;
+  mod_start := None;
+  mod_imports := nil;
+  mod_exports := nil;
+|}.
+
+Lemma data_drop_module_parses :
+  run_parse_module
+    (raw_single_function_module (xfc :: x09 :: x00 :: x0b :: nil)) =
+  Some (single_function_module (BI_data_drop 0%N :: nil)).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma data_drop_module_roundtrip :
+  let m := single_function_module (BI_data_drop 0%N :: nil) in
+  run_parse_module (binary_of_module m) = Some m.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma nested_memory_init_module_roundtrip :
+  let body := BI_block (BT_valtype None)
+    (BI_memory_init 0%N :: nil) :: nil in
+  let m := single_function_module body in
+  run_parse_module (raw_single_function_module
+    (x02 :: x40 :: xfc :: x08 :: x00 :: x00 :: x0b :: x0b :: nil)) =
+    Some m /\
+  run_parse_module (binary_of_module m) = Some m.
+Proof. vm_compute. split; reflexivity. Qed.
+
+Definition vector_load_test_cases : list load_vec_arg :=
+  LVA_none ::
+  LVA_extend (8%N, 8%N) SX_S :: LVA_extend (8%N, 8%N) SX_U ::
+  LVA_extend (16%N, 4%N) SX_S :: LVA_extend (16%N, 4%N) SX_U ::
+  LVA_extend (32%N, 2%N) SX_S :: LVA_extend (32%N, 2%N) SX_U ::
+  LVA_splat 8%N :: LVA_splat 16%N ::
+  LVA_splat 32%N :: LVA_splat 64%N ::
+  LVA_zero 32%N :: LVA_zero 64%N :: nil.
+
+Lemma vector_load_opcodes :
+  List.map
+    (fun arg => binary_of_load_vec arg
+      {| memarg_align := 0%N; memarg_offset := 0%N |})
+    vector_load_test_cases =
+  List.map (fun op => xfd :: op :: x00 :: x00 :: nil)
+    (x00 :: x01 :: x02 :: x03 :: x04 :: x05 :: x06 ::
+     x07 :: x08 :: x09 :: x0a :: x5c :: x5d :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma vector_load_modules_roundtrip :
+  List.Forall
+    (fun arg =>
+      let m := single_function_module
+        (BI_load_vec arg {| memarg_align := 4%N; memarg_offset := 128%N |}
+           :: nil) in
+      run_parse_module (binary_of_module m) = Some m)
+    vector_load_test_cases.
+Proof.
+  unfold vector_load_test_cases.
+  repeat (apply List.Forall_cons; [vm_compute; reflexivity |]).
+  apply List.Forall_nil.
+Qed.
+
+Definition shuffle_test_bytes : list Byte.byte :=
+  x00 :: x01 :: x02 :: x03 :: x04 :: x05 :: x06 :: x07 ::
+  x08 :: x09 :: x0a :: x0b :: x0c :: x0d :: x0e :: xff :: nil.
+
+Lemma shuffle_module_roundtrip :
+  let m := single_function_module
+    (BI_vbinop (13%N, List.map Byte.to_N shuffle_test_bytes) :: nil) in
+  run_parse_module
+    (raw_single_function_module
+      (xfd :: x0d :: shuffle_test_bytes ++ (x0b :: nil))) = Some m /\
+  run_parse_module (binary_of_module m) = Some m.
+Proof. vm_compute. split; reflexivity. Qed.

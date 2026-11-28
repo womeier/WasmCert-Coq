@@ -118,10 +118,17 @@ https://webassembly.github.io/spec/core/binary/instructions.html#vector-instruct
 Definition binary_of_vunop (op: vunop) :=
   xfd :: binary_of_N op.
 
+Definition binary_of_laneidx (x : laneidx) : list byte :=
+  match Byte.of_N x with
+  | Some b => b :: nil
+  | None => x00 :: nil (* outside the byte range; not produced by the parser *)
+  end.
+
 Definition binary_of_vbinop (op: vbinop) :=
   let '(opcode, args) := op in
   if N.eqb opcode 13%N then (* shuffle *)
-    xfd :: x0d :: binary_of_vec (binary_of_N) args
+    (* Exactly 16 raw lane bytes, without a vector length prefix. *)
+    xfd :: x0d :: List.concat (List.map binary_of_laneidx args)
   else
     xfd :: binary_of_N opcode.
 
@@ -137,20 +144,14 @@ Definition binary_of_vshiftop (op: vshiftop) :=
 Definition binary_of_splat_vec (sh: vshape) :=
   xfd ::
   (match sh with
-   | VS_i VSI_8_16 => x0e
-   | VS_i VSI_16_8 => x0f
-   | VS_i VSI_32_4 => x10
-   | VS_i VSI_64_2 => x11
-   | VS_f VSF_32_4 => x12
-   | VS_f VSF_64_2 => x13
+    | VS_i VSI_8_16 => x0f
+    | VS_i VSI_16_8 => x10
+    | VS_i VSI_32_4 => x11
+    | VS_i VSI_64_2 => x12
+    | VS_f VSF_32_4 => x13
+    | VS_f VSF_64_2 => x14
    end
   ) :: nil.
-
-Definition binary_of_laneidx (x : laneidx) : list byte :=
-  match Byte.of_N x with
-  | Some b => b :: nil
-  | None => x00 :: nil (* outside the byte range; not produced by the parser *)
-  end.
 
 Definition binary_of_extract_vec (sh: vshape) (s: option sx) (x: laneidx) :=
   xfd ::
@@ -180,7 +181,23 @@ Definition binary_of_replace_vec (sh: vshape) (x: laneidx) :=
   ) :: binary_of_laneidx x.
   
 Definition binary_of_load_vec (lvarg: load_vec_arg) (marg: memarg) :=
-  xfd :: x0c :: (List.repeat x00 16).
+  xfd ::
+  (match lvarg with
+   | LVA_none => x00
+   | LVA_extend (8%N, 8%N) SX_S => x01
+   | LVA_extend (8%N, 8%N) SX_U => x02
+   | LVA_extend (16%N, 4%N) SX_S => x03
+   | LVA_extend (16%N, 4%N) SX_U => x04
+   | LVA_extend (32%N, 2%N) SX_S => x05
+   | LVA_extend (32%N, 2%N) SX_U => x06
+   | LVA_splat 8%N => x07
+   | LVA_splat 16%N => x08
+   | LVA_splat 32%N => x09
+   | LVA_splat 64%N => x0a
+   | LVA_zero 32%N => x5c
+   | LVA_zero 64%N => x5d
+   | _ => x00 (* not produced by the parser *)
+   end) :: binary_of_memarg marg.
 
 Definition binary_of_load_vec_lane (w: vwidth) (marg: memarg) (x: laneidx) :=
   xfd :: 
@@ -669,6 +686,9 @@ Definition binary_of_data (d : module_data) : list byte :=
 Definition binary_of_datasec (ds : list module_data) : list byte :=
   x0b :: with_length (binary_of_vec binary_of_data ds).
 
+Definition binary_of_datacountsec (ds : list module_data) : list byte :=
+  x0c :: with_length (binary_of_u32_nat (List.length ds)).
+
 Definition only_if_non_nil {A} (f : list A -> list byte) (xs : list A) : list byte :=
   match xs with
   | nil => nil
@@ -692,5 +712,8 @@ Definition binary_of_module (m : module) : list byte :=
   only_if_non_nil binary_of_exportssec m.(mod_exports) ++
   only_if_non_none binary_of_startsec m.(mod_start) ++
   only_if_non_nil binary_of_elemsec m.(mod_elems) ++
+  (* The AST forgets the data-count section.  Emit it whenever there is code:
+     memory.init and data.drop require it, including inside nested blocks. *)
+  only_if_non_nil (fun _ => binary_of_datacountsec m.(mod_datas)) m.(mod_funcs) ++
   only_if_non_nil binary_of_codesec m.(mod_funcs) ++
   only_if_non_nil binary_of_datasec m.(mod_datas).
