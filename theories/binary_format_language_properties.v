@@ -98,7 +98,7 @@ Proof.
   intro Rec.
   assert (Be : parser_sound (_be n (language_step n rec)) instruction_encoding).
   {
-    unfold language_step; cbn [_be].
+    unfold language_step, parse_be_layer; cbn [_be].
     do 18 (apply parser_sound_alt; [shelve |]).
     Unshelve.
     all: try (eapply parser_sound_weaken;

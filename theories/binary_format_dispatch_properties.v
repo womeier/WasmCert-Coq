@@ -6,7 +6,7 @@ From parseque Require Import Parseque.
 From Wasm Require Import datatypes binary_format_parser
   binary_parser_combinator_properties binary_format_language_properties
   binary_format_block_properties binary_format_atomic_properties
-  binary_format_numeric_properties.
+  binary_format_numeric_properties binary_memory_grammar_properties.
 Local Notation byte := Byte.byte.
 
 Definition atomic_encoding
@@ -70,6 +70,43 @@ Proof.
     intros bs be E; right; right; now right.
   - eapply parser_sound_weaken; [apply parse_numeric_instruction_sound |].
     intros bs be E; right; right; now left.
+Qed.
+
+Definition wasm_atomic_encoding :=
+  atomic_encoding binary_memory_instruction.
+
+Theorem wasm_primitive_parsers_sound n p :
+  In p (primitive_parsers n) -> parser_sound p wasm_atomic_encoding.
+Proof.
+  apply primitive_dispatch_sound.
+  exact parse_memory_instruction_binary_sound.
+Qed.
+
+Theorem wasm_production_parse_expr_sound n :
+  parser_sound
+    (parse_expr (Toks := SizedList byte) (M := option) (n := n))
+    (expression_encoding wasm_atomic_encoding block_type_encoding).
+Proof.
+  apply production_parse_expr_sound.
+  - exact wasm_primitive_parsers_sound.
+  - exact parse_block_type_sound.
+Qed.
+
+Theorem wasm_run_parse_expr_sound bs es :
+  run_parse_expr bs = Some es ->
+  expression_encoding wasm_atomic_encoding block_type_encoding bs es.
+Proof.
+  unfold run_parse_expr. apply run_parser_sound.
+  exact wasm_production_parse_expr_sound.
+Qed.
+
+Theorem wasm_run_parse_expr_terminated bs es :
+  run_parse_expr bs = Some es ->
+  exists body, bs = body ++ (x0b :: nil).
+Proof.
+  intro Run.
+  exact (expression_encoding_terminated wasm_atomic_encoding
+    block_type_encoding bs es (wasm_run_parse_expr_sound bs es Run)).
 Qed.
 
 Theorem production_parse_expr_sound_with_memory Memory :
