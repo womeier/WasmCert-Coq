@@ -244,4 +244,97 @@ let () =
       check "long declared subtype chain direction"
         (not (Types.matches types (id 0 0) (id 63 0)))
   end;
+  let abstract h = CV_ref (true, CH_abstract h) in
+  let any = abstract HT_any and eq = abstract HT_eq and i31 = abstract HT_i31 in
+  let cf mut ty = { field_mutability = mut; field_storage = ST_value ty } in
+  let packed p = { field_mutability = MUT_const; field_storage = ST_packed p } in
+  let cm = Types.composite_matches [] in
+  check "closed function arguments are contravariant"
+    (cm (Comp_func (Closed_ft ([any], [i31])))
+        (Comp_func (Closed_ft ([eq], [eq]))));
+  check "closed function rejects reversed argument variance"
+    (not (cm (Comp_func (Closed_ft ([i31], [])))
+             (Comp_func (Closed_ft ([eq], [])))));
+  check "closed function rejects reversed result variance"
+    (not (cm (Comp_func (Closed_ft ([], [any])))
+             (Comp_func (Closed_ft ([], [eq])))));
+  check "closed function rejects arity mismatch"
+    (not (cm (Comp_func (Closed_ft ([], [])))
+             (Comp_func (Closed_ft ([eq], [])))));
+  check "immutable fields are covariant with struct width"
+    (cm (Comp_struct [cf MUT_const i31; packed PT_i8])
+        (Comp_struct [cf MUT_const eq]));
+  check "struct rejects insufficient width"
+    (not (cm (Comp_struct []) (Comp_struct [cf MUT_const eq])));
+  check "mutable fields reject covariance"
+    (not (cm (Comp_array (cf MUT_var i31)) (Comp_array (cf MUT_var eq))));
+  check "mutable fields accept identical types"
+    (cm (Comp_array (cf MUT_var i31)) (Comp_array (cf MUT_var i31)));
+  check "field mutability must agree"
+    (not (cm (Comp_array (cf MUT_const i31)) (Comp_array (cf MUT_var i31))));
+  check "packed fields require identical widths"
+    (not (cm (Comp_array (packed PT_i8)) (Comp_array (packed PT_i16))));
+  check "packed identical fields match"
+    (cm (Comp_array (packed PT_i8)) (Comp_array (packed PT_i8)));
+  check "composite kinds must agree"
+    (not (cm (Comp_struct []) (Comp_func (Closed_ft ([], [])))));
+  check "validated self recursive group"
+    (Types.close_validated [] [recursive_group 0] = Some (registry, ids));
+  let declares final supers comp =
+    { subtype_final = final; subtype_supers = supers; subtype_composite = comp }
+  in
+  let closed_parent = declares false [] (Comp_struct [cf MUT_const eq]) in
+  let closed_child =
+    declares true [CT_def (id 0 0)]
+      (Comp_struct [cf MUT_const i31; packed PT_i16])
+  in
+  check "validated structural subtype"
+    (Types.validate [[closed_parent]; [closed_child]]);
+  check "final declared parent rejected"
+    (not (Types.validate
+      [[{ closed_parent with subtype_final = true }]; [closed_child]]));
+  check "declared mixed composite kinds rejected"
+    (not (Types.validate [[closed_parent];
+      [declares true [CT_def (id 0 0)] (Comp_array (cf MUT_const i31))]]));
+  check "dangling closed field identity rejected"
+    (not (Types.validate
+      [[declares true [] (Comp_array
+        (cf MUT_const (CV_ref (true, CH_defined (CT_def (id 2 0))))))]]));
+  check "unresolved binder accepted only through expansion"
+    (Types.validate registry);
+  check "indexed source masquerading as abstract heap rejected"
+    (not (Types.validate
+      [[declares true [] (Comp_array (cf MUT_const (abstract (HT_type BigZ.zero))))]]));
+  check "duplicate canonical groups rejected by validator"
+    (not (Types.validate [[closed_parent]; [closed_parent]]));
+  check "validated closing rejects final parent"
+    (Types.close_validated []
+      [[st true [] (Comp_func (Tf ([], [])))]; child] = None);
+  let nullable t = CV_ref (true, CH_defined (CT_def t)) in
+  let nonnull t = CV_ref (false, CH_defined (CT_def t)) in
+  let cm_defined = Types.composite_matches [[closed_parent]; [closed_child]] in
+  check "closed defined reference follows declared edge"
+    (cm_defined (Comp_array (cf MUT_const (nonnull (id 1 0))))
+      (Comp_array (cf MUT_const (nullable (id 0 0)))));
+  check "nullable defined reference does not match non-null"
+    (not (cm_defined (Comp_array (cf MUT_const (nullable (id 1 0))))
+      (Comp_array (cf MUT_const (nonnull (id 0 0))))));
+  check "defined struct matches abstract eq"
+    (cm_defined (Comp_array (cf MUT_const (nullable (id 0 0))))
+      (Comp_array (cf MUT_const eq)));
+  check "none matches defined struct"
+    (cm_defined (Comp_array (cf MUT_const (abstract HT_none)))
+      (Comp_array (cf MUT_const (nullable (id 0 0)))));
+  check "nofunc does not match defined struct"
+    (not (cm_defined (Comp_array (cf MUT_const (abstract HT_nofunc)))
+      (Comp_array (cf MUT_const (nullable (id 0 0))))));
+  check "none does not match abstract function"
+    (not (cm (Comp_array (cf MUT_const (abstract HT_none)))
+      (Comp_array (cf MUT_const (abstract HT_func)))));
+  check "exception bottom matches exception"
+    (cm (Comp_array (cf MUT_const (abstract HT_noexn)))
+      (Comp_array (cf MUT_const (abstract HT_exn))));
+  check "exception root does not match GC root"
+    (not (cm (Comp_array (cf MUT_const (abstract HT_exn)))
+      (Comp_array (cf MUT_const any))));
   Printf.printf "GC extraction: %d/%d checks passed\n" !checks !checks

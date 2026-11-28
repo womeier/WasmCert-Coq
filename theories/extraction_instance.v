@@ -9,6 +9,7 @@ From Wasm Require Import memory_vec binary_format_parser text_format_parser.
 From Wasm Require Import gc_numerics gc_binary gc_types.
 From Wasm Require Import binary_format_printer.
 From Wasm Require Import gc_type_context.
+From Wasm Require Import gc_declaration_typing.
 
 (* see common.v *)
 Set SsrOldRewriteGoalsOrder.
@@ -67,6 +68,9 @@ Module Utility.
       in the existing module validator or interpreter. *)
   Module GC.
     Module Types.
+      Definition validate := canonical_registry_validb.
+      Definition close_validated := close_and_validate_type_groups.
+      Definition composite_matches := closed_composite_matchesb.
       Definition close := close_type_groups.
       Definition expand := expand_defined_type.
       Definition function_type := expand_function_type.

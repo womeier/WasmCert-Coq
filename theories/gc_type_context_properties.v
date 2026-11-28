@@ -634,3 +634,66 @@ Proof.
   - intro E; subst b. unfold defined_type_equiv.
     now rewrite defined_type_matches_refl.
 Qed.
+
+Definition defined_types_present groups ids : Prop :=
+  Forall (fun t => exists st, lookup_defined_type groups t = Some st) ids.
+
+Lemma defined_types_present_extension groups suffix ids :
+  defined_types_present groups ids ->
+  defined_types_present (groups ++ suffix) ids.
+Proof.
+  apply Forall_impl. intros t [st Lookup]. exists st.
+  rewrite lookup_defined_type_extension; [exact Lookup |].
+  unfold lookup_defined_type in Lookup.
+  destruct (nth_error groups (N.to_nat (defined_group t))) eqn:Group;
+    [now apply nth_error_index_bound in Group | discriminate].
+Qed.
+
+Lemma close_type_group_present groups prior source registry ids :
+  close_type_group groups prior source = Some (registry, ids) ->
+  defined_types_present registry ids.
+Proof.
+  unfold close_type_group.
+  destruct (close_subtypes prior (N.of_nat (length source)) 0 source)
+    as [closed|] eqn:Closed; [|discriminate].
+  pose proof (intern_group_lookup groups closed) as Lookup.
+  destruct (intern_group groups closed) as [output addr] eqn:Intern.
+  simpl in Lookup. intro E; inversion E; subst.
+  unfold defined_types_present, group_defined_types.
+  apply Forall_forall. intros t Member. apply in_map_iff in Member.
+  destruct Member as [i [Id Bound]]. subst t. apply in_seq in Bound.
+  unfold lookup_defined_type. simpl. rewrite Nat2N.id, Lookup.
+  destruct (nth_error closed i) as [st|] eqn:Member.
+  - now exists st.
+  - apply nth_error_None in Member. lia.
+Qed.
+
+Lemma close_type_groups_present initial prior source groups ids :
+  defined_types_present initial prior ->
+  close_type_groups_from initial prior source = Some (groups, ids) ->
+  defined_types_present groups ids.
+Proof.
+  revert initial prior groups ids.
+  induction source as [|head source IH]; intros initial prior groups ids Present Closed.
+  - inversion Closed; subst. exact Present.
+  - simpl in Closed.
+    destruct (close_type_group initial prior head) as [[registry types]|] eqn:Group;
+      [|discriminate].
+    apply (IH registry (prior ++ types) groups ids); [|exact Closed].
+    unfold defined_types_present. apply Forall_app. split.
+    + destruct (close_type_group_extension _ _ _ _ _ Group) as [suffix Extension].
+      rewrite Extension. now apply defined_types_present_extension.
+    + now apply close_type_group_present in Group.
+Qed.
+
+Theorem close_type_groups_present_public initial source groups ids :
+  close_type_groups initial source = Some (groups, ids) ->
+  defined_types_present groups ids.
+Proof.
+  unfold close_type_groups.
+  destruct (close_type_groups_from initial [] source) as [[registry types]|]
+    eqn:Closed; [|discriminate].
+  destruct (canonical_registry_super_orderedb registry); [|discriminate].
+  intro E; inversion E; subst.
+  apply close_type_groups_present in Closed; [exact Closed | constructor].
+Qed.
