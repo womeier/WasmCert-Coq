@@ -621,6 +621,68 @@ Definition module_locals_closingb registry names (m : module) :=
     (fun f => List.forallb (source_local_closesb registry names) f.(modfunc_locals))
     m.(mod_funcs).
 
+(** Collect SOURCE type occurrences, including unreachable instructions.
+    The synthetic nullable reference for an ordinary type index checks scope
+    through the existing closing map; it is never a runtime descriptor. *)
+Definition source_type_index_occurrence x := T_ref (Ref_type true (HT_type x)).
+
+Definition block_source_types bt :=
+  match bt with
+  | BT_id x => [:: source_type_index_occurrence x]
+  | BT_valtype None => nil
+  | BT_valtype (Some t) => [:: t]
+  end.
+
+Fixpoint instruction_source_types (be : basic_instruction) : list value_type :=
+  let nested bes := List.concat (List.map instruction_source_types bes) in
+  match be with
+  | BI_ref_null h => [:: T_ref (Ref_type true h)]
+  | BI_select (Some ts) => ts
+  | BI_block bt bes | BI_loop bt bes | BI_try_table bt _ bes =>
+      block_source_types bt ++ nested bes
+  | BI_if bt bes1 bes2 => block_source_types bt ++ nested bes1 ++ nested bes2
+  | BI_call_indirect _ x | BI_return_call_indirect _ x
+  | BI_call_ref x | BI_return_call_ref x => [:: source_type_index_occurrence x]
+  | _ => nil
+  end.
+
+Definition expression_source_types bes :=
+  List.concat (List.map instruction_source_types bes).
+
+Definition import_source_types (imp : module_import) :=
+  match imp.(imp_desc) with
+  | MID_func x | MID_tag x => [:: source_type_index_occurrence x]
+  | MID_table tab => [:: T_ref tab.(tt_elem_type)]
+  | MID_global gt => [:: gt.(tg_t)]
+  | MID_mem _ => nil
+  end.
+
+Definition element_source_types (elem : module_element) :=
+  T_ref elem.(modelem_type) ::
+  (List.concat (List.map expression_source_types elem.(modelem_init)) ++
+    match elem.(modelem_mode) with
+    | ME_active _ es => expression_source_types es
+    | _ => nil
+    end).
+
+Definition module_source_types (m : module) :=
+  List.concat (List.map
+    (fun f => source_type_index_occurrence f.(modfunc_type) ::
+      f.(modfunc_locals) ++ expression_source_types f.(modfunc_body)) m.(mod_funcs)) ++
+  List.map (fun t => T_ref t.(modtab_type).(tt_elem_type)) m.(mod_tables) ++
+  List.concat (List.map (fun g => g.(modglob_type).(tg_t) ::
+    expression_source_types g.(modglob_init)) m.(mod_globals)) ++
+  List.concat (List.map import_source_types m.(mod_imports)) ++
+  List.concat (List.map element_source_types m.(mod_elems)) ++
+  List.concat (List.map (fun d =>
+    match d.(moddata_mode) with
+    | MD_active _ es => expression_source_types es
+    | MD_passive => nil
+    end) m.(mod_datas)).
+
+Definition module_source_types_closingb registry names m :=
+  List.forallb (source_local_closesb registry names) (module_source_types m).
+
 Definition module_typing (m : module) (impts expts : list extern_type) : Prop :=
   (exists registry ids,
     close_and_validate_type_groups nil (module_type_groups m) = Some (registry, ids) /\
@@ -681,7 +743,10 @@ Definition get_init_expr_start (mstart: option module_start) : list basic_instru
   | _ => nil
   end.
 
-(* The following definitions needs a revisit when implementing the GC/funcref proposal *)
+(** Source-cache compatibility profile until the shared closed extern boundary
+    is connected. Equality is never allowed to alias module-local type numbers:
+    the function/table/global guards below require closing with no local names.
+    Tag identity is checked separately by mandatory canonical tag matching. *)
 Definition limits_subtyping (l1 l2: limits) : bool :=
   (N.leb l2.(lim_min) l1.(lim_min)) &&
     match l1.(lim_max), l2.(lim_max) with
@@ -691,17 +756,23 @@ Definition limits_subtyping (l1 l2: limits) : bool :=
     end.
 
 Definition import_func_subtyping (t1 t2: function_type) : bool :=
-  t1 == t2.
+  let portable t := let 'Tf ps rs := t in
+    List.forallb (source_local_closesb nil nil) (ps ++ rs) in
+  (t1 == t2) && portable t1 && portable t2.
 
 Definition import_table_subtyping (t1 t2: table_type) : bool :=
   (t1.(tt_elem_type) == t2.(tt_elem_type)) &&
-    limits_subtyping t1.(tt_limits) t2.(tt_limits).
+    limits_subtyping t1.(tt_limits) t2.(tt_limits) &&
+    source_local_closesb nil nil (T_ref t1.(tt_elem_type)) &&
+    source_local_closesb nil nil (T_ref t2.(tt_elem_type)).
 
 Definition import_mem_subtyping (t1 t2: memory_type) : bool :=
   limits_subtyping t1 t2.
 
 Definition import_global_subtyping (t1 t2: global_type) : bool :=
-  t1 == t2.
+  (t1 == t2) &&
+    source_local_closesb nil nil t1.(tg_t) &&
+    source_local_closesb nil nil t2.(tg_t).
 
 (** Compatibility of the current source-typed runtime's payload caches. This
     closes with NO module-local names and compares CLOSED types, so indexed

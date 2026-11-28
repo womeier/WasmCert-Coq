@@ -4,6 +4,11 @@ This is a counterexample/repair record, **not whole-module verification or
 passing conformance coverage**. The general module round-trip and grammar iff
 remain unproved.
 
+**Follow-up:** the indexed-global decoder failure below is now repaired.
+Current production paths, generalized proofs and source-scope checks are
+documented in `source_decoder_scope_checks.md`; the exact binary is a positive
+round-trip/instantiation regression, not an expected malformed input.
+
 ## Repaired: unsigned block indices
 
 The old printer encoded `BT_id 64` as unsigned `40`. The actual parser chooses
@@ -49,7 +54,7 @@ wasm-tools validation agrees on all ten new block/count fixtures (six valid
 and four deliberately rejected). Artifacts:
 `/tmp/opencode/eh-wholemodule-block-count-fixtures/validation.json`.
 
-## Still false: full source-value grammar at the global decoder
+## Historical failed premise at ffa5a0c: indexed globals (now repaired)
 
 This is an actual failed derivation, not a list of unimplemented proofs.
 Take the single source type `(func)` at index 0 and one immutable global:
@@ -69,35 +74,36 @@ SHA-256:
 `6d1b654656aa8528644b308a45bd4bcd213dfd04ae5d9a9d2e024b0391ed8c12`.
 The independently pinned wasm-tools validator accepts it.
 
-The following facts are kernel checked in
+At `ffa5a0c`, the following facts were kernel checked in
 `theories/binary_format_eh_module_tests.v`:
 
 1. `indexed_global_source_type_is_in_grammar` derives
    `source_value_encoding [x63; x00] (T_ref (Ref_type true (HT_type 0)))`.
-2. `indexed_global_source_type_decode_gap` proves the actual
-   `parse_value_type` rejects those bytes.
+2. The abstract-fragment decoder rejected the bytes (now retained as
+   `indexed_global_abstract_fragment_rejects`); the production decoder no longer
+   uses that fragment.
 3. `indexed_global_source_module_validates` proves the current production
    validator accepts the source AST; this is not an out-of-scope index or
    unencodable AST.
-4. `indexed_global_whole_module_roundtrip_gap` proves
-   `run_parse_module (binary_of_module indexed_global_source_module) = None`.
+4. The actual module round trip then failed. It is now replaced by the positive
+   `indexed_global_whole_module_roundtrip` and `indexed_global_string_roundtrip`.
 
-The failed shared-template premise is therefore concrete: global-type
+The failed shared-template premise was therefore concrete: global-type
 completeness cannot instantiate its value leaf with the full source grammar.
-`parse_global_type -> parse_value_type -> parse_reference_type` still selects
+`parse_global_type -> parse_value_type -> parse_reference_type` selected
 the abstract-only reference codec. The initializer's `parse_ref_null` path
-also uses an abstract-only heap decoder. Indexed-local decoding repaired in
-the preceding increment does not fix either path.
+also used an abstract-only heap decoder. Both production paths are now wired
+to the already-proved full source codecs.
 
-This blocks the **claimed full source-AST** module round trip and the
-corresponding full grammar iff on the current decoder. It does not justify
+This blocked the **claimed full source-AST** module round trip and the
+corresponding full grammar iff at that revision. It did not justify
 assuming the shared non-EH theorem, filtering out this valid module, calling
 the binary malformed, or introducing a parser-success grammar. Repairing
-these source decoder/composition paths is still independent parser work;
-it is not described as waiting for GC.
+these source decoder/composition paths was independent parser work, and did
+not wait for GC.
 
-The valid-but-rejected binary is retained as a red counterexample, **not**
-added to the green harness with an `assert_malformed` expectation. Artifact:
+The binary is now in the green harness with a required successful module load,
+**not** an `assert_malformed` expectation. The historical diagnostic artifact is:
 `/tmp/opencode/eh-wholemodule-block-count-fixtures/indexed-global-gap.json`.
 
 Official EH accounting remains separate: **489/489 binary-scope commands**
@@ -106,7 +112,7 @@ remain **7 passes / 3 failures**, not seven failures. General closed payload
 transport and the shared closed administrative-stack bridge remain open as
 documented in `exception_payload_handoff.md`.
 
-## Validation of this repair increment
+## Historical validation of the ffa5a0c repair increment
 
 Full exact-tree build and forced tests pass. The extracted script suite has
 **142 positive commands** and detects the same 12 deliberately wrong

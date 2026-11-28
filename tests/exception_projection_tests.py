@@ -307,6 +307,81 @@ def whole_module_block_count_cases():
     return files, commands
 
 
+def source_position_cases():
+    header = b"\0asm\x01\0\0\0"
+    empty = b"\x60\0\0"
+    main = b"\x60\0\x01\x7f"
+    files, commands = {}, []
+    exact = bytes.fromhex("0061736d01000000010401600000060701630000d0000b")
+    files["indexed-global-exact-counterexample.wasm"] = exact
+    commands.append(load("indexed-global-exact-counterexample.wasm"))
+
+    def global_module(heap=b"\0", initializer=None, execute=False):
+        initializer = b"\xd0" + heap if initializer is None else initializer
+        data = header + sec(1, vec([empty, main] if execute else [empty]))
+        if execute:
+            data += sec(3, b"\x01\x01")
+        data += sec(6, vec([b"\x63" + heap + b"\0" + initializer + b"\x0b"]))
+        if execute:
+            code = b"\0\x23\0\xd1\x0b"
+            data += sec(7, b"\x01\x04main\0\0") + sec(10, vec([u32(len(code)) + code]))
+        return data
+
+    files["indexed-global-execute.wasm"] = global_module(execute=True)
+    commands.extend([load("indexed-global-execute.wasm"),
+                     assertion("assert_return", [literal(1)])])
+    for label, heap in [("wrong-scope", b"\x01"),
+                        ("max-index", b"\xff\xff\xff\xff\x0f")]:
+        filename = f"indexed-global-{label}.wasm"
+        files[filename] = global_module(heap)
+        commands.append({"type": "assert_invalid", "filename": filename})
+    files["indexed-global-overflow.wasm"] = global_module(b"\x80\x80\x80\x80\x10")
+    commands.append({"type": "assert_malformed", "filename": "indexed-global-overflow.wasm"})
+
+    def function(body):
+        code = b"\0" + body + b"\x0b"
+        return (header + sec(1, vec([empty, main])) + sec(3, b"\x01\x01")
+                + sec(7, b"\x01\x04main\0\0") + sec(10, vec([u32(len(code)) + code])))
+
+    # Scope checking cannot be bypassed with unreachable/polymorphic code.
+    for label, body in {
+        "unreachable-ref-null": b"\0\xd0\xe3\0\x1a\x41\x07",
+        "indexed-block-result": b"\x02\x63\xe3\0\0\x0b\x1a\x41\x07",
+        "typed-select": b"\0\x1c\x01\x63\xe3\0\x1a\x41\x07",
+    }.items():
+        filename = label + "-wrong-scope.wasm"
+        files[filename] = function(body)
+        commands.append({"type": "assert_invalid", "filename": filename})
+    files["indexed-typed-select-valid.wasm"] = function(
+        b"\xd0\0\xd0\0\x41\0\x1c\x01\x63\0\xd1")
+    commands.extend([load("indexed-typed-select-valid.wasm"),
+                     assertion("assert_return", [literal(1)])])
+    for label, section, payload, valid in [
+        ("indexed-table", 4, b"\x01\x63\0\0\0", True),
+        ("indexed-table-wrong-scope", 4, b"\x01\x63\x01\0\0", False),
+        ("indexed-passive-element", 9, b"\x01\x05\x63\0\x01\xd0\0\x0b", True),
+        ("indexed-declarative-element", 9, b"\x01\x07\x63\0\x01\xd0\0\x0b", True),
+        ("indexed-element-wrong-scope", 9, b"\x01\x05\x63\x01\0", False),
+        ("indexed-global-import-wrong-scope", 2, b"\x01\x01p\x01g\x03\x63\x01\0", False),
+        ("indexed-table-import-wrong-scope", 2, b"\x01\x01p\x01t\x01\x63\x01\0\0", False),
+    ]:
+        filename = label + ".wasm"
+        files[filename] = header + sec(1, vec([empty])) + sec(section, payload)
+        commands.append(load(filename) if valid else
+                        {"type": "assert_invalid", "filename": filename})
+
+    # Same raw index 0, DIFFERENT canonical referenced function types.
+    # Source-cache equality must not newly enable this invalid global link.
+    files["indexed-global-producer.wasm"] = exact + sec(7, b"\x01\x01g\x03\0")
+    files["indexed-global-different-canonical-import.wasm"] = (
+        header + sec(1, vec([main])) + sec(2, b"\x01\x01p\x01g\x03\x63\0\0"))
+    commands.extend([load("indexed-global-producer.wasm", "IndexedGlobalProducer"),
+                     {"type": "register", "name": "IndexedGlobalProducer", "as": "p"},
+                     {"type": "assert_unlinkable",
+                      "filename": "indexed-global-different-canonical-import.wasm"}])
+    return files, commands
+
+
 def main(exe):
     text = ';; ignored (\n(; " ;; (; nested ;) ;) (module binary "\\00(;\\22")\n(register "x")'
     assert [text[a:b] for a, b in forms(text)] == [
@@ -388,6 +463,9 @@ def main(exe):
     assembly_files, assembly_commands = whole_module_block_count_cases()
     files.update(assembly_files)
     positive.extend(assembly_commands)
+    source_files, source_commands = source_position_cases()
+    files.update(source_files)
+    positive.extend(source_commands)
     check_driver(exe, files, positive, len(positive))
     negative = [
         load("throw.wasm"), assertion("assert_trap"),

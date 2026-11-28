@@ -39,6 +39,8 @@ Proof.
     as [[registry ids]|] eqn:Hclosed => //.
    destruct (source_type_identitiesb registry ids (List.concat (mod_types m)) ids &&
      module_locals_closingb registry ids m) eqn:Hsource => //.
+   apply check_module_source_types_success in Hmodcheck.
+   destruct Hmodcheck as [Hmodcheck Hsource_types].
    move/andP in Hsource; destruct Hsource as [Hidentity Hlocals].
   split; first by exists registry, ids; split.
   unfold module_components_type_checker in Hmodcheck.
@@ -269,11 +271,15 @@ Lemma module_typecheck_glob_aux: forall m t_imps t_exps str,
     exists c, all (module_global_type_checker c) m.(mod_globals).
 Proof.
   move => m t_imps t_exps str.
-  unfold module_type_checker, module_components_type_checker.
+  unfold module_type_checker.
   move => Hmodcheck.
   destruct (close_and_validate_type_groups nil (module_type_groups m))
     as [[registry typeids]|] => //.
-  destruct (source_type_identitiesb registry typeids (List.concat (mod_types m)) typeids) => //.
+  destruct (source_type_identitiesb registry typeids (List.concat (mod_types m)) typeids &&
+    module_locals_closingb registry typeids m) => //.
+  apply check_module_source_types_success in Hmodcheck.
+  destruct Hmodcheck as [Hmodcheck Hsource_types].
+  unfold module_components_type_checker in Hmodcheck.
   destruct m.
   remove_bools_options.
   simpl in *.
@@ -285,11 +291,15 @@ Lemma module_typecheck_elem_aux: forall m t_imps t_exps str,
     exists c, all (module_elem_type_checker c) m.(mod_elems).
 Proof.
   move => m t_imps t_exps str.
-  unfold module_type_checker, module_components_type_checker.
+  unfold module_type_checker.
   move => Hmodcheck.
   destruct (close_and_validate_type_groups nil (module_type_groups m))
     as [[registry typeids]|] => //.
-  destruct (source_type_identitiesb registry typeids (List.concat (mod_types m)) typeids) => //.
+  destruct (source_type_identitiesb registry typeids (List.concat (mod_types m)) typeids &&
+    module_locals_closingb registry typeids m) => //.
+  apply check_module_source_types_success in Hmodcheck.
+  destruct Hmodcheck as [Hmodcheck Hsource_types].
+  unfold module_components_type_checker in Hmodcheck.
   destruct m.
   remove_bools_options.
   simpl in *.

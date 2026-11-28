@@ -58,18 +58,19 @@ Example actual_eh_section_assembly_string_roundtrip :
     Some (eh_assembly_module eh_assembly_body).
 Proof. vm_compute. reflexivity. Qed.
 
-(** A concrete remaining failed leaf derivation, not a passing conformance
-    case: the full source value grammar admits this in-scope indexed type,
-    but the global/instruction path still uses the abstract-only decoder. *)
-Definition indexed_global_source_module : module :=
+(** The concrete indexed-global counterexample is now a positive regression.
+    The abstract fragment remains separate from production source decoding. *)
+Definition indexed_global_source_module_at (index : N) : module :=
   {| mod_types := [[Sub_type true [] (Comp_func (Tf [] []))]];
      mod_funcs := []; mod_tables := []; mod_mems := [];
      mod_globals := [Build_module_global
        (Build_global_type gc_storage_types.MUT_const
-         (T_ref (Ref_type true (HT_type 0%N))))
-       [BI_ref_null (HT_type 0%N)]];
+         (T_ref (Ref_type true (HT_type index))))
+       [BI_ref_null (HT_type index)]];
      mod_elems := []; mod_datas := []; mod_start := None;
      mod_imports := []; mod_exports := []; mod_tags := [] |}.
+
+Definition indexed_global_source_module := indexed_global_source_module_at 0%N.
 
 Example indexed_global_source_type_is_in_grammar :
   source_value_encoding [x63; x00] (T_ref (Ref_type true (HT_type 0%N))).
@@ -80,7 +81,7 @@ Proof.
   cbn; lia.
 Qed.
 
-Example indexed_global_source_type_decode_gap :
+Example indexed_global_abstract_fragment_rejects :
   run [x63; x00] (fun n => parse_value_type (n := n)) = None.
 Proof. vm_compute. reflexivity. Qed.
 
@@ -88,8 +89,14 @@ Example indexed_global_source_module_validates :
   fst (module_type_checker indexed_global_source_module) <> None.
 Proof. vm_compute. discriminate. Qed.
 
-Example indexed_global_whole_module_roundtrip_gap :
-  run_parse_module (binary_of_module indexed_global_source_module) = None.
+Example indexed_global_whole_module_roundtrip :
+  run_parse_module (binary_of_module indexed_global_source_module) =
+    Some indexed_global_source_module.
+Proof. vm_compute. reflexivity. Qed.
+
+Example indexed_global_string_roundtrip :
+  run_parse_module_str (String.string_of_list_byte
+    (binary_of_module indexed_global_source_module)) = Some indexed_global_source_module.
 Proof. vm_compute. reflexivity. Qed.
 
 Example indexed_global_printed_bytes :
@@ -97,4 +104,13 @@ Example indexed_global_printed_bytes :
     magic ++ version ++
     [x01; x04; x01; x60; x00; x00;
      x06; x07; x01; x63; x00; x00; xd0; x00; x0b].
+Proof. vm_compute. reflexivity. Qed.
+
+Example indexed_global_wrong_scope_still_parses :
+  run_parse_module (binary_of_module (indexed_global_source_module_at 1%N)) =
+    Some (indexed_global_source_module_at 1%N).
+Proof. vm_compute. reflexivity. Qed.
+
+Example indexed_global_wrong_scope_is_invalid :
+  fst (module_type_checker (indexed_global_source_module_at 1%N)) = None.
 Proof. vm_compute. reflexivity. Qed.

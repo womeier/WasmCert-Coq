@@ -236,12 +236,33 @@ Definition module_components_type_checker (m : module) : option ((list extern_ty
   | (Some _, None) | (None, Some _) | (None, None) => (None, "invalid module function or import references")
   end.
 
+Definition check_module_source_types registry names m
+    (checked : option ((list extern_type) * (list extern_type)) * string) :=
+  let '(types, message) := checked in
+  match types with
+  | None => (None, message)
+  | Some ts =>
+      if module_source_types_closingb registry names m
+      then (Some ts, message)
+      else (None, "invalid source type references")
+  end.
+
+Lemma check_module_source_types_success registry names m checked imps exps message :
+  check_module_source_types registry names m checked = (Some (imps, exps), message) ->
+  checked = (Some (imps, exps), message) /\
+  module_source_types_closingb registry names m = true.
+Proof.
+  destruct checked as [[[actual_imps actual_exps]|] actual_message] => //.
+  unfold check_module_source_types.
+  destruct (module_source_types_closingb registry names m) eqn:Valid => //.
+Qed.
+
 Definition module_type_checker (m : module) : option ((list extern_type) * (list extern_type)) * string :=
   match close_and_validate_type_groups nil (module_type_groups m) with
   | Some (registry, ids) =>
       if source_type_identitiesb registry ids (List.concat m.(mod_types)) ids &&
          module_locals_closingb registry ids m
-      then module_components_type_checker m
+      then check_module_source_types registry ids m (module_components_type_checker m)
       else (None, "inconsistent closed module type signatures")
   | None => (None, "invalid module type declarations")
   end.

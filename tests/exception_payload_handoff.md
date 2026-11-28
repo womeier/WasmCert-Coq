@@ -121,6 +121,15 @@ The other required connected contracts are:
   Closed function imports use the existing directed matching/variance contract;
   tag imports require bidirectional equivalence.
 
+The source-decoder repair now also fails closed on indexed **function/table/
+global** compatibility caches at imports, using shared closing with no local
+names. This prevents newly exposed indexed source syntax from enabling
+raw-index-equality links before the closed extern boundary is ready. These
+guards are compatibility restrictions, not canonical import completeness;
+positive indexed links must still become green through the shared migration,
+not by treating coincident source indices as identities. Exact syntax/scope
+contracts and checks are in `source_decoder_scope_checks.md`.
+
 EH already supplies the public connected pieces at `e27a6b1`:
 `tag_import_matching_correct`, store/registry extension,
 `tag_import_matching_closed_signature_agreement`,
