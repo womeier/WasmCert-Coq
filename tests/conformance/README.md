@@ -26,6 +26,8 @@ instruction immediates, cross-instance imported tail calls, incorrect function
 sizes, and permitted u32 padding in function-size and zero-local-count fields.
 It also covers zero-count entries in nonempty local vectors and aggregate local
 count overflow with individually valid u32 counts.
+Nonempty-local bodies exercise a multibyte local count, both wrong-size
+directions, and an executed tail transfer from a caller with 64 locals.
 Both `dune test` and CI run the checked-in fixtures without requiring wasm-tools.
 Binary invalid assertions must decode then fail validation; binary malformed
 assertions must fail decoding.

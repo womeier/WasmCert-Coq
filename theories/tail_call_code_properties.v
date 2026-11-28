@@ -581,3 +581,41 @@ Proof.
     (Nat.le_refl _) Hlength Hlocals Htail Hsize) as Hprefix.
   now rewrite List.app_nil_r in Hprefix.
 Qed.
+
+Theorem parse_code_locals_tail_wrong_size :
+    forall n m (input : SizedList Byte.byte m)
+      declared body locals instruction suffix (Hle : (m <= n)%nat),
+    u32_prefix (@Sized.value _ _ _ input) declared body ->
+    declared <> N.of_nat (List.length body - List.length suffix) ->
+    locals_tail_body_prefix body locals instruction suffix ->
+    runParser (parse_code :
+      Parser (SizedList Byte.byte) Byte.byte option module_func_without_type n)
+      Hle input = None.
+Proof.
+  intros n m input declared body locals instruction suffix
+    Hle Hheader Hdeclared Hgrammar.
+  pose proof (proj2 (parse_u32_as_N_correct n m Hle input declared body)
+    Hheader) as Hhead.
+  unfold parse_code, Combinators.bind, Combinators.andbind, Combinators.map.
+  cbn [runParser].
+  destruct (runParser (parse_u32_as_N :
+    Parser (SizedList Byte.byte) Byte.byte option N n) Hle input)
+    as [result|]; [|discriminate].
+  destruct result as [value remaining Hsmall [tail Hlength]].
+  cbn [observe_reader Success.value Success.leftovers Sized.value] in Hhead.
+  inversion Hhead; subst value tail.
+  subst remaining.
+  cbn [Combinators.box le_close Combinators.le_lower call runParser].
+  cbn -[assert_sized parse_code_func].
+  assert (Hconstraint :
+    N.eqb declared (N.of_nat (List.length body - List.length suffix)) = false).
+  { now apply N.eqb_neq. }
+  match goal with
+  | |- context [runParser (assert_sized ?parser ?constraint) ?bound ?tokens] =>
+      pose proof (parse_code_func_locals_tail_prefix n _ tokens
+        locals instruction suffix bound Hgrammar) as Hbody;
+      rewrite (assert_sized_reject _ n _ bound parser tokens
+        (locals, instruction :: nil) suffix constraint Hbody Hconstraint)
+  end.
+  reflexivity.
+Qed.

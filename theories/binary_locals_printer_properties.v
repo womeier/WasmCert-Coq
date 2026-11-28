@@ -139,13 +139,21 @@ Qed.
 (** Only types accepted by the current concrete binary value-type parser are
     claimed here. Indexed reference encodings belong to its shared extension. *)
 Definition printable_local_type type :=
-  concrete_valtype_prefix (binary_of_value_type type) type nil.
+  match type with
+  | T_num _ | T_vec _ => True
+  | T_ref reference => reference = T_funcref \/ reference = T_externref
+  | T_bot => False
+  end.
 
 Lemma printable_local_type_suffix : forall type suffix,
     printable_local_type type ->
     concrete_valtype_prefix (List.app (binary_of_value_type type) suffix) type suffix.
 Proof.
-  intros type suffix Htype. inversion Htype; subst; constructor.
+  intros [number | vector | reference |] suffix Htype.
+  - destruct number; constructor.
+  - destruct vector; constructor.
+  - destruct Htype as [-> | ->]; constructor.
+  - contradiction.
 Qed.
 
 Lemma unpack_locals_decl_bounds : forall decls,
