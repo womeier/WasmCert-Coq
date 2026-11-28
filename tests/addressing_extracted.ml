@@ -348,6 +348,31 @@ let () =
                      modelem_mode = ME_passive }] } in
   check "core table64.init uses i64 destination and i32 segment operands"
     (execute_storage_module passive = [Utility.vali32_of_Z one]);
+  let full_tt64 = { core_tt64 with tt_limits = limits "18446744073709551615" None } in
+  check "core table64 allocates full capacity without eager reference allocation"
+    (execute_storage_module
+      (storage_module T_i64 [] [full_tt64] (BI_table_size z)) =
+        [Utility.vali64_of_Z (n "-1")]);
+  let with_declared_self m = { m with
+    mod_elems = [{ modelem_type = T_funcref;
+                   modelem_init = [[BI_ref_func z]];
+                   modelem_mode = ME_declarative }] } in
+  check "core table64.set/get reaches last full-capacity element"
+    (execute_storage_module (with_declared_self (table_program [full_tt64]
+      [index64 "18446744073709551614"; BI_ref_func z; BI_table_set z;
+       index64 "18446744073709551614"; BI_table_get z; BI_ref_is_null])) =
+       [Utility.vali32_of_Z z]);
+  check "core table64 high write does not alias a low index"
+    (execute_storage_module (with_declared_self (table_program [full_tt64]
+      [index64 "4294967296"; BI_ref_func z; BI_table_set z;
+       index64 "0"; BI_table_get z; BI_ref_is_null])) =
+       [Utility.vali32_of_Z one]);
+  let unbounded_tt64 = { core_tt64 with tt_limits = limits "1" None } in
+  check "core table64 grows above 2^32 entries without eager allocation"
+    (execute_storage_module (with_declared_self (table_program [unbounded_tt64]
+      [BI_ref_func z; index64 "4294967296"; BI_table_grow z; BI_drop;
+       index64 "4294967296"; BI_table_get z; BI_ref_is_null])) =
+       [Utility.vali32_of_Z z]);
   let byte s = Byte.repr (n s) in
   let fill_one data at b = some "memory64 fill"
       (U.fill memory_instance data (value A.AT_i64 at)

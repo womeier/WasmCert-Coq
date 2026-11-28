@@ -944,7 +944,7 @@ Definition smem (s: store_record) (inst: moduleinst) (x: memidx) : option memins
   end.
 
 Definition tab_size (t: tableinst) : nat :=
-  length (tableinst_elem t).
+  TableStorage.size (tableinst_elem t).
 
 Definition stab_ind (s: store_record) (inst: moduleinst) (x: tableidx) : option tableaddr :=
   lookup_N inst.(inst_tables) x.
@@ -959,7 +959,7 @@ Definition stab_elem (s: store_record) (inst: moduleinst) (x: tableidx) (i: elem
   match lookup_N inst.(inst_tables) x with
   | Some tabaddr =>
       match lookup_N s.(s_tables) tabaddr with
-      | Some tab => lookup_N tab.(tableinst_elem) i
+      | Some tab => TableStorage.get tab.(tableinst_elem) (N.to_nat i)
       | _ => None
       end
   | _ => None
@@ -972,7 +972,7 @@ Definition stab_update (s: store_record) (inst: moduleinst) (x: tableidx) (i: el
       | Some tab =>
           if (N.ltb i (N.of_nat (tab_size tab))) then
             let: tab' := {| tableinst_type := tab.(tableinst_type);
-                           tableinst_elem := set_nth tabv tab.(tableinst_elem) (N.to_nat i) tabv |} in
+                            tableinst_elem := TableStorage.set tab.(tableinst_elem) (N.to_nat i) tabv |} in
             let: tabs' := set_nth tab' s.(s_tables) (N.to_nat tabaddr) tab' in
             Some (Build_store_record (s_funcs s) tabs' (s_mems s) (s_globals s) (s_elems s) (s_datas s))
           else None
@@ -1148,7 +1148,7 @@ Definition growtable (tab: tableinst) (n: N) (tabinit: value_ref) : option table
     let: {| tt_limits := lim; tt_elem_type := tabtype |} := tab.(tableinst_type) in
     let lim' := {| lim_min := len; lim_max := lim.(lim_max) |} in
     if limit_valid_range lim' (table_limit_bound_for tab.(tableinst_type).(tt_address_type)) then
-      let elem' := tab.(tableinst_elem) ++ (List.repeat tabinit (N.to_nat n)) in
+      let elem' := TableStorage.append tab.(tableinst_elem) (TableStorage.repeat (N.to_nat n) tabinit) in
       let tab' := {| tableinst_type := {| tt_limits := lim'; tt_elem_type := tabtype;
                         tt_address_type := tab.(tableinst_type).(tt_address_type) |}; tableinst_elem := elem' |} in
       Some tab'

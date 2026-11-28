@@ -77,7 +77,7 @@ Definition add_table (s : store_record) (ti : tableinst) : store_record := {|
 
 Definition gen_table_instance (mt: table_type) ref: tableinst :=
   let '{| tt_limits := {| lim_min := min; lim_max := maxo |} as lim; tt_elem_type := ety |} := mt in
-  {| tableinst_elem := (List.repeat ref (N.to_nat min));
+  {| tableinst_elem := TableStorage.repeat (N.to_nat min) ref;
     tableinst_type := mt;
   |}.
   
@@ -273,7 +273,7 @@ Definition alloc_module (s : store_record) (m : module) (imps : list extern_valu
   (inst.(inst_datas) = i_ds) /\
   (inst.(inst_exports) = (map (get_exportinst inst) m.(mod_exports))).
 
-Definition dummy_table : tableinst := {| tableinst_elem := nil; tableinst_type := Build_table_type (Build_limits N0 None) T_funcref AT_i32 |}.
+Definition dummy_table : tableinst := {| tableinst_elem := TableStorage.empty; tableinst_type := Build_table_type (Build_limits N0 None) T_funcref AT_i32 |}.
 
 Definition module_func_typing (c : t_context) (mf : module_func) (tf : function_type) : Prop :=
   let '{| modfunc_type := x; modfunc_locals := t_locs; modfunc_body := b_es |} := mf in

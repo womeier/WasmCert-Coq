@@ -450,8 +450,8 @@ Section Store_validity.
 Definition tableinst_typing (s: store_record) (ti: tableinst) : option table_type :=
   let '{| tableinst_type := ti_type; tableinst_elem := refs |} := ti in
   if tabletype_valid ti_type then
-    if N.of_nat (length refs) == ti_type.(tt_limits).(lim_min) then
-      if all (fun ref => value_typing s (VAL_ref ref) (T_ref (ti_type.(tt_elem_type)))) refs then
+    if N.of_nat (TableStorage.size refs) == ti_type.(tt_limits).(lim_min) then
+      if TableStorage.all (fun ref => value_typing s (VAL_ref ref) (T_ref (ti_type.(tt_elem_type)))) refs then
         Some ti_type
       else None
     else None

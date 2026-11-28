@@ -3,7 +3,7 @@
     and https://webassembly.github.io/spec/core/exec/index.html **)
 (* (C) J. Pichon, M. Bodin - see LICENSE.txt *)
 
-From Wasm Require Export common numerics bytes memory simd address_types.
+From Wasm Require Export common numerics bytes memory simd address_types table_storage.
 From compcert Require common.Memdata.
 From Stdlib Require Import ZArith.
 
@@ -855,7 +855,7 @@ never exceeds the maximum size of tabletype, if present.
 *)
 Record tableinst : Set := {
   tableinst_type : table_type;
-  tableinst_elem : list value_ref;
+  tableinst_elem : TableStorage.entries value_ref;
 }.
 
 

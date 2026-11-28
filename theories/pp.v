@@ -804,7 +804,7 @@ Definition pp_memories (n : indentation) (ms : list meminst) : string :=
   String.concat "" (mapi (fun i m => indent n (string_of_nat i ++ ": " ++ "TODO: memory" ++ newline)) ms).
 
 Definition pp_table (n: indentation) (t : tableinst) : string :=
-  String.concat "" (mapi (fun i elem => indent n (string_of_nat i ++ ": " ++ pp_value_ref elem ++ newline)) t.(tableinst_elem)).
+  String.concat "" (mapi (fun i elem => indent n (string_of_nat i ++ ": " ++ pp_value_ref elem ++ newline)) (TableStorage.to_list t.(tableinst_elem))).
 
 Definition pp_tables (n : indentation) (ms : list tableinst) : string :=
   String.concat "" (mapi (fun i t => indent n (string_of_nat i ++ ": " ++ pp_table n t)) ms).

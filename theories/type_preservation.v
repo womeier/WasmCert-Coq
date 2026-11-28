@@ -1059,10 +1059,9 @@ Proof.
   unfold table_extension, table_type_extension, limits_extension => /=; rewrite eq_refl => /=.
   apply/andP; split; first by lias.
   unfold tab_size in *; simpl in *.
-  erewrite nth_error_set_nth_length => //.
-  apply nth_error_nth with (x := (VAL_ref_null T_funcref)).
   move/N.ltb_spec0 in Hif.
-  by lias.
+  rewrite TableStorage.set_size; last by lias.
+  table_storage_view. by rewrite leqnn.
 Qed.
 
 Lemma stab_update_typing: forall s f x i v s' C tabt,
@@ -1087,6 +1086,8 @@ Proof.
   eapply Forall_lookup in Hoption1; eauto; simpl in *.
   destruct Hoption1 as [vt Ht]; remove_bools_options.
   unfold tab_size in *; simpl in *.
+  table_storage_view.
+  rewrite TableStorage.set_spec; last by rewrite TableStorage.size_spec; move/N.ltb_spec0 in Hif; lias.
   erewrite set_nth_length; last by lias.
   move/eqP in Hif4.
   rewrite Hif4 eq_refl.
@@ -1119,6 +1120,8 @@ Proof.
   move/eqP in Hif1; rewrite - Hif1.
   unfold tab_size in *; simpl in *.
   do 2 (try (apply/andP; split => //)); try by lias.
+  all: table_storage_view.
+  all: try by apply/N.leb_spec0; lias.
   rewrite List.length_app List.repeat_length.
   by lias.
 Qed.
@@ -1148,6 +1151,7 @@ Proof.
   - unfold tableinst_typing => /=.
     exists (Build_table_type (Build_limits (N.of_nat (length tableinst_elem) + i)%N (lim_max tt_limits)) tt_elem_type tt_address_type).
     unfold tabletype_valid => /=.
+    table_storage_view.
     rewrite Hif3 List.length_app List.repeat_length.
     replace (_ == _) with true; last first.
     { symmetry; apply/eqP. by lias. }
