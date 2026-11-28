@@ -563,7 +563,11 @@ Definition binary_of_funcsec (fs : list module_func) : list byte :=
   x03 :: with_length (binary_of_vec binary_of_typeidx (List.map (fun f => f.(modfunc_type)) fs)).
 
 Definition binary_of_module_table (t : module_table) : list byte :=
-  binary_of_table_type t.(modtab_type).
+  match modtab_init t with
+  | None => binary_of_table_type t.(modtab_type)
+  | Some es =>
+      x40 :: x00 :: binary_of_table_type t.(modtab_type) ++ binary_of_expr es
+  end.
 
 Definition binary_of_tablesec (ts : list module_table) : list byte :=
   x04 :: with_length (binary_of_vec binary_of_module_table ts).

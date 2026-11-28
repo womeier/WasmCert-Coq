@@ -1048,7 +1048,10 @@ Definition parse_code {n} : byte_parser module_func_without_type n :=
   parse_u32_as_N >>= (fun sz => assert_sized parse_code_func (fun szn => N.eqb sz szn)).
 
 Definition parse_module_table {n} : byte_parser module_table n :=
-  (fun tty => {| modtab_type := tty |}) <$> parse_table_type.
+  (exact_byte x40 &> exact_byte x00 &>
+     (((fun ty es => Build_module_table ty (Some es)) <$>
+        parse_table_type) <*> parse_expr)) <|>
+  ((fun ty => Build_module_table ty None) <$> parse_table_type).
 
 Definition parse_module_mem {n} : byte_parser module_mem n :=
   (fun tty => {| modmem_type := tty |}) <$> parse_memory_type.

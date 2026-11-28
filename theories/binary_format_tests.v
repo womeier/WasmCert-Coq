@@ -81,6 +81,33 @@ Lemma parse_br_on_non_null_single_byte (b : Byte.byte) :
     else None.
 Proof. destruct b; vm_compute; reflexivity. Qed.
 
+Definition initialized_funcref_table :=
+  Build_module_table
+    (Build_table_type (Build_limits 2%N None) T_funcref)
+    (Some (BI_ref_func 0%N :: nil)).
+
+Lemma parse_table_initializer :
+  check_toks (x40 :: x00 :: x70 :: x00 :: x02 :: xd2 :: x00 :: x0b :: nil)
+    (fun n => parse_module_table (n := n)) = Running.Singleton initialized_funcref_table.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma print_table_initializer :
+  binary_of_module_table initialized_funcref_table =
+    x40 :: x00 :: x70 :: x00 :: x02 :: xd2 :: x00 :: x0b :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma print_legacy_table :
+  binary_of_module_table
+    (Build_module_table
+      (Build_table_type (Build_limits 2%N None) T_funcref) None) =
+    x70 :: x00 :: x02 :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma reject_table_reserved_byte :
+  check_toks (x40 :: x01 :: x70 :: x00 :: x02 :: xd2 :: x00 :: x0b :: nil)
+    (fun n => parse_module_table (n := n)) = False.
+Proof. vm_compute. reflexivity. Qed.
+
 (** An example program. **)
 Definition test :=
   BI_if (BT_valtype None) (BI_testop T_i64 TO_eqz :: nil) (BI_testop T_i64 TO_eqz :: nil).
@@ -239,7 +266,7 @@ Definition module_tableops := {|
   mod_funcs :=
     let e := BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 1))) in
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := cons e nil |} nil;
-  mod_tables := (cons (Build_module_table (Build_table_type (Build_limits 0%N (Some 4%N)) T_funcref)) nil);
+  mod_tables := (cons (Build_module_table (Build_table_type (Build_limits 0%N (Some 4%N)) T_funcref) None) nil);
   mod_mems := nil;
                                mod_globals := nil;
   mod_elems := (cons (Build_module_element T_funcref (cons (cons (BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 1)))) nil) nil) (ME_active 0%N (cons (BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 1)))) nil))) nil);

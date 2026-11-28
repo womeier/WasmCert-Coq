@@ -323,7 +323,6 @@ Definition functype_valid (ft: function_type) : bool :=
 Definition table_limit_bound : N := (N.sub u32_bound 1%N).
 
 Definition tabletype_valid (tt: table_type) : bool :=
-  ref_nullable tt.(tt_elem_type) &&
   limit_valid_range tt.(tt_limits) table_limit_bound.
 
 Definition mem_limit_bound : N := 65536%N.
@@ -700,9 +699,16 @@ Record module_func : Type := {
   modfunc_body : expr;
 }.
 
-Record module_table : Set := {
+Record module_table : Type := {
   modtab_type : table_type;
+  modtab_init : option expr;
 }.
+
+Definition module_table_init (mt : module_table) : expr :=
+  match modtab_init mt with
+  | Some es => es
+  | None => cons (BI_ref_null (ref_heap (tt_elem_type (modtab_type mt)))) nil
+  end.
 
 Record module_mem : Set := {
   modmem_type : memory_type;

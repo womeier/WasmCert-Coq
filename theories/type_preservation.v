@@ -1066,9 +1066,7 @@ Proof.
     rewrite Hif3 List.length_app List.repeat_length.
     replace (_ == _) with true; last first.
     { symmetry; apply/eqP. by lias. }
-    { move/andP: Hif0 => [Hnullable _].
-      rewrite Hnullable /=.
-      resolve_if_true_eq.
+    { resolve_if_true_eq.
       rewrite all_cat.
       apply/andP; split => //.
       apply all_repeat.

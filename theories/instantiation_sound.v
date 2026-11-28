@@ -76,11 +76,11 @@ Lemma instantiation_sound: forall (s: store_record) m v_imps s' f exps,
 Proof.
   move => s m v_imps s' f exps HST Hinst.
   unfold instantiate in Hinst.
-  destruct Hinst as [t_imps_mod [t_imps [t_exps [hs' [inst [g_inits [r_inits [Hmodtype [Himptype [Hsubtype [Hallocmodule [Hinstglob [Hinstelem [Heqf Heqexps]]]]]]]]]]]]]].
+  destruct Hinst as [t_imps_mod [t_imps [t_exps [hs' [inst [g_inits [r_inits [t_inits [Hmodtype [Himptype [Hsubtype [Hallocmodule [Hinsttable [Hinstglob [Hinstelem [Heqf Heqexps]]]]]]]]]]]]]]]].
 
   unfold alloc_module in Hallocmodule.
   destruct (alloc_funcs _ _ _) as [s1 ifs] eqn:Hallocfuncs.
-  destruct (alloc_tabs _ _) as [s2 its] eqn:Halloctabs.
+  destruct (alloc_tabs_with_init _ _) as [s2 its] eqn:Halloctabs.
   destruct (alloc_mems _ _) as [s3 ims] eqn:Hallocmems.
   destruct (alloc_globs _ _) as [s4 igs] eqn:Hallocglobs.
   destruct (alloc_elems _ _) as [s5 ies] eqn:Hallocelems.
@@ -89,11 +89,20 @@ Proof.
   remove_bools_options.
 
   apply alloc_func_iota_N in Hallocfuncs.
-  apply alloc_table_iota_N in Halloctabs.
+  apply alloc_table_inits_iota_N in Halloctabs.
+  have Htablelen : length t_inits = length m.(mod_tables).
+  { symmetry. exact (List.Forall2_length Hinsttable). }
+  rewrite List.length_combine List.length_map Htablelen Nat.min_id in Halloctabs.
   apply alloc_mem_iota_N in Hallocmems.
   apply alloc_global_iota_N in Hallocglobs; last by apply List.Forall2_length in Hinstglob.
   apply alloc_elem_iota_N in Hallocelems; last by apply List.Forall2_length in Hinstelem.
   apply alloc_data_iota_N in Hallocdatas.
+
+  have Hinstfuncs : inst.(inst_funcs) =
+      ext_funcs v_imps ++ iota_N (length s.(s_funcs)) (length m.(mod_funcs)).
+  { destruct Hallocmodule as [_ [_ [Hfuncs _]]].
+    destruct Hallocfuncs as [Hifs _].
+    by rewrite Hifs in Hfuncs. }
 
   (* Important to prove the goals first separately as there is some sort of dependency *)
   assert (store_extension s s') as Hstoreext.
@@ -191,23 +200,27 @@ Proof.
       (* New *)
       {
         apply those_spec.
-        { rewrite List.length_map iota_N_length List.length_map.
-          by apply List.Forall2_length in Hmtabletype; lias.
+         { rewrite List.length_map iota_N_length.
+           by apply List.Forall2_length in Hmtabletype; lias.
         }
         move => n ft Hnth.
-        rewrite nth_error_map' List.length_map.
-        eapply Forall2_nth_impl' in Hmtabletype as [x [Hnthm Hmap]]; eauto.
+         rewrite nth_error_map'.
+         eapply Forall2_nth_impl' in Hmtabletype as [x [Hnthm Hmap]]; eauto.
         rewrite iota_N_lookup => /=; last by apply nth_error_Some_length in Hnthm; lias.
         unfold ext_table_typing.
         destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
         unfold lookup_N; rewrite Nnat.Nat2N.id.
         rewrite List.nth_error_app2; last by lias.
-        do 2 rewrite nth_error_map' => /=.
-        replace (_ + n - _)%coq_nat with n; last by lias.
-        rewrite Hnthm => /=; do 2 f_equal.
-        unfold gen_table_instance => /=.
-        unfold module_table_typing in Hmap; destruct x, ft, modtab_type, tt_limits0; simpl in *.
-        by remove_bools_options; subst.
+         rewrite nth_error_map' => /=.
+         replace (_ + n - _)%coq_nat with n; last by lias.
+         unfold instantiate_tables in Hinsttable.
+         eapply Forall2_lookup in Hinsttable as [tv [Hnthtv Hreduce]]; eauto.
+         have Hnthty : List.nth_error (map modtab_type mod_tables) n =
+             Some (modtab_type x).
+         { by rewrite nth_error_map' Hnthm. }
+         rewrite (combine_lookup_spec Hnthty Hnthtv) /= gen_table_instance_type.
+         unfold module_table_typing in Hmap.
+         by destruct Hmap as [_ [-> _]].
       }
     }
     (* Memories *)
@@ -443,7 +456,7 @@ Proof.
         unfold gen_func_instance => /=.
         rewrite Hnthmf; split.
         { exact (Forall_lookup Hmtypes Hnthmf). }
-        rewrite HIT /= Hconjl1 Hnthmf Hfunclen; repeat split => //=.
+        rewrite HIT /= Hinstfuncs Hnthmf Hfunclen; repeat split => //=.
         unfold upd_local_label_return in *; simpl in *.
         eapply bet_import_subtyping; eauto.
         eapply bet_skip_refcheck => /=; eauto.
@@ -472,20 +485,55 @@ Proof.
       {
         apply Forall_spec.
         move => n fi Hnth.
-        apply nth_error_map in Hnth as [mt [Hnth <-]].
-        apply nth_error_map in Hnth as [mtab [Hnth <-]].
+        apply nth_error_map in Hnth as [[ty tv] [Hnth <-]].
+        apply combine_lookup in Hnth as [Hnthty Hnthtv].
+        apply nth_error_map in Hnthty as [mtab [Hnth Hty]].
+        subst ty.
         eapply Forall2_nth_impl in Hmtabletype as [tabt [Hnthtab Htabtype]]; eauto.
         unfold module_table_typing in Htabtype.
+        destruct Htabtype as [Hvalid [Htype [Hconst Hbet]]].
+        subst tabt.
+        unfold instantiate_tables in Hinsttable.
+        eapply Forall2_lookup in Hinsttable as [tv' [Hnthtv' Hreduce]]; eauto.
+        simplify_multieq.
         destruct mtab, modtab_type, tt_limits.
         unfold tableinst_typing, gen_table_instance; simpl in *.
-        remove_bools_options; simpl in *; subst.
-        rewrite H.
+        rewrite Hvalid.
         rewrite List.repeat_length Nnat.N2Nat.id eq_refl.
         rewrite all_repeat; first by eexists.
-        unfold value_typing => /=.
-        destruct tt_elem_type as [[|] ht]; simpl in *.
-        - by rewrite value_subtyping_eq.
-        - by unfold tabletype_valid in H; simpl in H.
+        eapply init_value_typing; eauto; simpl in *.
+        { move => m addr Hnthaddr.
+          rewrite List.length_app List.length_map.
+          match goal with Hmap : inst_funcs inst = _ |- _ =>
+            rewrite Hmap in Hnthaddr end.
+          apply cat_lookup in Hnthaddr as [Hnth' | Hnth'].
+          - apply ext_funcs_lookup_exist in Hnth' as [k Hnthaddr].
+            eapply Forall2_nth_impl in Himptype as [et [Hnthext Hext]]; last by apply Hnthaddr.
+            unfold external_typing, ext_typing, ext_func_typing in Hext; simpl in Hext.
+            remove_bools_options.
+            unfold lookup_N in *.
+            apply nth_error_Some_length in Hoption0.
+            by lias.
+          - apply iota_N_lookup_Some in Hnth' as [-> Hlength].
+            by lias.
+        }
+        { move => gidx v' gt /= Hsglob Hntht.
+          unfold sglob_val, sglob, sglob_ind in Hsglob.
+          remove_bools_options.
+          eapply import_subtyping_globs_impl' in Hsubtype as [gt' [Hnthsub Hsub]]; eauto.
+          unfold import_global_subtyping in Hsub; remove_bools_options; subst.
+          eapply vt_imps_globals_typing in Hnthsub as [addr [Hnthaddr Htext]]; eauto.
+          unfold external_typing, ext_typing, ext_global_typing in Htext.
+          simpl in Htext; remove_bools_options.
+          unfold lookup_N in *; simplify_multieq.
+          rewrite List.nth_error_app1 in Hoption; last by apply nth_error_Some_length in Hoption2.
+          simplify_multieq; simpl in *.
+          eapply Forall_lookup in Hsglobaltype as [gt Hginsttype]; eauto.
+          unfold globalinst_typing in Hginsttype.
+          destruct g => /=.
+          remove_bools_options; simpl in *.
+          by eapply value_typing_extension; eauto.
+        }
       }
     }
     (* Memories *)
@@ -552,7 +600,8 @@ Proof.
         eapply init_value_typing; eauto; simpl in *.
         { move => m addr Hnthaddr.
           rewrite List.length_app List.length_map.
-          rewrite Hconjl1 in Hnthaddr.
+          match goal with Hmap : inst_funcs inst = _ |- _ =>
+            rewrite Hmap in Hnthaddr end.
           apply cat_lookup in Hnthaddr as [Hnth' | Hnth'].
           - apply ext_funcs_lookup_exist in Hnth' as [k Hnthaddr].
             eapply Forall2_nth_impl in Himptype as [et [Hnthext Hext]]; last by apply Hnthaddr.
@@ -615,7 +664,8 @@ Proof.
         eapply init_value_typing; eauto; simpl in *.
         { move => n' addr Hnthaddr.
           rewrite List.length_app List.length_map.
-          rewrite Hconjl1 in Hnthaddr.
+          match goal with Hmap : inst_funcs inst = _ |- _ =>
+            rewrite Hmap in Hnthaddr end.
           apply cat_lookup in Hnthaddr as [Hnth' | Hnth'].
           - apply ext_funcs_lookup_exist in Hnth' as [k Hnthaddr].
             eapply Forall2_nth_impl in Himptype as [et [Hnthext Hext]]; last by apply Hnthaddr.

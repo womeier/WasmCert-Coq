@@ -264,6 +264,39 @@ Proof.
     + by rewrite catA => /=.
 Qed.
 
+Lemma alloc_table_inits_iota_N tables ws ws' l:
+  alloc_tabs_with_init ws tables = (ws', l) ->
+  l = iota_N (length (s_tables ws)) (length tables) /\
+  ws.(s_funcs) = ws'.(s_funcs) /\
+  ws'.(s_tables) = ws.(s_tables) ++
+    map (fun tr => gen_table_instance (fst tr) (snd tr)) tables /\
+  ws.(s_mems) = ws'.(s_mems) /\
+  ws.(s_globals) = ws'.(s_globals) /\
+  ws.(s_elems) = ws'.(s_elems) /\
+  ws.(s_datas) = ws'.(s_datas).
+Proof.
+  unfold alloc_tabs_with_init.
+  move => Halloc.
+  eapply alloc_Xs_IP with
+    (R := (fun s_i s_e xs ys => ys = iota_N _ (length xs) /\ _))
+    in Halloc; eauto => //=.
+  - unfold iota_N => /=.
+    repeat split. by rewrite cats0.
+  - move => s s0 [ty ref] xs' ys' s' y Hallocx [Hys [? [Hcomp [? [?[??]]]]]].
+    repeat rewrite -> iota_N_iota_N in *.
+    unfold alloc_tab_ref, add_table in Hallocx.
+    destruct ty, tt_limits.
+    injection Hallocx as ->; subst => /=.
+    rewrite List.length_app map_cat iota_N_extend Hcomp => /=.
+    repeat split => //=.
+    + by rewrite List.length_app List.length_map.
+    + by rewrite catA.
+Qed.
+
+Lemma gen_table_instance_type ty ref :
+  tableinst_type (gen_table_instance ty ref) = ty.
+Proof. by destruct ty as [[min max] rt]. Qed.
+
 Lemma alloc_mem_iota_N modmems ws ws' l:
   alloc_mems ws modmems = (ws', l) ->
   l = iota_N (length (s_mems ws)) (length modmems) /\

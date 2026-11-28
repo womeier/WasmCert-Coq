@@ -184,4 +184,23 @@ Example closed_runtime_function_identity :
   end.
 Proof. reflexivity. Qed.
 
+Example zero_table_initializer_is_still_typechecked :
+  module_table_type_checker empty_t_context
+    (Build_module_table
+      (Build_table_type (Build_limits 0%N None) T_funcref)
+      (Some [BI_ref_null HT_extern])) = false.
+Proof. reflexivity. Qed.
+
+Example nullable_table_default_is_valid :
+  module_table_type_checker empty_t_context
+    (Build_module_table
+      (Build_table_type (Build_limits 0%N None) T_funcref) None) = true.
+Proof. reflexivity. Qed.
+
+Example non_nullable_table_has_no_implicit_initializer :
+  module_table_type_checker empty_t_context
+    (Build_module_table
+      (Build_table_type (Build_limits 0%N None) (Ref_type false HT_func)) None) = false.
+Proof. reflexivity. Qed.
+
 End HostMetadata.
