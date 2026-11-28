@@ -4,7 +4,8 @@
     that store. **)
 
 From mathcomp Require Import ssreflect ssrbool eqtype seq ssrnat.
-From Wasm Require Import instantiation_spec instantiation_properties type_preservation extended_const.
+From Wasm Require Import instantiation_spec instantiation_properties type_preservation extended_const
+  instantiation_code_typing.
 From Stdlib Require Import ZArith.
 
 (* see common.v *)
@@ -70,33 +71,20 @@ Lemma get_init_expr_data_typing: forall C i data,
   module_data_typing C data tt ->
   be_typing C (get_init_expr_data i data) (Tf [::] [::]).
 Proof.
-  move => C i [init mode] Hdata Htype.
-  destruct mode as [ | midx offset]; simpl in *.
-  - by apply bet_empty.
-  - destruct Htype as [[mt [Hmem [Hoffset Hconst]]] _].
-    eapply bet_composition'; first by apply Hoffset.
-    eapply bet_composition_front with (t2s := [::T_num T_i32; T_num T_i32]).
-    + apply bet_weakening_empty_1 with (ts := [::T_num T_i32]).
-      by apply bet_const_num.
-    + eapply bet_composition_front with
-        (t2s := [::T_num T_i32; T_num T_i32; T_num T_i32]).
-      * apply bet_weakening_empty_1 with (ts := [::T_num T_i32; T_num T_i32]).
-        by apply bet_const_num.
-      * eapply bet_composition_front with (t2s := [::]).
-        -- by eapply bet_memory_init; eauto.
-        -- by eapply bet_data_drop; eauto.
+  exact instantiation_code_typing.get_init_expr_data_typing.
 Qed.
 
 (** Soundness of the module instantiation operation
 The post-instantiation store is a valid extension of the old store,
 and the post-instantiation frame is well-typed within the new store.
 **)
-Lemma instantiation_sound: forall (s: store_record) m v_imps s' f exps,
+Lemma instantiation_sound_with_code: forall (s: store_record) m v_imps s' f exps,
   store_typing s ->
   instantiate s m v_imps (s', f, exps) ->
   (store_typing s') /\
   (store_extension s s') /\
-  (exists C, frame_typing s' f C).
+  (exists C, frame_typing s' f C /\ tc_return C = None /\
+    be_typing C exps (Tf nil nil)).
 Proof.
   move => s m v_imps s' f exps HST Hinst.
   unfold instantiate in Hinst.
@@ -663,10 +651,62 @@ Proof.
       }
     }
   }
-  repeat split => //.
-  exists C.
+  assert (Hpending : be_typing C exps (Tf nil nil)).
+  {
+    pose D := Build_t_context mod_types
+      (ext_t_funcs t_imps ++ fts) (ext_t_tables t_imps ++ tts)
+      (ext_t_mems t_imps ++ mts) (ext_t_globals t_imps ++ gts)
+      rts dts nil nil None Cinit.(tc_refs).
+    assert (Imported : be_typing D exps (Tf nil nil)).
+    {
+      rewrite Heqexps.
+      unfold D.
+      eapply bet_import_subtyping; first exact Hsubtype.
+      eapply pending_initialization_code_typing with
+        (Cinit := const_context_add_globals Cinit gts);
+        try reflexivity; eassumption.
+    }
+    eapply bet_skip_refcheck with (C := D); [|exact Imported].
+    have Count := inst_typing_function_count HIT.
+    rewrite HeqC Heqf in Count; cbn in Count.
+    rewrite HeqC; unfold D, upd_refs; cbn.
+    rewrite <-Count; reflexivity.
+  }
+  split; [exact HST' |split; [exact Hstoreext |]].
+  exists C; split.
+  2: { split; [rewrite HeqC; reflexivity |exact Hpending]. }
   unfold frame_typing; rewrite HIT.
   exists nil; subst; by split.
+Qed.
+
+(** Preserve the original public store/frame-only interface. *)
+Lemma instantiation_sound: forall (s: store_record) m v_imps s' f exps,
+  store_typing s ->
+  instantiate s m v_imps (s', f, exps) ->
+  store_typing s' /\ store_extension s s' /\
+  (exists C, frame_typing s' f C).
+Proof.
+  move => s m imps s' f code Store Instantiated.
+  destruct (instantiation_sound_with_code Store Instantiated)
+    as [Typed [Extension [C [Frame [Return Code]]]]].
+  split; [exact Typed |split; [exact Extension |now exists C]].
+Qed.
+
+Theorem instantiation_sound_configuration: forall s m imps s' f code,
+  store_typing s ->
+  instantiate s m imps (s', f, code) ->
+  config_typing s' (f, to_e_list code) nil /\ store_extension s s'.
+Proof.
+  move => s m imps s' f code Store Instantiated.
+  destruct (instantiation_sound_with_code Store Instantiated)
+    as [Typed [Extension [C [Frame [Return Code]]]]].
+  split; [|exact Extension].
+  split; [exact Typed |].
+  eapply mk_thread_typing with (C := C) (C' := C).
+  - exact Frame.
+  - destruct C as [types funcs tables mems globals elems datas locals labels ret refs].
+    cbn in Return; subst ret; reflexivity.
+  - now apply ety_a.
 Qed.
   
 End Host.
