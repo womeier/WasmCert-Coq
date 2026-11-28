@@ -651,6 +651,20 @@ Proof.
   exact (unsigned_encoding_bound _ _ E).
 Qed.
 
+Lemma encode_unsigned_length_monotone x y :
+  (x <= y)%N ->
+  List.length (encode_unsigned x) <= List.length (encode_unsigned y).
+Proof.
+  intro Order.
+  pose proof (encode_unsigned_encoding y) as Encoding.
+  pose proof (unsigned_encoding_bound _ _ Encoding) as Bound.
+  destruct (encode_unsigned y) as [|b tail] eqn:Bytes;
+    [inversion Encoding |].
+  unfold encode_unsigned.
+  apply (write_unsigned_length_bound (List.length tail)).
+  cbn [List.length] in Bound. eapply N.le_lt_trans; eauto.
+Qed.
+
 Theorem encode_signed_no_longer v prefix :
   signed_encoding v prefix ->
   List.length (encode_signed v) <= List.length prefix.
