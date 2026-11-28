@@ -239,6 +239,48 @@ initialization_cases = [
      0, "Execution returned a trap"),
 ]
 
+def check_tail_covariance(directory, indirect, name, callee_results, caller_results,
+                          callee_body, status, expected):
+    # Keep this independent of indexed-reference closing: these are abstract
+    # function/extern heaps with genuine non-null -> nullable result covariance.
+    def section(tag, payload):
+        assert len(payload) < 128
+        return bytes([tag, len(payload)]) + payload
+
+    types = bytes.fromhex("036000" + callee_results + "6000" + caller_results + "6000017f")
+    data = bytes.fromhex("0061736d01000000") + section(1, types)
+    data += section(3, bytes.fromhex("03000102"))
+    if indirect:
+        data += section(4, bytes.fromhex("01700001"))
+    data += section(7, bytes.fromhex("01046d61696e0002"))
+    data += section(9, bytes.fromhex("010041000b0100") if indirect
+                    else bytes.fromhex("0103000100"))
+    bodies = [callee_body, "4100130000" if indirect else "1200", "1001d1"]
+    code = b"\x03"
+    for body in bodies:
+        encoded = bytes.fromhex("00" + body + "0b")
+        code += bytes([len(encoded)]) + encoded
+    data += section(10, code)
+    path = pathlib.Path(directory) / (("indirect_" if indirect else "direct_") + name + ".wasm")
+    path.write_bytes(data)
+    result = subprocess.run([exe, str(path), "-r", "main"], capture_output=True, text=True)
+    output = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout + result.stderr)
+    if result.returncode != status or expected not in output:
+        raise AssertionError(f"{path.stem}: exit {result.returncode}; {output!r}")
+
+
+tail_covariance_cases = [
+    ("nonnull_to_nullable", "016470", "0170", "d200", 0, "i32.const 0"),
+    ("nonnull_equal", "016470", "016470", "d200", 0, "i32.const 0"),
+    ("nullable_equal", "0170", "0170", "d070", 0, "i32.const 1"),
+    ("nullable_to_nonnull_rejected", "0170", "016470", "d070",
+     123, "Module type checking failure:"),
+    ("unrelated_heap_rejected", "016f", "0170", "d06f",
+     123, "Module type checking failure:"),
+    ("result_arity_rejected", "00", "0170", "",
+     123, "Module type checking failure:"),
+]
+
 
 with tempfile.TemporaryDirectory() as directory:
     for name, body, status, expected in cases:
@@ -261,6 +303,10 @@ with tempfile.TemporaryDirectory() as directory:
         check_case(directory, name + "_nonnull_callee_slots", opcode + "00",
                    0, "i32.const 42", callee_locals="01016470",
                    callee_body="d20021002000d11a412a")
+    for indirect in [False, True]:
+        for case in tail_covariance_cases:
+            check_tail_covariance(directory, indirect, *case)
 
-total = len(cases) + len(table_cases) + len(initialization_cases) + 8
+total = (len(cases) + len(table_cases) + len(initialization_cases)
+         + 2 * len(tail_covariance_cases) + 8)
 print(f"function-reference binary runtime regressions: {total}/{total}")

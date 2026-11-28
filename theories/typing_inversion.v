@@ -190,17 +190,17 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
         ref_heap tabt.(tt_elem_type) = HT_func /\
         lookup_function_type (tc_types C) y = Some (Tf ts1 ts2)
   | BI_return_call n =>
-      exists ts1 ts2 ts3 ts4,
+      exists ts1 ts2 ts3 ts4 returns,
       tf = (Tf (ts3 ++ ts1) ts4) /\
         lookup_N (tc_funcs C) n = Some (Tf ts1 ts2) /\
-        tc_return C = Some ts2
+        tc_return C = Some returns /\ ts2 <ts: returns
   | BI_return_call_indirect x y =>
-      exists ts1 ts2 ts3 ts4 tabt,
+      exists ts1 ts2 ts3 ts4 tabt returns,
       tf = (Tf (ts3 ++ ts1 ++ [::T_num T_i32]) ts4)/\
         lookup_N (tc_tables C) x = Some tabt /\
         ref_heap tabt.(tt_elem_type) = HT_func /\
         lookup_function_type (tc_types C) y = Some (Tf ts1 ts2) /\
-        tc_return C = Some ts2
+        tc_return C = Some returns /\ ts2 <ts: returns
   | BI_local_get x =>
       exists t,
       tf = (Tf nil [::t]) /\
@@ -559,9 +559,9 @@ Definition e_principal_typing (s: store_record) (C: t_context) (e: administrativ
       exists tf0, tf = tf0 /\
         ext_func_typing s a = Some tf0
   | AI_return_invoke a =>
-      exists ts1 ts2 ts3 ts4, tf = (Tf (ts3 ++ ts1) ts4) /\
+      exists ts1 ts2 ts3 ts4 returns, tf = (Tf (ts3 ++ ts1) ts4) /\
       ext_func_typing s a = Some (Tf ts1 ts2) /\
-      tc_return C = Some ts2                     
+      tc_return C = Some returns /\ ts2 <ts: returns
   | AI_label n es0 es =>
       exists ts1 ts2,
       tf = (Tf nil ts2) /\

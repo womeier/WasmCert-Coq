@@ -691,7 +691,7 @@ Proof.
     eapply ety_invoke; eauto => //.
     by eapply ext_func_typing_extension; eauto.
   (* return_invoke *)
-  - move => s a C ts1 ts2 ts3 ts4 Hextfunc Hret s' HST1 HST2 Hext.
+  - move => s a C ts1 ts2 ts3 ts4 returns Hextfunc Hret Hcov s' HST1 HST2 Hext.
     eapply ety_return_invoke; eauto.
     by eapply ext_func_typing_extension; eauto.
   (* Label *)
@@ -1895,6 +1895,7 @@ Proof.
     eapply ety_return_invoke with (ts2 := extr0); eauto.
     unfold ext_func_typing.
     by rewrite Hnthfunc Hcltype.
+    reflexivity.
   - (* Invoke native *)
     destruct extr as [ts1' ts2'].
     destruct Hft as [<- [Hvalid Hftype]].
@@ -1945,12 +1946,13 @@ Proof.
     eapply lfilled_es_type_exists in Hetype; eauto.
     destruct Hetype as [labs [ts1 [ts2 Hetype]]].
     invert_e_typing.
-    injection Hconjr1 as <-.
+    injection Hconjl1 as <-.
     resolve_e_typing.
     eapply ety_subtyping; first by eapply ety_invoke; eauto.
     unfold ext_func_typing in Hconjl0.
     rewrite H H0 in Hconjl0.
     injection Hconjl0 as <- <-.
+    eapply instr_subtyping_weaken2; last exact Hconjr.
     eapply instr_subtyping_weaken1; first by apply instr_subtyping_eq.
     (* This almost seems impossible, but the subtyping relation can indeed be
 derived from the two transitive pairs on the suffixes. Stated as an individual lemma. *)

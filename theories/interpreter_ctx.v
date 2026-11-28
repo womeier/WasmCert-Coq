@@ -386,6 +386,8 @@ Proof.
       rewrite Heqo Hcltype in Hconjl0.
       injection Hconjl0 as <- <-.
       apply Hfarity.
+      apply values_subtyping_size in Hconjr.
+      rewrite !length_is_size Hconjr -!length_is_size.
       injection Hretcons => //; by destruct ccs'.
   (* None *)
   - resolve_invalid_typing.

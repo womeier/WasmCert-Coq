@@ -342,7 +342,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
               match lookup_N (tc_funcs C) x with
               | None => None 
               | Some (Tf tn tm) =>
-                  if (t2s == tm) then
+                  if (tm <ts: t2s) then
                     type_update_top ts (tn) nil
                   else None
               end
@@ -356,7 +356,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
                     if ref_heap tabt.(tt_elem_type) == HT_func then
                     match lookup_function_type (tc_types C) y with
                     | Some (Tf tn tm) =>
-                        if (t2s == tm) then
+                        if (tm <ts: t2s) then
                           type_update_top ts ((T_num T_i32 :: tn)) nil
                         else None
                     | None => None 

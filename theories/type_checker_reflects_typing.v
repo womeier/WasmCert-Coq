@@ -1644,7 +1644,6 @@ Proof.
     (* Return_call *)
     + destruct f0 as [tn0 tm0].
       remove_bools_options.
-      move/eqP in Hif; subst.
       eapply type_update_top_agree_subtyping in Hupdate; eauto.
       destruct Hupdate as [tn [ts1 [ts2 [Hagree' Hsub]]]].
       apply nth_error_map in Hoption0 as [ts [Hnth Heq]].
@@ -1652,14 +1651,17 @@ Proof.
       injection Heq as <- Hrevr.
       apply (f_equal rev) in Hrevr; repeat rewrite revK in Hrevr; subst.
       rewrite revK in Hsub.
+      have Hcov : rev tm0 <ts: r.
+      { apply values_subtyping_rev in Hif. by rewrite revK in Hif. }
       exists tn; split => //.
-      eapply bet_subtyping; first by apply bet_return_call with (t1s := r0) (t2s := r).
+      eapply bet_subtyping; first
+        (eapply bet_return_call with (t1s := r0) (t2s := rev tm0)
+          (returns := r); eauto).
       by eauto.
     (* Return_call_indirect *)      
     + destruct f as [tn0 tm0].
       move/eqP in Hif.
       remove_bools_options.
-      move/eqP in Hif0; subst.
       eapply type_update_top_agree_subtyping in Hupdate; eauto.
       destruct Hupdate as [tn [ts1 [ts2 [Hagree' Hsub]]]].
       apply lookup_function_type_reverse_inv in Hoption as [ts [Hnth Heq]].
@@ -1667,8 +1669,11 @@ Proof.
       injection Heq as <- Hrevr.
       apply (f_equal rev) in Hrevr; repeat rewrite revK in Hrevr; subst.
       rewrite rev_cons revK -cats1 in Hsub.
+      have Hcov : rev tm0 <ts: r.
+      { apply values_subtyping_rev in Hif0. by rewrite revK in Hif0. }
       exists tn; split => //.
-      eapply bet_subtyping; first by eapply bet_return_call_indirect with (t1s := r0) (t2s := r); eauto.
+      eapply bet_subtyping; first by eapply bet_return_call_indirect with
+        (t1s := r0) (t2s := rev tm0) (returns := r); eauto.
       by eauto.
     + by eapply type_update_ref_as_non_null_bet; eauto.
     + destruct r as [|t labels] => //=.
