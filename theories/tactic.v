@@ -75,7 +75,7 @@ Ltac solve_progress :=
 Ltac inst_typing_lookup :=
   try multimatch goal with
   | H1: inst_typing ?s ?i = Some ?t,
-    H2: lookup_N (inst_types ?i) ?n = Some _ |- _ =>
+    H2: lookup_function_type (inst_types ?i) ?n = Some _ |- _ =>
       let Hteq := fresh "Hteq" in
       specialize (Logic.eq_sym (inst_typing_type_lookup n H1)) as Hteq;
       rewrite H2 in Hteq
@@ -262,7 +262,9 @@ Ltac resolve_e_typing :=
     | |- e_typing _ _ nil _ =>
         try eapply ety_subtyping; first (by apply ety_a' => //; apply bet_empty; eauto; try apply instr_subtyping_eq); eauto => //
     | |- e_typing _ _ [::AI_basic _] _ =>
-        try eapply ety_subtyping; first (by apply ety_a' => //; econstructor; eauto; try apply instr_subtyping_eq); eauto => //
+         try eapply ety_subtyping; first (by apply ety_a' => //; econstructor; eauto; try apply instr_subtyping_eq); eauto => //
+    | |- e_typing _ _ [::AI_ref_i31 _] _ =>
+         try eapply ety_subtyping; first (by apply ety_ref_i31); eauto => //
     | |- e_typing _ _ (v_to_e_list _) _ =>
         try eapply ety_subtyping; first (by eapply et_values_typing; eauto); eauto => //
     | |- e_typing _ _ ((cons ($VN ?v) ?es)) _ =>

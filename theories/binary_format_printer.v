@@ -69,6 +69,13 @@ Definition binary_of_idx n := binary_of_u32 n.
 Definition binary_of_typeidx (t : typeidx) : list byte :=
   binary_of_idx t.
 
+(** Unlike ordinary typeidx immediates, a type index occurring as a heap
+    type uses a signed 33-bit encoding.  Reject indices outside u32. *)
+Definition binary_of_heap_typeidx (t : typeidx) : option (list byte) :=
+  if N.leb t 4294967295
+  then Some (leb128.encode_signed (Z.of_N t))
+  else None.
+
 Definition binary_of_funcidx (t : funcidx) : list byte :=
   binary_of_idx t.
 
@@ -264,6 +271,9 @@ Fixpoint binary_of_be (be : basic_instruction) : list byte :=
   | BI_ref_is_null => xd1 :: nil
   | BI_ref_func x => xd2 :: binary_of_idx x
   | BI_ref_as_non_null => [::xd4]
+  | BI_ref_i31 => [::xfb; x1c]
+  | BI_i31_get SX_S => [::xfb; x1d]
+  | BI_i31_get SX_U => [::xfb; x1e]
                         
   | BI_drop => x1a :: nil
   | BI_select None => x1b :: nil
@@ -524,8 +534,41 @@ Definition binary_of_functype (ft : function_type) : list byte :=
   let 'Tf rt1 rt2 := ft in
   x60 :: binary_of_result_type rt1 ++ binary_of_result_type rt2.
 
-Definition binary_of_typesec (ts : list function_type) : list byte :=
-  x01 :: with_length (binary_of_vec binary_of_functype ts).
+Definition binary_of_storage_type (t : storage_type value_type) : list byte :=
+  match t with
+  | ST_value v => binary_of_value_type v
+  | ST_packed PT_i8 => x78 :: nil
+  | ST_packed PT_i16 => x77 :: nil
+  end.
+
+Definition binary_of_field_type (f : field_type value_type) : list byte :=
+  binary_of_storage_type f.(field_storage) ++
+    (match f.(field_mutability) with MUT_const => x00 | MUT_var => x01 end) :: nil.
+
+Definition binary_of_composite_type
+    (t : composite_type value_type function_type) : list byte :=
+  match t with
+  | Comp_func f => binary_of_functype f
+  | Comp_struct fields => x5f :: binary_of_vec binary_of_field_type fields
+  | Comp_array field => x5e :: binary_of_field_type field
+  end.
+
+Definition binary_of_subtype (t : source_subtype) : list byte :=
+  let composite := binary_of_composite_type t.(subtype_composite) in
+  match t.(subtype_final), t.(subtype_supers) with
+  | true, nil => composite
+  | final, supers => (if final then x4f else x50) ::
+      binary_of_vec binary_of_typeidx supers ++ composite
+  end.
+
+Definition binary_of_recursive_type (group : recursive_type) : list byte :=
+  match group with
+  | cons t nil => binary_of_subtype t
+  | _ => x4e :: binary_of_vec binary_of_subtype group
+  end.
+
+Definition binary_of_typesec (ts : list recursive_type) : list byte :=
+  x01 :: with_length (binary_of_vec binary_of_recursive_type ts).
 
 Definition binary_of_name (n : name) : list byte :=
   binary_of_vec (fun n => cons n nil) n.

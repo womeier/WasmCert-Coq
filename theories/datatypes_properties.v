@@ -89,6 +89,15 @@ Definition eqfunction_typeP : Equality.axiom function_type_eqb :=
 
 HB.instance Definition function_type_eqMixin := hasDecEq.Build function_type eqfunction_typeP.
 
+Definition source_subtype_eq_dec : forall x y : source_subtype, {x = y} + {x <> y}.
+Proof. decidable_equality. Defined.
+
+Definition source_subtype_eqb x y : bool := source_subtype_eq_dec x y.
+Definition eqsource_subtypeP : Equality.axiom source_subtype_eqb :=
+  eq_dec_Equality_axiom source_subtype_eq_dec.
+HB.instance Definition source_subtype_eqMixin :=
+  hasDecEq.Build source_subtype eqsource_subtypeP.
+
 Definition t_context_eq_dec : forall x y : t_context, {x = y} + {x <> y}.
 Proof. decidable_equality. Defined.
 

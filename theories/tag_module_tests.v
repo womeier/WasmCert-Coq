@@ -8,12 +8,13 @@ Context `{hfc: host_function_class} `{memory: BlockUpdateMemory}.
 
 Definition tag_test_store : store_record :=
   {| s_funcs := []; s_tables := []; s_mems := []; s_globals := [];
-     s_elems := []; s_datas := []; s_tags := [[T_num T_i32]]; s_exns := [] |}.
+     s_elems := []; s_datas := []; s_tags := [[T_num T_i32]]; s_exns := [];
+     s_types := [] |}.
 
 Definition tag_test_instance (addrs : list tagaddr) : moduleinst :=
   {| inst_types := []; inst_funcs := []; inst_tables := []; inst_mems := [];
      inst_globals := []; inst_elems := []; inst_datas := []; inst_exports := [];
-     inst_tags := addrs |}.
+     inst_tags := addrs; inst_defined_types := [] |}.
 
 Example tag_instance_context_contains_parameters :
   inst_typing tag_test_store (tag_test_instance [0%N]) =

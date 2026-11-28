@@ -4,6 +4,71 @@ From parseque Require Import Parseque.
 From Wasm Require Import binary_format_parser binary_format_printer
                          datatypes_properties check_toks.
 
+(** A vector's u32 length may have a non-minimal LEB128 representation.
+    In particular, a padded zero length must not require an element parser
+    to consume a token.  These tests use the actual whole-module parser. *)
+Definition empty_module_header : list Byte.byte :=
+  x00 :: x61 :: x73 :: x6d :: x01 :: x00 :: x00 :: x00 :: nil.
+
+Lemma padded_empty_type_vector :
+  run_parse_module
+    (empty_module_header ++ (x01 :: x02 :: x80 :: x00 :: nil)) =
+  run_parse_module empty_module_header.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma maximally_padded_empty_type_vector :
+  run_parse_module
+    (empty_module_header ++
+      (x01 :: x05 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil)) =
+  run_parse_module empty_module_header.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma overlong_empty_type_vector_rejected :
+  run_parse_module
+    (empty_module_header ++
+      (x01 :: x06 :: x80 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma overflowing_type_vector_length_rejected :
+  run_parse_module
+    (empty_module_header ++
+      (x01 :: x05 :: x80 :: x80 :: x80 :: x80 :: x10 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+(** Heap indices are unsigned indices encoded with signed LEB128. *)
+Lemma heap_index_64 :
+  run_parse_heap_typeidx (xc0 :: x00 :: nil) = Some 64%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_64_requires_positive_sign :
+  run_parse_heap_typeidx (x40 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_u32_max :
+  run_parse_heap_typeidx (xff :: xff :: xff :: xff :: x0f :: nil) =
+  Some 4294967295%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_padded_zero :
+  run_parse_heap_typeidx (x80 :: x80 :: x80 :: x80 :: x00 :: nil) = Some 0%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_overlong_zero_rejected :
+  run_parse_heap_typeidx (x80 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_overflow_rejected :
+  run_parse_heap_typeidx (x80 :: x80 :: x80 :: x80 :: x10 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_abstract_type_rejected :
+  run_parse_heap_typeidx (x70 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_leftovers_rejected :
+  run_parse_heap_typeidx (x00 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
 Open Scope string_scope.
 Import Stdlib.Strings.String.StringSyntax.
 Open Scope list_scope.
@@ -213,7 +278,7 @@ Proof. vm_compute. reflexivity. Qed.
 
 Definition module_type := {|
   mod_tags := nil;
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs := nil;
   mod_tables := nil;
   mod_mems := nil;
@@ -231,7 +296,7 @@ Proof. vm_compute. reflexivity. Qed.
 
 Definition module_type_fun := {|
   mod_tags := nil;
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs :=
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := nil |} nil;
   mod_tables := nil;
@@ -250,7 +315,7 @@ Proof. vm_compute. reflexivity. Qed.
 
 Definition module_42 := {|
   mod_tags := nil;
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs :=
     let e := BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 42))) in
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := cons e nil |} nil;
@@ -270,7 +335,7 @@ Proof. vm_compute. reflexivity. Qed.
 
 Definition module_42_exported := {|
   mod_tags := nil;
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs :=
     let e := BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 42))) in
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := cons e nil |} nil;
@@ -290,7 +355,7 @@ Proof. vm_compute. reflexivity. Qed.
 
 Definition module_tableops := {|
   mod_tags := nil;
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs :=
     let e := BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 1))) in
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := cons e nil |} nil;

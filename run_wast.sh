@@ -30,6 +30,8 @@ trap 'rm -rf "$results_dir"' EXIT
 
 # Worker function: run one .wast file, print output, write
 # "passed total infrastructure_errors" to a result file.
+# A crash or missing/malformed summary must fail the aggregate run, even when
+# other files passed.  In particular, it must not disappear as "0 0".
 # Output is grouped per-file under flock so parallel jobs don't interleave their reports.
 run_one() {
   local wastfile="$1"
@@ -59,8 +61,9 @@ run_one() {
     echo "0 0 1" > "$results_dir/$base"
   else
     local result_line
-    if result_line=$(printf '%s' "$cleaned" | grep -m1 "Result: "); then
-      if [[ "$result_line" =~ Result:\ ([0-9]+)/([0-9]+)([[:space:]]|$) ]] &&
+    if result_line=$(printf '%s' "$cleaned" | grep "Result: "); then
+      if [[ "$result_line" != *$'\n'* &&
+            "$result_line" =~ Result:\ ([0-9]+)/([0-9]+)([[:space:]]|$) ]] &&
           (( 10#${BASH_REMATCH[2]} > 0 &&
              10#${BASH_REMATCH[1]} <= 10#${BASH_REMATCH[2]} )); then
         echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]} 0" > "$results_dir/$base"

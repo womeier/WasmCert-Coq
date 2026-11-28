@@ -161,6 +161,7 @@ Definition ref_has_type (s : store_record) (types : list function_type)
         end
   | VAL_ref_extern _ => heap t = HT_extern
   | VAL_ref_exn _ => False
+  | VAL_ref_i31 _ => False
   end.
 
 (* The refinement layer is conservative over the existing runtime typing.
@@ -170,7 +171,7 @@ Lemma ref_has_type_erases s types v t :
   ref_has_type s types v t ->
   value_typing s (VAL_ref v) (T_ref (Ref_type true (erase_heap (heap t)))) = true.
 Proof.
-  intros [_ Hv]. destruct v as [h | a | a | a].
+  intros [_ Hv]. destruct v as [h | a | a | a | n].
   - destruct Hv as [_ He]. subst h.
     unfold value_typing, typeof_value, typeof_ref. simpl.
     apply value_subtyping_eq.
@@ -179,6 +180,7 @@ Proof.
     destruct (heap t); simpl in *; try contradiction; apply value_subtyping_eq.
   - unfold value_typing, typeof_value, typeof_ref.
     rewrite Hv. simpl. apply value_subtyping_eq.
+  - contradiction.
   - contradiction.
 Qed.
 
@@ -199,6 +201,7 @@ Proof.
       destruct Hnull; congruence.
     + destruct Hval as [ft [Ha Hft]]. exists ft. auto.
     + discriminate.
+    + contradiction.
     + contradiction.
 Qed.
 
@@ -239,6 +242,7 @@ Definition call_ref_step (tail : bool) (v : value_ref)
       Some (if tail then AI_return_invoke a else AI_invoke a)
   | VAL_ref_extern _ => None
   | VAL_ref_exn _ => None
+  | VAL_ref_i31 _ => None
   end.
 
 Inductive call_ref_reduces (tail : bool) :
@@ -263,13 +267,14 @@ Lemma call_ref_progress s types v n i ft tail :
      exists a, ext_func_typing s a = Some ft /\
        e = if tail then AI_return_invoke a else AI_invoke a).
 Proof.
-  intros Hi [_ Hv]. destruct v as [h | a | a | a]; simpl in Hv.
+  intros Hi [_ Hv]. destruct v as [h | a | a | a | n31]; simpl in Hv.
   - exists AI_trap. split; [reflexivity | auto].
   - destruct Hv as [ft' [Ha Hi']].
     assert (ft' = ft) by congruence. subst ft'.
     exists (if tail then AI_return_invoke a else AI_invoke a).
     split; [reflexivity | right; exists a; auto].
   - discriminate.
+  - contradiction.
   - contradiction.
 Qed.
 
@@ -280,12 +285,13 @@ Lemma call_ref_non_null_progress s types v i ft tail :
     call_ref_step tail v =
       Some (if tail then AI_return_invoke a else AI_invoke a).
 Proof.
-  intros Hi [_ Hv]. destruct v as [h | a | a | a]; simpl in Hv.
+  intros Hi [_ Hv]. destruct v as [h | a | a | a | n31]; simpl in Hv.
   - destruct Hv as [Hn _]. discriminate.
   - destruct Hv as [ft' [Ha Hi']].
     assert (ft' = ft) by congruence. subst ft'.
     exists a. split; auto.
   - discriminate.
+  - contradiction.
   - contradiction.
 Qed.
 
@@ -304,6 +310,7 @@ Proof.
   - apply ref_has_type_non_null; auto. intros h H. discriminate.
   - apply ref_has_type_non_null; auto. intros h H. discriminate.
   - apply ref_has_type_non_null; auto. intros h H. discriminate.
+  - apply ref_has_type_non_null; auto. intros h H. discriminate.
 Qed.
 
 Lemma as_non_null_step_traps v :
@@ -313,6 +320,7 @@ Proof.
   - split.
     + intros _. eexists. reflexivity.
     + intros _. reflexivity.
+  - split; [discriminate | intros [h H]; discriminate].
   - split; [discriminate | intros [h H]; discriminate].
   - split; [discriminate | intros [h H]; discriminate].
   - split; [discriminate | intros [h H]; discriminate].

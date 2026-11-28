@@ -4,6 +4,7 @@
 (* (C) J. Pichon, M. Bodin - see LICENSE.txt *)
 
 From Wasm Require Export common numerics bytes memory simd.
+From Wasm Require Export gc_storage_types.
 From compcert Require common.Memdata.
 From Stdlib Require Import ZArith.
 
@@ -36,6 +37,13 @@ Definition u32_bound : N := 4294967296%N.
 Definition u8_bound : N := 256%N.
 
 Definition typeidx : Set := u32.
+
+(** Runtime defined-type identities are canonical registry entries, never
+    module-local HT_type indices. Group members retain their binder position. *)
+Record defined_type : Set := Def_type {
+  defined_group : N;
+  defined_member : N;
+}.
 Definition funcidx : Set := u32.
 Definition tableidx : Set := u32.
 Definition memidx : Set := u32.
@@ -185,10 +193,58 @@ Inductive function_type := (* tf *)
 | Tf : result_type -> result_type -> function_type
 .
 
-(* Source type declarations currently contain function signatures only.
-   GC must extend this declaration layer with recursive subtype groups.
-   An inst_types entry is not a globally allocated runtime identity. *)
-Definition type_context := list function_type.
+Inductive function_type_gen (V : Type) : Type :=
+| Closed_ft : list V -> list V -> function_type_gen V.
+
+Arguments Closed_ft {V} _ _.
+
+(** Source and canonical declaration phases share the same composite,
+    field/storage and function shapes. Only their reference leaves differ. *)
+Inductive composite_type (V F : Type) : Type :=
+| Comp_func : F -> composite_type V F
+| Comp_struct : list (field_type V) -> composite_type V F
+| Comp_array : field_type V -> composite_type V F.
+
+Arguments Comp_func {V F} _.
+Arguments Comp_struct {V F} _.
+Arguments Comp_array {V F} _.
+
+Record subtype (V I F : Type) : Type := Sub_type {
+  subtype_final : bool;
+  subtype_supers : list I;
+  subtype_composite : composite_type V F;
+}.
+
+Arguments Sub_type {V I F} _ _ _.
+Arguments subtype_final {V I F} _.
+Arguments subtype_supers {V I F} _.
+Arguments subtype_composite {V I F} _.
+
+Definition source_subtype := subtype value_type typeidx function_type.
+Definition recursive_type := list source_subtype.
+
+Inductive closed_type_use : Set :=
+| CT_rec : N -> closed_type_use
+| CT_def : defined_type -> closed_type_use.
+
+Inductive closed_heap_type : Set :=
+| CH_abstract : heap_type -> closed_heap_type
+| CH_defined : closed_type_use -> closed_heap_type.
+
+Inductive closed_value_type : Set :=
+| CV_num : number_type -> closed_value_type
+| CV_vec : vector_type -> closed_value_type
+| CV_ref : bool -> closed_heap_type -> closed_value_type.
+
+Definition closed_function_type := function_type_gen closed_value_type.
+Definition closed_subtype :=
+  subtype closed_value_type closed_type_use closed_function_type.
+Definition canonical_group := list closed_subtype.
+Definition canonical_registry := list canonical_group.
+
+(* Context entries retain composite kind and the source index space.
+   An inst_types entry is never a globally allocated runtime identity. *)
+Definition type_context := list source_subtype.
 
 (* This is a definition for future extensions, where instruction types are no longer
 the same as function types. *)
@@ -244,10 +300,6 @@ Record table_type : Set := {
 
 [https://www.w3.org/TR/wasm-core-2/syntax/types.html#global-types]
 *)
-Inductive mutability : Set := (* mut *)
-  | MUT_const
-  | MUT_var
-  .
 
 
 (** std-doc:
@@ -289,6 +341,19 @@ Most types are universally valid. However, restrictions apply to limits, which m
 Definition functype_valid (ft: function_type) : bool :=
   true.
 
+Definition source_subtype_valid (t : source_subtype) : bool :=
+  match subtype_composite t with
+  | Comp_func f => functype_valid f
+  | Comp_struct _ | Comp_array _ => true
+  end.
+
+(** Like the pre-existing functype_valid predicate, this is only the
+    compatibility context-shape check. Actual source declaration validity is
+    checked by canonical closing, registry validation and identity agreement;
+    it must never be inferred from this universally true legacy predicate. *)
+Lemma source_subtype_valid_true t : source_subtype_valid t = true.
+Proof. destruct t as [final supers composite]; destruct composite; reflexivity. Qed.
+
 Definition table_limit_bound : N := (N.sub u32_bound 1%N).
 
 Definition tabletype_valid (tt: table_type) : bool :=
@@ -304,6 +369,11 @@ Definition globaltype_valid (gt: global_type) : bool :=
   true.
 
 End Types.
+
+Arguments Closed_ft {V} _ _.
+Arguments Comp_func {V F} _.
+Arguments Comp_struct {V F} _.
+Arguments Comp_array {V F} _.
 
 Notation T_funcref := (Ref_type true HT_func).
 Notation T_externref := (Ref_type true HT_extern).
@@ -614,6 +684,8 @@ Instructions in this group affect the flow of control.
   | BI_return_call_ref : typeidx -> basic_instruction
   | BI_br_on_non_null : labelidx -> basic_instruction
   | BI_throw_ref
+  | BI_ref_i31
+  | BI_i31_get : sx -> basic_instruction
   .
 
 
@@ -640,6 +712,7 @@ Inductive value_ref : Set :=
 | VAL_ref_func: funcaddr -> value_ref
   | VAL_ref_extern: externaddr -> value_ref
   | VAL_ref_exn: exnaddr -> value_ref
+| VAL_ref_i31: i31bits -> value_ref
 .
 
 Inductive value : Type :=
@@ -777,7 +850,7 @@ WebAssembly programs are organized into modules, which are the unit of deploymen
 [https://webassembly.github.io/spec/core/syntax/modules.html]
 *)
 Record module : Type := {
-  mod_types : list function_type;
+  mod_types : list recursive_type;
   mod_funcs : list module_func;
   mod_tables : list module_table;
   mod_mems : list module_mem;
@@ -999,9 +1072,11 @@ Record moduleinst : Type := (* inst *) {
   inst_datas : list dataaddr;
   inst_exports: list exportinst;  
   inst_tags : list tagaddr;
+  (* Source type index -> canonical closed identity in the shared store. *)
+  inst_defined_types : list defined_type;
   }.
 
-Definition empty_moduleinst := Build_moduleinst nil nil nil nil nil nil nil nil nil.
+Definition empty_moduleinst := Build_moduleinst nil nil nil nil nil nil nil nil nil nil.
 
 
 (** We assume a family of host functions. **)
@@ -1055,6 +1130,8 @@ Record store_record : Type := (* s *) {
       Identity is its position in this separate store component. *)
   s_tags : list result_type;
   s_exns : list exninst;
+  (* Append-only canonical groups shared by instantiated modules. *)
+  s_types : canonical_registry;
 }.
 
                             
@@ -1102,6 +1179,7 @@ Inductive administrative_instruction : Type := (* e *)
 | AI_raise : exnaddr -> administrative_instruction
 | AI_handler : nat -> list catch_clause -> list administrative_instruction -> administrative_instruction
 | AI_ref_exn : exnaddr -> administrative_instruction
+| AI_ref_i31 : i31bits -> administrative_instruction
 .
 
 (** std-doc:

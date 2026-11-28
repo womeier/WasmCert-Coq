@@ -5,6 +5,7 @@
 
 From mathcomp Require Import ssreflect ssrbool eqtype seq ssrnat.
 From Wasm Require Import instantiation_spec instantiation_properties type_preservation.
+From Wasm Require Import gc_type_context_properties gc_declaration_typing_properties.
 From Stdlib Require Import ZArith.
 
 (* see common.v *)
@@ -79,6 +80,7 @@ Proof.
   destruct Hinst as [t_imps_mod [t_imps [t_exps [hs' [inst [g_inits [r_inits [Hmodtype [Himptype [Hsubtype [Hallocmodule [Hinstglob [Hinstelem [Heqf Heqexps]]]]]]]]]]]]]].
 
   unfold alloc_module in Hallocmodule.
+  destruct Hallocmodule as [registry [typeids [Hclosed [Hidentity [Htypeids Hallocmodule]]]]].
   destruct (alloc_funcs _ _ _) as [s1 ifs] eqn:Hallocfuncs.
   destruct (alloc_tabs _ _) as [s2 its] eqn:Halloctabs.
   destruct (alloc_mems _ _) as [s3 ims] eqn:Hallocmems.
@@ -117,6 +119,11 @@ Proof.
     extract_premise.
     destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
     unfold store_extension => /=.
+    apply/andP; split; last first.
+    { apply gc_type_context_properties.canonical_registry_prefixb_correct.
+      apply gc_declaration_typing_properties.close_and_validate_type_groups_sound in Hclosed.
+      destruct Hclosed as [_ Hclosed].
+      by apply gc_type_context_properties.close_type_groups_extension_public in Hclosed. }
     erewrite component_extension_extend; eauto; last by apply all2_func_extension_same.
     erewrite component_extension_extend; eauto; last by apply all2_table_extension_same.
     erewrite component_extension_extend; eauto; last by apply all2_mem_extension_same.
@@ -131,15 +138,17 @@ Proof.
     - move => l; apply reflexive_all2_same; move => x; by rewrite eq_refl.
   }
 
-  destruct m; unfold module_typing in Hmodtype; simpl in *.
+  destruct Hmodtype as [Hdecl Hmodtype].
+  destruct m; unfold module_components_typing in Hmodtype; simpl in *.
    destruct Hmodtype as [fts [tts [mts [gts [rts [dts [Hmtypes [Hmfunctype [Hmtabletype [Hmmemtype [Hmemcount [Hmglobaltype [Hmelemtype [Hmdatatype [Hstarttype [Hmimptype [Hmexptype [Hexpunique Htags]]]]]]]]]]]]]]]]]].
 
-  remember (Build_t_context mod_types (ext_t_funcs t_imps ++ fts) (ext_t_tables t_imps ++ tts) (ext_t_mems t_imps ++ mts) (ext_t_globals t_imps ++ gts) rts dts nil nil None (iota_N 0 (length inst.(inst_funcs))) (map (gen_tag_instance mod_types) mod_tags)) as C.
+  remember (Build_t_context (List.concat mod_types) (ext_t_funcs t_imps ++ fts) (ext_t_tables t_imps ++ tts) (ext_t_mems t_imps ++ mts) (ext_t_globals t_imps ++ gts) rts dts nil nil None (iota_N 0 (length inst.(inst_funcs))) (map (gen_tag_instance (List.concat mod_types)) mod_tags)) as C.
 
   assert (inst_typing s' f.(f_inst) = Some C) as HIT.
   {
     extract_premise.
     destruct inst; subst; simpl in *.
+    subst inst_types.
 
     (* Functions *)
     assert (those (map (ext_func_typing s6) inst_funcs) = Some (ext_t_funcs t_imps ++ fts)) as Hfit.
@@ -160,7 +169,8 @@ Proof.
         rewrite Hntht in Hntht'; injection Hntht' as <-.
         unfold external_typing, ext_typing in Hexttype.
         remove_bools_options => /=.
-        eapply ext_func_typing_extension in Hoption; eauto.
+         eapply ext_func_typing_extension in Hoption; eauto.
+         change (ext_func_typing s6 v = Some ft) in Hoption.
         by rewrite Hnthextv /= Hoption.
       }
       (* New *)
@@ -363,7 +373,9 @@ Proof.
         move => n' vref Hnthref.
         eapply Forall2_nth_impl' in Hreduce as [be [Hnthinit Hreduce]]; eauto.
         eapply Forall_lookup in Hconstbet as [Hconst Hbet]; eauto.
-        eapply init_value_typing; eauto.
+         change (value_typing (upd_s_types s6 registry) (VAL_ref vref)
+           (T_ref modelem_type) = true).
+         eapply init_value_typing; eauto.
         { move => m addr /= Hnth'.
           destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
           rewrite List.length_app List.length_map.
@@ -390,7 +402,7 @@ Proof.
           unfold lookup_N in *; simplify_multieq.
           rewrite List.nth_error_app1 in Hoption; last by apply nth_error_Some_length in Hoption2.
           simplify_multieq.
-          destruct HST as [_ [_ [_ [Hglobtype _]]]].
+           destruct HST as [_ [_ [_ [_ [Hglobtype _]]]]].
           eapply Forall_lookup in Hglobtype as [gt Hginsttype]; eauto.
           unfold globalinst_typing in Hginsttype.
           destruct g => /=.
@@ -430,7 +442,7 @@ Proof.
     }
 
     assert (those (map (lookup_N (s_tags s6)) inst_tags) =
-            Some (map (gen_tag_instance inst_types) mod_tags)) as Hjit.
+            Some (map (gen_tag_instance (List.concat mod_types)) mod_tags)) as Hjit.
     { subst inst_tags.
       apply those_spec.
       { by rewrite List.length_map iota_N_length List.length_map. }
@@ -444,16 +456,24 @@ Proof.
       replace (_ + n - _)%coq_nat with n by lias.
       by rewrite Hnth.
     }
-    replace (all functype_valid inst_types) with true; last by symmetry; apply Forall_all.
+    replace (all source_subtype_valid (List.concat mod_types)) with true;
+      last by symmetry; apply/allP; intros x Member; rewrite source_subtype_valid_true.
     rewrite Hfit Htit Hmit Hgit Heit Hdit Hjit.
+    rewrite Hidentity.
     reflexivity.
   }
 
   assert (store_typing s') as HST'.
   {
     extract_premise.
+    split.
+    { apply gc_declaration_typing_properties.close_and_validate_type_groups_sound in Hclosed.
+      destruct Hclosed as [Valid _].
+      apply gc_declaration_typing_properties.canonical_registry_validb_correct.
+      by subst; simpl. }
+    extract_premise.
     destruct s, s1, s2, s3, s4, s5, s_data, s6; simpl in *; subst.
-    destruct HST as [Hsfunctype [Hstabletype [Hsmemtype [Hsglobaltype [Hselemtype [Hsdatatype Hsexnstype]]]]]].
+    destruct HST as [Htypes [Hsfunctype [Hstabletype [Hsmemtype [Hsglobaltype [Hselemtype [Hsdatatype Hsexnstype]]]]]]].
     repeat split => //.
     (* Functions *)
     {
@@ -478,6 +498,8 @@ Proof.
         unfold module_func_typing in Hmftype; destruct mf, tf; simpl in *.
         destruct Hmftype as [Hnthmf [Hbet Hdefaultable]].
         unfold gen_func_instance => /=.
+        unfold gen_func_instance in HIT.
+        rewrite -> Hconjl0 in *.
         rewrite Hnthmf; split => //.
         rewrite HIT /= Hconjl1 Hnthmf Hfunclen; repeat split => //=.
         unfold upd_local_label_return in *; simpl in *.

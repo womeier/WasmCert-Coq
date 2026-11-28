@@ -401,7 +401,7 @@ Qed.
 Lemma alloc_tags_lookup types tags s s' addrs n x ps :
   alloc_tags s types tags = (s', addrs) ->
   List.nth_error tags n = Some x ->
-  lookup_N types x = Some (Tf ps nil) ->
+  lookup_function_type types x = Some (Tf ps nil) ->
   exists a, List.nth_error addrs n = Some a /\
             lookup_N s'.(s_tags) a = Some ps.
 Proof.
@@ -421,11 +421,12 @@ Qed.
 Lemma alloc_module_tags_lookup s m imps gvs rvs s' inst n x ps :
   alloc_module s m imps gvs rvs (s', inst) ->
   List.nth_error m.(mod_tags) n = Some x ->
-  lookup_N m.(mod_types) x = Some (Tf ps nil) ->
+  lookup_function_type (List.concat m.(mod_types)) x = Some (Tf ps nil) ->
   exists a, List.nth_error inst.(inst_tags) n = Some a /\
             lookup_N s'.(s_tags) a = Some ps.
 Proof.
   unfold alloc_module.
+  move => [registry [typeids [Hclosed [Hidentities [Hids Halloc]]]]].
   destruct (alloc_funcs _ _ _) as [s1 ifs].
   destruct (alloc_tabs _ _) as [s2 its].
   destruct (alloc_mems _ _) as [s3 ims].
@@ -433,9 +434,10 @@ Proof.
   destruct (alloc_elems _ _) as [s5 ies].
   destruct (alloc_datas _ _) as [s6 ids].
   destruct (alloc_tags _ _ _) as [s7 itags] eqn:Halloctags.
-  move => [Hstore [Htypes [Hfuncs [Htables [Hmems [Hglobals
-    [Helems [Hdatas [Hexports Htags]]]]]]]]] Hnth Htype.
-  subst s'; rewrite Htags.
+  destruct Halloc as [Hstore [Htypes [Hfuncs [Htables [Hmems [Hglobals
+    [Helems [Hdatas [Hexports Htags]]]]]]]]].
+  move => Hnth Htype.
+  subst s'; rewrite Htags; simpl.
   by eapply alloc_tags_lookup; eauto.
 Qed.
 

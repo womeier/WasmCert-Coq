@@ -2,6 +2,7 @@
 (* (C) J. Pichon, M. Bodin - see LICENSE.txt *)
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From Wasm Require Export operations subtyping.
+From Wasm Require Import gc_declaration_typing.
 From Stdlib Require Import NArith.
 
 (* see common.v *)
@@ -68,6 +69,7 @@ Definition typeof_ref (s: store_record) (v: value_ref) : option reference_type :
       | Some _ => Some (Ref_type false HT_exn)
       | None => None
       end
+  | VAL_ref_i31 _ => Some (Ref_type false HT_i31)
   end.
 
 Definition typeof_value (s: store_record) (v: value) : option value_type :=
@@ -98,7 +100,7 @@ https://www.w3.org/TR/wasm-core-2/exec/runtime.html#exec-expand
 **)
 Definition expand_t (C: t_context) (tb: block_type) : option instr_type :=
   match tb with
-  | BT_id n => lookup_N C.(tc_types) n
+  | BT_id n => lookup_function_type C.(tc_types) n
   | BT_valtype (Some t) => Some (Tf [::] [::t])
   | BT_valtype None => Some (Tf [::] [::])
   end.
@@ -310,7 +312,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 | bet_call_indirect : forall C x y tabtype t1s t2s,
   lookup_N (tc_tables C) x = Some tabtype ->
   tabtype.(tt_elem_type) = T_funcref ->
-  lookup_N (tc_types C) y = Some (Tf t1s t2s) ->
+   lookup_function_type (tc_types C) y = Some (Tf t1s t2s) ->
   be_typing C [::BI_call_indirect x y] (Tf (t1s ++ [::T_num T_i32]) t2s)
 | bet_return_call : forall C x t1s t2s t3s t4s,
   lookup_N (tc_funcs C) x = Some (Tf t1s t2s) ->
@@ -319,7 +321,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 | bet_return_call_indirect : forall C x y tabt t1s t2s t3s t4s,
   lookup_N (tc_tables C) x = Some tabt ->
   tabt.(tt_elem_type) = T_funcref ->
-  lookup_N (tc_types C) y = Some (Tf t1s t2s) -> 
+   lookup_function_type (tc_types C) y = Some (Tf t1s t2s) ->
   tc_return C = Some t2s ->
   be_typing C [::BI_return_call_indirect x y] (Tf (t3s ++ t1s ++ [::T_num T_i32]) t4s)
 | bet_local_get : forall C x t,
@@ -438,6 +440,12 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   lookup_N C.(tc_labels) x = Some (ts ++ [::t]) ->
   is_ref_t t ->
   be_typing C [::BI_br_on_non_null x] (Tf (ts ++ [::t]) ts)
+| bet_ref_i31 : forall C,
+  be_typing C [::BI_ref_i31]
+    (Tf [::T_num T_i32] [::T_ref (Ref_type false HT_i31)])
+| bet_i31_get : forall C signed nullable,
+  be_typing C [::BI_i31_get signed]
+    (Tf [::T_ref (Ref_type nullable HT_i31)] [::T_num T_i32])
 .
 
 Definition expr_typing (C: t_context) (bes: list basic_instruction) (ts: result_type) : Prop :=
@@ -445,7 +453,7 @@ Definition expr_typing (C: t_context) (bes: list basic_instruction) (ts: result_
 
 Definition func_typing (C: t_context) (code: module_func) (tf: function_type) : Prop :=
   let: {| modfunc_type := x; modfunc_locals := ts; modfunc_body := bes |} := code in
-  match lookup_N C.(tc_types) x with
+  match lookup_function_type C.(tc_types) x with
   | Some (Tf ts1 ts2) =>
       tf = (Tf ts1 ts2) /\
       let C' := upd_local_label_return C (ts1 ++ ts) [:: ts2] (Some ts2) in
@@ -517,7 +525,9 @@ This definition is currently computable -- hopefully it remains so in the future
  **)
 Definition inst_typing (s : store_record) (inst : moduleinst) : option t_context :=
   let '{| inst_types := ts; inst_funcs := fs; inst_tables := tbs; inst_mems := ms; inst_globals := gs; inst_elems := es; inst_datas := ds; inst_exports := exps; inst_tags := js |} := inst in
-  if (all functype_valid ts) then
+  if (all source_subtype_valid ts &&
+      source_type_identitiesb s.(s_types) inst.(inst_defined_types)
+        ts inst.(inst_defined_types)) then
     match those (map (ext_func_typing s) fs) with
     | Some tfs =>
         match those (map (ext_table_typing s) tbs) with
@@ -620,6 +630,8 @@ Inductive e_typing : store_record -> t_context -> seq administrative_instruction
   thread_typing s (Some ts) (f, es) ts ->
   length ts = n ->
   e_typing s C [::AI_frame n f es] (Tf [::] ts)
+| ety_ref_i31 : forall s C n,
+  e_typing s C [::AI_ref_i31 n] (Tf [::] [::T_ref (Ref_type false HT_i31)])
 
 with thread_typing : store_record -> option result_type -> thread -> result_type -> Prop :=
 | mk_thread_typing : forall s f es rs ts C C',
@@ -642,7 +654,8 @@ Definition funcinst_typing (s: store_record) (fi: funcinst) (tf0: function_type)
         | None => False
         end
   | FC_func_host tf hf =>
-      functype_valid tf (* No host function assumptions *)
+      functype_valid tf /\
+      gc_type_context.canonical_function_identityb s.(s_types) tf = true
   end.
 
 Definition exninst_typing (s : store_record) (e : exninst) : Prop :=
@@ -650,8 +663,9 @@ Definition exninst_typing (s : store_record) (e : exninst) : Prop :=
              values_typing s e.(exninst_fields) ps.
 
 Definition store_typing (s : store_record) : Prop :=
+  canonical_registry_validb s.(s_types) = true /\
   match s with
-  | Build_store_record fs tabs ms gs es ds tags exns =>
+  | Build_store_record fs tabs ms gs es ds tags exns types =>
     (List.Forall (fun x => exists t, funcinst_typing s x t) fs) /\
     (List.Forall (fun x => exists t, tableinst_typing s x = Some t) tabs) /\
     (List.Forall (fun x => exists t, meminst_typing s x = Some t) ms) /\

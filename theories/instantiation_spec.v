@@ -4,7 +4,7 @@
 From mathcomp Require Import ssreflect ssrbool ssrnat eqtype seq.
 From Wasm Require Import list_extra datatypes datatypes_properties
                         binary_format_parser operations
-                         typing opsem type_checker memory.
+                         typing opsem type_checker memory gc_declaration_typing.
 From Stdlib Require Import ZArith.
 
 (* see common.v *)
@@ -15,6 +15,9 @@ Set SsrOldRewriteGoalsOrder.
 Section Instantiation_spec.
   
 Context `{ho: host}.
+
+Definition module_type_groups (m : module) : list recursive_type :=
+  m.(mod_types).
 
 Definition alloc_Xs {A B} f (s : store_record) (xs : list A) : store_record * list B :=
   let '(s', fas) :=
@@ -41,6 +44,7 @@ Definition globals_of_externals (evs : list extern_value) : list globaladdr :=
 Definition add_func (s : store_record) funcinst := {|
   s_exns := s.(s_exns);
   s_tags := s.(s_tags);
+  s_types := s.(s_types);
   s_funcs := cat s.(s_funcs) [::funcinst];
   s_tables := s.(s_tables);
   s_mems := s.(s_mems);
@@ -50,7 +54,7 @@ Definition add_func (s : store_record) funcinst := {|
 |}.
 
 Definition gen_func_instance mf inst : funcinst :=
-  match lookup_N inst.(inst_types) mf.(modfunc_type) with
+  match lookup_function_type inst.(inst_types) mf.(modfunc_type) with
   | Some ft =>
       FC_func_native ft inst mf
   | None =>
@@ -71,6 +75,7 @@ Definition alloc_funcs (s : store_record) (m_fs : list module_func) (mi : module
 Definition add_table (s : store_record) (ti : tableinst) : store_record := {|
   s_exns := s.(s_exns);
   s_tags := s.(s_tags);
+  s_types := s.(s_types);
   s_funcs := s.(s_funcs);
   s_tables := cat s.(s_tables) [::ti];
   s_mems := s.(s_mems);
@@ -106,6 +111,7 @@ Definition gen_mem_instance (lim : limits) : meminst :=
 Definition add_mem (s : store_record) (m_m : meminst) : store_record := {|
   s_exns := s.(s_exns);
   s_tags := s.(s_tags);
+  s_types := s.(s_types);
   s_funcs := s.(s_funcs);
   s_tables := s.(s_tables);
   s_mems := cat s.(s_mems) [::m_m];
@@ -126,6 +132,7 @@ Definition alloc_mems (s : store_record) (m_mts : list memory_type) : store_reco
 Definition add_glob (s : store_record) (m_g : globalinst) : store_record := {|
   s_exns := s.(s_exns);
   s_tags := s.(s_tags);
+  s_types := s.(s_types);
   s_funcs := s.(s_funcs);
   s_tables := s.(s_tables);
   s_mems := s.(s_mems);
@@ -152,6 +159,7 @@ Definition alloc_globs s m_gs vs :=
 Definition add_elem (s : store_record) (m_e : eleminst) : store_record := {|
   s_exns := s.(s_exns);
   s_tags := s.(s_tags);
+  s_types := s.(s_types);
   s_funcs := s.(s_funcs);
   s_tables := s.(s_tables);
   s_mems := s.(s_mems);
@@ -173,6 +181,7 @@ Definition alloc_elems (s : store_record) (m_es : list module_element) (elem_ini
 Definition add_data (s : store_record) (m_d : datainst) : store_record := {|
   s_exns := s.(s_exns);
   s_tags := s.(s_tags);
+  s_types := s.(s_types);
   s_funcs := s.(s_funcs);
   s_tables := s.(s_tables);
   s_mems := s.(s_mems);
@@ -189,8 +198,8 @@ Definition alloc_data (s: store_record) (m_d: module_data) : store_record * data
 Definition alloc_datas (s : store_record) (m_d: list module_data) : store_record * list dataaddr :=
   alloc_Xs alloc_data s m_d.
 
-Definition gen_tag_instance (types : list function_type) (x : typeidx) : result_type :=
-  match lookup_N types x with
+Definition gen_tag_instance (types : type_context) (x : typeidx) : result_type :=
+  match lookup_function_type types x with
   | Some (Tf ps nil) => ps
   | _ => nil (* unreachable after module validation, as for gen_func_instance *)
   end.
@@ -198,7 +207,7 @@ Definition gen_tag_instance (types : list function_type) (x : typeidx) : result_
 Definition alloc_tag (s : store_record) (ps : result_type) : store_record * tagaddr :=
   (upd_s_tags s (s.(s_tags) ++ [::ps]), N.of_nat (length s.(s_tags))).
 
-Definition alloc_tags (s : store_record) (types : list function_type)
+Definition alloc_tags (s : store_record) (types : type_context)
     (tags : list typeidx) : store_record * list tagaddr :=
   alloc_Xs (fun s x => alloc_tag s (gen_tag_instance types x)) s tags.
 
@@ -283,15 +292,19 @@ Definition get_exportinst (inst: moduleinst) (m_exp: module_export) : exportinst
 Definition alloc_module (s : store_record) (m : module) (imps : list extern_value) (gvs : list value) (rvs: list (list value_ref))
     (s'_inst : store_record * moduleinst) : Prop :=
   let '(s'_goal, inst) := s'_inst in
+  exists registry typeids,
+  close_and_validate_type_groups s.(s_types) (module_type_groups m) = Some (registry, typeids) /\
+  source_type_identitiesb registry typeids (List.concat m.(mod_types)) typeids = true /\
+  inst.(inst_defined_types) = typeids /\
   let '(s1, i_fs) := alloc_funcs s m.(mod_funcs) inst in
   let '(s2, i_ts) := alloc_tabs s1 (map modtab_type m.(mod_tables)) in
   let '(s3, i_ms) := alloc_mems s2 (map modmem_type m.(mod_mems)) in
   let '(s4, i_gs) := alloc_globs s3 m.(mod_globals) gvs in
   let '(s5, i_es) := alloc_elems s4 m.(mod_elems) rvs in
    let '(s6, i_ds) := alloc_datas s5 m.(mod_datas) in
-   let '(s', i_tags) := alloc_tags s6 m.(mod_types) m.(mod_tags) in
-  (s'_goal = s') /\
-  (inst.(inst_types) = m.(mod_types)) /\
+   let '(s', i_tags) := alloc_tags s6 (List.concat m.(mod_types)) m.(mod_tags) in
+  (s'_goal = upd_s_types s' registry) /\
+  (inst.(inst_types) = List.concat m.(mod_types)) /\
   (inst.(inst_funcs) = ((ext_funcs imps) ++ i_fs)) /\
   (inst.(inst_tables) = ((ext_tables imps) ++ i_ts)) /\
   (inst.(inst_mems) = ((ext_mems imps) ++ i_ms)) /\
@@ -306,7 +319,7 @@ Definition dummy_table : tableinst := {| tableinst_elem := nil; tableinst_type :
 Definition module_func_typing (c : t_context) (mf : module_func) (tf : function_type) : Prop :=
   let '{| modfunc_type := x; modfunc_locals := t_locs; modfunc_body := b_es |} := mf in
   let '(Tf tn tm) := tf in
-  lookup_N c.(tc_types) x = Some (Tf tn tm) /\
+  lookup_function_type c.(tc_types) x = Some (Tf tn tm) /\
   let c' := upd_local_label_return c (tn ++ t_locs) [::tm] (Some tm) in
   be_typing c' b_es (Tf [::] tm) /\
   (* Revise when non-defaultable types are added *)
@@ -384,7 +397,7 @@ Definition module_start_typing (c : t_context) (ms : module_start) : bool :=
 
 Definition module_import_desc_typing (c : t_context) (imp_desc : module_import_desc) (e : extern_type) : bool := 
   match imp_desc with
-  | MID_func i => (option_map ET_func (lookup_N c.(tc_types) i) == Some e)
+  | MID_func i => (option_map ET_func (lookup_function_type c.(tc_types) i) == Some e)
   | MID_table t_t =>
       tabletype_valid t_t && (e == ET_table t_t)
   | MID_mem mt =>
@@ -506,10 +519,10 @@ Definition wasm_2_memory_count_check (ms: list module_mem) (ims: list memory_typ
   (List.length ms) + (List.length ims) <= 1.
                             
 (* We deliberately omit the artificial restriction on the length of memory here. *)
-Definition module_typing (m : module) (impts : list extern_type) (expts : list extern_type) : Prop :=
+Definition module_components_typing (m : module) (impts : list extern_type) (expts : list extern_type) : Prop :=
   exists fts tts mts gts rts dts,
   let '{|
-    mod_types := tfs;
+    mod_types := groups;
     mod_funcs := fs;
     mod_tables := ts;
     mod_mems := ms;
@@ -521,6 +534,7 @@ Definition module_typing (m : module) (impts : list extern_type) (expts : list e
     mod_exports := exps;
     mod_tags := tags;
   |} := m in
+  let tfs := List.concat groups in
   let ifts := ext_t_funcs impts in
   let its := ext_t_tables impts in
   let ims := ext_t_mems impts in
@@ -554,7 +568,7 @@ Definition module_typing (m : module) (impts : list extern_type) (expts : list e
     tc_refs := xs;
     tc_tags := nil;
   |} in
-  List.Forall functype_valid tfs /\
+  List.Forall source_subtype_valid tfs /\
   List.Forall2 (module_func_typing c) fs fts /\
   List.Forall2 (module_table_typing c') ts tts /\
   List.Forall2 (module_mem_typing c') ms mts /\
@@ -567,7 +581,13 @@ Definition module_typing (m : module) (impts : list extern_type) (expts : list e
   List.Forall2 (module_export_typing c) exps expts /\
    export_name_unique exps /\
    List.Forall (fun x => exists ps,
-     lookup_N tfs x = Some (Tf ps nil)) tags.
+     lookup_function_type tfs x = Some (Tf ps nil)) tags.
+
+Definition module_typing (m : module) (impts expts : list extern_type) : Prop :=
+  (exists registry ids,
+    close_and_validate_type_groups nil (module_type_groups m) = Some (registry, ids) /\
+    source_type_identitiesb registry ids (List.concat m.(mod_types)) ids = true) /\
+  module_components_typing m impts expts.
 
 (** std-doc:
 For the purpose of checking external values against imports, such values are classified by external types. The following auxiliary typing rules specify this typing relation relative to a store S in which the referenced instances live.
@@ -667,7 +687,7 @@ Definition instantiate (s : store_record) (m : module) (v_imps : list extern_val
     List.Forall2 (external_typing s) v_imps t_imps /\
     List.Forall2 import_subtyping t_imps t_imps_mod /\
     alloc_module s m v_imps g_inits r_inits (s_end, inst) /\
-    let inst_init := Build_moduleinst nil inst.(inst_funcs) nil nil (ext_globals v_imps) nil nil nil nil in
+    let inst_init := Build_moduleinst nil inst.(inst_funcs) nil nil (ext_globals v_imps) nil nil nil nil nil in
     let f_init := Build_frame nil inst_init in
     (* Init values *)
     instantiate_globals f_init hs' s_end m g_inits /\
