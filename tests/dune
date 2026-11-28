@@ -10,6 +10,11 @@
    (libraries wasmcert_extracted parray zarith))
 
 (rule
+ (alias runtest)
+ (deps wast_to_binary.py wast_to_binary_test.py)
+ (action (run python3 %{dep:wast_to_binary_test.py})))
+
+(rule
  (target memory64_binary.wast)
  (deps memory64_binary.py)
  (action
