@@ -317,6 +317,7 @@ Definition const_expr (c : t_context) (b_e : basic_instruction) : bool :=
   | BI_const_vec _ => true
   | BI_ref_null _ => true
   | BI_ref_func _ => true
+  | BI_ref_i31 => true
   | BI_binop t op => const_binop t op
   | BI_global_get k =>
       match lookup_N c.(tc_globals) k with

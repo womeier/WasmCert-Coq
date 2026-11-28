@@ -25,7 +25,8 @@ Definition const_admin (e : administrative_instruction) : bool :=
   match e with
   | AI_basic (BI_const_num _) | AI_basic (BI_const_vec _)
   | AI_basic (BI_ref_null _) | AI_basic (BI_ref_func _)
-  | AI_basic (BI_global_get _) | AI_basic (BI_binop _ _)
+   | AI_basic (BI_global_get _) | AI_basic (BI_binop _ _)
+   | AI_basic BI_ref_i31
    | AI_ref _ | AI_ref_extern _ | AI_ref_i31 _ | AI_trap => true
   | _ => false
   end.
@@ -389,6 +390,17 @@ Proof.
       hs s f (v_to_e_list (rev vs) ++ [::$V v] ++ nil)).
     apply const_reduce_context.
     by apply r_global_get.
+  - (* ref.i31 *)
+    destruct vs as [|v vs]; [discriminate |].
+    destruct v as [[n|n|n|n]|v|v]; try discriminate.
+    move => [<-].
+    rewrite !rev_cons /v_to_e_list !map_rcons -!cats1 /= -!catA.
+    apply rt_step.
+    change (reduce hs s f
+      (v_to_e_list (rev vs) ++ [::$VN (VAL_int32 n); AI_basic BI_ref_i31] ++ nil)
+      hs s f
+      (v_to_e_list (rev vs) ++ [::$V (VAL_ref (VAL_ref_i31 (i31bits_of_i32 n)))] ++ nil)).
+    apply const_reduce_context. apply r_simple. apply rs_ref_i31.
 Qed.
 
 Lemma const_reduce_trans_suffix hs s f es es' tail :

@@ -25,6 +25,13 @@
 
 (rule
  (alias runtest)
+ (deps gc_i31_constants_binary.py)
+ (action
+  (run python3 %{dep:gc_i31_constants_binary.py}
+   %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
  (deps gc_declarations_binary.py)
  (action
   (run python3 %{dep:gc_declarations_binary.py}

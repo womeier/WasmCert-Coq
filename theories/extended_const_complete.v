@@ -122,8 +122,24 @@ Proof.
     specialize (Hglob _ _ Hlookup) as [v [Hget Htyped]].
     do 2 eexists; split; first reflexivity.
     split.
-    + by cbn [interp_const_step]; rewrite Hget.
-    + by constructor.
+     + by cbn [interp_const_step]; rewrite Hget.
+     + by constructor.
+  - (* ref.i31 *)
+    cbn [type_checker.check_single] in Hcheck.
+    unfold type_checker.type_update in Hcheck.
+    destruct ts as [|t ts].
+    { by cbn [type_checker.consume type_checker.CT_type type_checker.CT_unr] in Hcheck. }
+    cbn [type_checker.consume type_checker.CT_type type_checker.CT_unr] in Hcheck.
+    destruct (t <t: T_num T_i32) eqn:Hsub => //.
+    cbn [type_checker.produce] in Hcheck.
+    injection Hcheck as <-.
+    inversion Hstack as [|v ? ? ? Hv Htail]; subst.
+    specialize (value_typing_trans Hv Hsub) as Hnumeric.
+    destruct (const_value_num_inv _ _ _ Hnumeric) as [number [-> Hnumber]].
+    destruct number => //.
+    do 2 eexists; split; first reflexivity.
+    split; first reflexivity.
+    constructor => //.
 Qed.
 
 Lemma const_checker_fold_complete typing_store runtime_store f C es ts vs ct' :

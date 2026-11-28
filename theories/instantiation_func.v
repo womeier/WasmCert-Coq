@@ -259,6 +259,12 @@ Definition interp_const_step (s : store_record) (f : frame)
           | Some v => Some (v :: vs)
           | None => None
           end
+      | BI_ref_i31 =>
+          match vs with
+          | VAL_num (VAL_int32 n) :: vs' =>
+              Some (VAL_ref (VAL_ref_i31 (i31bits_of_i32 n)) :: vs')
+          | _ => None
+          end
       | BI_binop t op =>
           if const_binop t op then
             match vs with
