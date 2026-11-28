@@ -28,6 +28,7 @@ Label indices reference structured control instructions inside an instruction se
 [https://www.w3.org/TR/wasm-core-2/syntax/modules.html#indices]
 *)
 Definition u32 : Set := N.
+Definition u64 : Set := N.
 Definition u8: Set := N.
 
 (* 2^32 *)
@@ -307,7 +308,7 @@ Definition globaltype_valid (gt: global_type) : bool :=
 End Types.
 
 
-Definition static_offset := (* off *) u32. 
+Definition static_offset := (* off *) u64.
 
 Definition alignment_exponent := (* a *) u32.
 
@@ -497,7 +498,7 @@ Inductive load_vec_arg :=
   .
 
 Record memarg : Set :=
-  { memarg_offset : u32;
+  { memarg_offset : u64;
     memarg_align: u32;
     memarg_memory: memidx
   }.

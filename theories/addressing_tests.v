@@ -1,7 +1,7 @@
 (** Regression tests for the memory64/table64 address and binary layers.
     These do not claim end-to-end proposal conformance of the legacy AST. *)
 From Wasm Require Import datatypes addressing addressing_binary
-  binary_format_parser check_toks.
+  binary_format_parser binary_format_printer check_toks.
 From Stdlib Require Import Strings.Byte ZArith List.
 Import ListNotations Addressing AddressingBinary.
 Open Scope N_scope.
@@ -224,6 +224,37 @@ Proof. vm_compute. reflexivity. Qed.
 Example parser_u64_maximum :
   check_toks [xff; xff; xff; xff; xff; xff; xff; xff; xff; x01]
     (fun n => parse_u64_as_N (n := n)) = Running.Singleton 18446744073709551615%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Example parser_memory64_no_maximum :
+  check_toks [x04; x81; x80; x04]
+    (fun n => parse_memory_type (n := n)) =
+  Running.Singleton {| mt_limits := lim 65537 None; mt_address_type := AT_i64 |}.
+Proof. vm_compute. reflexivity. Qed.
+
+Example parser_memory64_with_maximum :
+  check_toks [x05; x81; x80; x04; x82; x80; x04]
+    (fun n => parse_memory_type (n := n)) =
+  Running.Singleton {| mt_limits := lim 65537 (Some 65538); mt_address_type := AT_i64 |}.
+Proof. vm_compute. reflexivity. Qed.
+
+Example parser_memarg_wide_offset :
+  check_toks [x00; x80; x80; x80; x80; x10]
+    (fun n => parse_memarg (n := n)) =
+  Running.Singleton (Build_memarg 4294967296 0 0).
+Proof. vm_compute. reflexivity. Qed.
+
+Example production_memory64_codec_round_trip :
+  let mt := {| mt_limits := lim 281474976710656 (Some 281474976710656);
+               mt_address_type := AT_i64 |} in
+  check_toks (binary_of_memory_type mt)
+    (fun n => parse_memory_type (n := n)) = Running.Singleton mt.
+Proof. vm_compute. reflexivity. Qed.
+
+Example production_wide_memarg_codec_round_trip :
+  let marg := Build_memarg 18446744073709551615 0 1 in
+  check_toks (binary_of_memarg marg)
+    (fun n => parse_memarg (n := n)) = Running.Singleton marg.
 Proof. vm_compute. reflexivity. Qed.
 
 Example parser_u64_rejects_overflow :

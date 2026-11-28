@@ -84,12 +84,14 @@ Proof.
   - by apply bet_empty.
   - destruct Htype as [[mt [Hmem [Hoffset Hconst]]] _].
     eapply bet_composition'; first by apply Hoffset.
-    eapply bet_composition_front with (t2s := [::T_num T_i32; T_num T_i32]).
-    + apply bet_weakening_empty_1 with (ts := [::T_num T_i32]).
+    eapply bet_composition_front with
+      (t2s := [::Addressing.address_value_type mt.(mt_address_type); T_num T_i32]).
+    + apply bet_weakening_empty_1 with (ts := [::Addressing.address_value_type mt.(mt_address_type)]).
       by apply bet_const_num.
     + eapply bet_composition_front with
-        (t2s := [::T_num T_i32; T_num T_i32; T_num T_i32]).
-      * apply bet_weakening_empty_1 with (ts := [::T_num T_i32; T_num T_i32]).
+        (t2s := [::Addressing.address_value_type mt.(mt_address_type); T_num T_i32; T_num T_i32]).
+      * apply bet_weakening_empty_1 with
+          (ts := [::Addressing.address_value_type mt.(mt_address_type); T_num T_i32]).
         by apply bet_const_num.
       * eapply bet_composition_front with (t2s := [::]).
         -- by eapply bet_memory_init; eauto.

@@ -332,27 +332,39 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 | bet_load : forall C m_arg tp_sx t mem,
   lookup_N (tc_mems C) m_arg.(memarg_memory) = Some mem ->
   load_store_t_bounds m_arg.(memarg_align) (option_projl tp_sx) t ->
-  be_typing C [::BI_load t tp_sx m_arg] (Tf [::T_num T_i32] [::T_num t])
+  Addressing.offset_valid mem.(mt_address_type) m_arg.(memarg_offset) ->
+  be_typing C [::BI_load t tp_sx m_arg]
+    (Tf [::Addressing.address_value_type mem.(mt_address_type)] [::T_num t])
 | bet_load_vec : forall C lv_arg m_arg mem,
   lookup_N (tc_mems C) m_arg.(memarg_memory) = Some mem ->
   load_vec_bounds lv_arg m_arg ->
-  be_typing C [::BI_load_vec lv_arg m_arg] (Tf [::T_num T_i32] [::T_vec T_v128])
+  Addressing.offset_valid mem.(mt_address_type) m_arg.(memarg_offset) ->
+  be_typing C [::BI_load_vec lv_arg m_arg]
+    (Tf [::Addressing.address_value_type mem.(mt_address_type)] [::T_vec T_v128])
 | bet_load_vec_lane : forall C width m_arg x mem,
   lookup_N (tc_mems C) m_arg.(memarg_memory) = Some mem ->
   load_store_vec_lane_bounds width m_arg x ->
-  be_typing C [::BI_load_vec_lane width m_arg x] (Tf [::T_num T_i32; T_vec T_v128] [::T_vec T_v128])
+  Addressing.offset_valid mem.(mt_address_type) m_arg.(memarg_offset) ->
+  be_typing C [::BI_load_vec_lane width m_arg x]
+    (Tf [::Addressing.address_value_type mem.(mt_address_type); T_vec T_v128] [::T_vec T_v128])
 | bet_store : forall C m_arg tp t mem,
   lookup_N (tc_mems C) m_arg.(memarg_memory) = Some mem ->
   load_store_t_bounds m_arg.(memarg_align) tp t ->
-  be_typing C [::BI_store t tp m_arg] (Tf [::T_num T_i32; T_num t] [::])
+  Addressing.offset_valid mem.(mt_address_type) m_arg.(memarg_offset) ->
+  be_typing C [::BI_store t tp m_arg]
+    (Tf [::Addressing.address_value_type mem.(mt_address_type); T_num t] [::])
 | bet_store_vec : forall C m_arg mem,
   lookup_N (tc_mems C) m_arg.(memarg_memory) = Some mem ->
   store_vec_bounds m_arg ->
-  be_typing C [::BI_store_vec m_arg] (Tf [::T_num T_i32; T_vec T_v128] [::])
+  Addressing.offset_valid mem.(mt_address_type) m_arg.(memarg_offset) ->
+  be_typing C [::BI_store_vec m_arg]
+    (Tf [::Addressing.address_value_type mem.(mt_address_type); T_vec T_v128] [::])
 | bet_store_vec_lane : forall C width m_arg x mem,
   lookup_N (tc_mems C) m_arg.(memarg_memory) = Some mem ->
   load_store_vec_lane_bounds width m_arg x ->
-  be_typing C [::BI_store_vec_lane width m_arg x] (Tf [::T_num T_i32; T_vec T_v128] [::])
+  Addressing.offset_valid mem.(mt_address_type) m_arg.(memarg_offset) ->
+  be_typing C [::BI_store_vec_lane width m_arg x]
+    (Tf [::Addressing.address_value_type mem.(mt_address_type); T_vec T_v128] [::])
 | bet_memory_size : forall C x mem,
   lookup_N (tc_mems C) x = Some mem ->
   be_typing C [::BI_memory_size x] (Tf [::] [::Addressing.address_value_type mem.(mt_address_type)])
@@ -363,15 +375,22 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
         [::Addressing.address_value_type mem.(mt_address_type)])
 | bet_memory_fill : forall C x mem,
   lookup_N (tc_mems C) x = Some mem ->
-  be_typing C [::BI_memory_fill x] (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::])
+  be_typing C [::BI_memory_fill x]
+    (Tf [::Addressing.address_value_type mem.(mt_address_type); T_num T_i32;
+           Addressing.address_value_type mem.(mt_address_type)] [::])
 | bet_memory_copy : forall C x y mem_dst mem,
   lookup_N (tc_mems C) x = Some mem_dst ->
   lookup_N (tc_mems C) y = Some mem ->
-  be_typing C [::BI_memory_copy x y] (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::])
+  be_typing C [::BI_memory_copy x y]
+    (Tf [::Addressing.address_value_type mem_dst.(mt_address_type);
+           Addressing.address_value_type mem.(mt_address_type);
+           Addressing.address_value_type
+             (Addressing.copy_address_type mem_dst.(mt_address_type) mem.(mt_address_type))] [::])
 | bet_memory_init : forall C x y mem dat,
   lookup_N (tc_mems C) x = Some mem ->
   lookup_N (tc_datas C) y = Some dat ->
-  be_typing C [::BI_memory_init x y] (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::])
+  be_typing C [::BI_memory_init x y]
+    (Tf [::Addressing.address_value_type mem.(mt_address_type); T_num T_i32; T_num T_i32] [::])
 | bet_data_drop : forall C x dat,
   lookup_N (tc_datas C) x = Some dat ->
   be_typing C [::BI_data_drop x] (Tf [::] [::])

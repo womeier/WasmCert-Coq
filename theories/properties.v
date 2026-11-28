@@ -18,6 +18,13 @@ Lemma value_of_address_type a n :
     Addressing.address_value_type a.
 Proof. destruct a; reflexivity. Qed.
 
+Lemma decoded_address_type a v n :
+  Addressing.address_of_value a v = Some n ->
+  T_num (typeof_num v) = Addressing.address_value_type a.
+Proof.
+  destruct a, v; simpl; intros Hdecode; try discriminate; reflexivity.
+Qed.
+
 Lemma address_of_value_typing `{BlockUpdateMemory} `{host_function_class} s a v n :
   Addressing.address_of_value a v = Some n ->
   value_typing s (VAL_num v) (Addressing.address_value_type a).

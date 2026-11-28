@@ -478,79 +478,103 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
            
 (** memory **)
 | r_load_success :
-  forall s f t bs k marg m hs,
+  forall s f t bs k n marg m hs,
     smem s f.(f_inst) marg.(memarg_memory) = Some m ->
-    load m (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) (tnum_length t) = Some bs ->
-    reduce hs s f [::$VN (VAL_int32 k); AI_basic (BI_load t None marg)] hs s f [::$VN (wasm_deserialise bs t)]
+    Addressing.address_of_value m.(meminst_type).(mt_address_type) k = Some n ->
+    load m n marg.(memarg_offset) (tnum_length t) = Some bs ->
+    reduce hs s f [::$VN k; AI_basic (BI_load t None marg)] hs s f [::$VN (wasm_deserialise bs t)]
 | r_load_failure :
-  forall s f t k marg m hs,
+  forall s f t k n marg m hs,
     smem s f.(f_inst) marg.(memarg_memory) = Some m ->
-    load m (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) (tnum_length t) = None ->
-    reduce hs s f [::$VN (VAL_int32 k); AI_basic (BI_load t None marg)] hs s f [::AI_trap]
+    Addressing.address_of_value m.(meminst_type).(mt_address_type) k = Some n ->
+    load m n marg.(memarg_offset) (tnum_length t) = None ->
+    reduce hs s f [::$VN k; AI_basic (BI_load t None marg)] hs s f [::AI_trap]
 | r_load_packed_success :
-  forall s f t tp k marg m bs sx hs,
+  forall s f t tp k n marg m bs sx hs,
     smem s f.(f_inst) marg.(memarg_memory) = Some m ->
-    load_packed sx m (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) (tp_length tp) (tnum_length t) = Some bs ->
-    reduce hs s f [::$VN (VAL_int32 k); AI_basic (BI_load t (Some (tp, sx)) marg)] hs s f [::$VN (wasm_deserialise bs t)]
+    Addressing.address_of_value m.(meminst_type).(mt_address_type) k = Some n ->
+    load_packed sx m n marg.(memarg_offset) (tp_length tp) (tnum_length t) = Some bs ->
+    reduce hs s f [::$VN k; AI_basic (BI_load t (Some (tp, sx)) marg)] hs s f [::$VN (wasm_deserialise bs t)]
 | r_load_packed_failure :
-  forall s f t tp k marg m sx hs,
+  forall s f t tp k n marg m sx hs,
     smem s f.(f_inst) marg.(memarg_memory) = Some m ->
-    load_packed sx m (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) (tp_length tp) (tnum_length t) = None ->
-    reduce hs s f [::$VN (VAL_int32 k); AI_basic (BI_load t (Some (tp, sx)) marg)] hs s f [::AI_trap]
+    Addressing.address_of_value m.(meminst_type).(mt_address_type) k = Some n ->
+    load_packed sx m n marg.(memarg_offset) (tp_length tp) (tnum_length t) = None ->
+    reduce hs s f [::$VN k; AI_basic (BI_load t (Some (tp, sx)) marg)] hs s f [::AI_trap]
 | r_load_vec_success :
-  forall s f m lvarg marg k v hs,
+  forall s f m lvarg marg k n v hs,
     smem s f.(f_inst) marg.(memarg_memory) = Some m ->
-    load_vec m (Wasm_int.N_of_uint i32m k) lvarg marg = Some v ->
-    reduce hs s f [::$VN (VAL_int32 k); AI_basic (BI_load_vec lvarg marg)] hs s f [::$VV v]
+    Addressing.address_of_value m.(meminst_type).(mt_address_type) k = Some n ->
+    load_vec m n lvarg marg = Some v ->
+    reduce hs s f [::$VN k; AI_basic (BI_load_vec lvarg marg)] hs s f [::$VV v]
 | r_load_vec_failure :
-  forall s f m lvarg marg k hs,
+  forall s f m lvarg marg k n hs,
     smem s f.(f_inst) marg.(memarg_memory) = Some m ->
-    load_vec m (Wasm_int.N_of_uint i32m k) lvarg marg = None ->
-    reduce hs s f [::$VN (VAL_int32 k); AI_basic (BI_load_vec lvarg marg)] hs s f [::AI_trap]
+    Addressing.address_of_value m.(meminst_type).(mt_address_type) k = Some n ->
+    load_vec m n lvarg marg = None ->
+    reduce hs s f [::$VN k; AI_basic (BI_load_vec lvarg marg)] hs s f [::AI_trap]
 | r_load_vec_lane_success :
-  forall s f m width marg x k v v' hs,
+  forall s f m width marg x k n v v' hs,
     smem s f.(f_inst) marg.(memarg_memory) = Some m ->
-    load_vec_lane m (Wasm_int.N_of_uint i32m k) v width marg x = Some v' ->
-    reduce hs s f [::$VN (VAL_int32 k); $VV v; AI_basic (BI_load_vec_lane width marg x)] hs s f [::$VV v']
+    Addressing.address_of_value m.(meminst_type).(mt_address_type) k = Some n ->
+    load_vec_lane m n v width marg x = Some v' ->
+    reduce hs s f [::$VN k; $VV v; AI_basic (BI_load_vec_lane width marg x)] hs s f [::$VV v']
 | r_load_vec_lane_failure :
-  forall s f m width marg x k v hs,
+  forall s f m width marg x k n v hs,
     smem s f.(f_inst) marg.(memarg_memory) = Some m ->
-    load_vec_lane m (Wasm_int.N_of_uint i32m k) v width marg x = None ->
-    reduce hs s f [::$VN (VAL_int32 k); $VV v; AI_basic (BI_load_vec_lane width marg x)] hs s f [::AI_trap]
+    Addressing.address_of_value m.(meminst_type).(mt_address_type) k = Some n ->
+    load_vec_lane m n v width marg x = None ->
+    reduce hs s f [::$VN k; $VV v; AI_basic (BI_load_vec_lane width marg x)] hs s f [::AI_trap]
 | r_store_success :
-  forall t v s f k marg s' hs,
-    smem_store s f.(f_inst) marg.(memarg_memory) (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) v t = Some s' ->
-    reduce hs s f [::$VN (VAL_int32 k); $VN v; AI_basic (BI_store t None marg)] hs s' f [::]
+  forall t v s f k n marg m s' hs,
+    smem s f.(f_inst) marg.(memarg_memory) = Some m ->
+    Addressing.address_of_value m.(meminst_type).(mt_address_type) k = Some n ->
+    smem_store s f.(f_inst) marg.(memarg_memory) n marg.(memarg_offset) v t = Some s' ->
+    reduce hs s f [::$VN k; $VN v; AI_basic (BI_store t None marg)] hs s' f [::]
 | r_store_failure :
-  forall t v s f k marg hs,
-    smem_store s f.(f_inst) marg.(memarg_memory) (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) v t = None ->
-    reduce hs s f [::$VN (VAL_int32 k); $VN v; AI_basic (BI_store t None marg)] hs s f [::AI_trap]
+  forall t v s f k n marg m hs,
+    smem s f.(f_inst) marg.(memarg_memory) = Some m ->
+    Addressing.address_of_value m.(meminst_type).(mt_address_type) k = Some n ->
+    smem_store s f.(f_inst) marg.(memarg_memory) n marg.(memarg_offset) v t = None ->
+    reduce hs s f [::$VN k; $VN v; AI_basic (BI_store t None marg)] hs s f [::AI_trap]
 | r_store_packed_success :
-  forall t v s s' f k marg tp hs,
-    smem_store_packed s f.(f_inst) marg.(memarg_memory) (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) v tp = Some s' ->
+  forall t v s s' f k n marg m tp hs,
+    smem s f.(f_inst) marg.(memarg_memory) = Some m ->
+    Addressing.address_of_value m.(meminst_type).(mt_address_type) k = Some n ->
+    smem_store_packed s f.(f_inst) marg.(memarg_memory) n marg.(memarg_offset) v tp = Some s' ->
     typeof_num v = t ->
-    reduce hs s f [::$VN (VAL_int32 k); $VN v; AI_basic (BI_store t (Some tp) marg)] hs s' f [::]
+    reduce hs s f [::$VN k; $VN v; AI_basic (BI_store t (Some tp) marg)] hs s' f [::]
 | r_store_packed_failure :
-  forall t v s f k marg tp hs,
-    smem_store_packed s f.(f_inst) marg.(memarg_memory) (Wasm_int.N_of_uint i32m k) marg.(memarg_offset) v tp = None ->
+  forall t v s f k n marg m tp hs,
+    smem s f.(f_inst) marg.(memarg_memory) = Some m ->
+    Addressing.address_of_value m.(meminst_type).(mt_address_type) k = Some n ->
+    smem_store_packed s f.(f_inst) marg.(memarg_memory) n marg.(memarg_offset) v tp = None ->
     typeof_num v = t ->
-    reduce hs s f [::$VN (VAL_int32 k); $VN v; AI_basic (BI_store t (Some tp) marg)] hs s f [::AI_trap]
+    reduce hs s f [::$VN k; $VN v; AI_basic (BI_store t (Some tp) marg)] hs s f [::AI_trap]
 | r_store_vec_success :
-  forall s s' f marg k v hs,
-    smem_store_vec s f.(f_inst) (Wasm_int.N_of_uint i32m k) v marg = Some s' ->
-    reduce hs s f [::$VN (VAL_int32 k); $VV v; AI_basic (BI_store_vec marg)] hs s' f [::]
+  forall s s' f marg k n m v hs,
+    smem s f.(f_inst) marg.(memarg_memory) = Some m ->
+    Addressing.address_of_value m.(meminst_type).(mt_address_type) k = Some n ->
+    smem_store_vec s f.(f_inst) n v marg = Some s' ->
+    reduce hs s f [::$VN k; $VV v; AI_basic (BI_store_vec marg)] hs s' f [::]
 | r_store_vec_failure :
-  forall s f marg k v hs,
-    smem_store_vec s f.(f_inst) (Wasm_int.N_of_uint i32m k) v marg = None ->
-    reduce hs s f [::$VN (VAL_int32 k); $VV v; AI_basic (BI_store_vec marg)] hs s f [::AI_trap]
+  forall s f marg k n m v hs,
+    smem s f.(f_inst) marg.(memarg_memory) = Some m ->
+    Addressing.address_of_value m.(meminst_type).(mt_address_type) k = Some n ->
+    smem_store_vec s f.(f_inst) n v marg = None ->
+    reduce hs s f [::$VN k; $VV v; AI_basic (BI_store_vec marg)] hs s f [::AI_trap]
 | r_store_vec_lane_success :
-  forall s s' f width marg x k v hs,
-    smem_store_vec_lane s f.(f_inst) (Wasm_int.N_of_uint i32m k) v width marg x = Some s' ->
-    reduce hs s f [::$VN (VAL_int32 k); $VV v; AI_basic (BI_store_vec_lane width marg x)] hs s' f [::]
+  forall s s' f width marg x k n m v hs,
+    smem s f.(f_inst) marg.(memarg_memory) = Some m ->
+    Addressing.address_of_value m.(meminst_type).(mt_address_type) k = Some n ->
+    smem_store_vec_lane s f.(f_inst) n v width marg x = Some s' ->
+    reduce hs s f [::$VN k; $VV v; AI_basic (BI_store_vec_lane width marg x)] hs s' f [::]
 | r_store_vec_lane_failure :
-  forall s f width marg x k v hs,
-    smem_store_vec_lane s f.(f_inst) (Wasm_int.N_of_uint i32m k) v width marg x = None ->
-    reduce hs s f [::$VN (VAL_int32 k); $VV v; AI_basic (BI_store_vec_lane width marg x)] hs s f [::AI_trap]
+  forall s f width marg x k n m v hs,
+    smem s f.(f_inst) marg.(memarg_memory) = Some m ->
+    Addressing.address_of_value m.(meminst_type).(mt_address_type) k = Some n ->
+    smem_store_vec_lane s f.(f_inst) n v width marg x = None ->
+    reduce hs s f [::$VN k; $VV v; AI_basic (BI_store_vec_lane width marg x)] hs s f [::AI_trap]
 | r_memory_size :
   forall x f m n s hs,
     smem s f.(f_inst) x = Some m ->
@@ -572,120 +596,153 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
     reduce hs s f [::$VN v; AI_basic (BI_memory_grow x)] hs s f
       [::$VN (Addressing.grow_failure mem.(meminst_type).(mt_address_type))]
 | r_memory_fill_bound:
-  forall x s f mem d n v hs,
-    let n_z := Wasm_int.Z_of_uint i32m n in
-    let d_z := Wasm_int.Z_of_uint i32m d in
+  forall x s f mem d n address count v hs,
+    let n_z := Z.of_N count in
+    let d_z := Z.of_N address in
     smem s f.(f_inst) x = Some mem ->
+    Addressing.address_of_value mem.(meminst_type).(mt_address_type) d = Some address ->
+    Addressing.address_of_value mem.(meminst_type).(mt_address_type) n = Some count ->
     (Z.add n_z d_z > Z.of_N (mem_length mem))%Z ->
-    reduce hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); $VN (VAL_int32 n); AI_basic (BI_memory_fill x)]
+    reduce hs s f [::$VN d; $VN (VAL_int32 v); $VN n; AI_basic (BI_memory_fill x)]
            hs s f [::AI_trap]
 | r_memory_fill_return:
-  forall x s f mem d n v hs,
-    let n_z := Wasm_int.Z_of_uint i32m n in
-    let d_z := Wasm_int.Z_of_uint i32m d in
+  forall x s f mem d n address count v hs,
+    let n_z := Z.of_N count in
+    let d_z := Z.of_N address in
     smem s f.(f_inst) x = Some mem ->
+    Addressing.address_of_value mem.(meminst_type).(mt_address_type) d = Some address ->
+    Addressing.address_of_value mem.(meminst_type).(mt_address_type) n = Some count ->
     (Z.add n_z d_z <= Z.of_N (mem_length mem))%Z ->
     (n_z = 0)%Z ->
-    reduce hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); $VN (VAL_int32 n); AI_basic (BI_memory_fill x)]
+    reduce hs s f [::$VN d; $VN (VAL_int32 v); $VN n; AI_basic (BI_memory_fill x)]
            hs s f [::]
 | r_memory_fill_step:
-  forall x s f mem d n d' n' v hs,
-    let n_z := Wasm_int.Z_of_uint i32m n in
-    let d_z := Wasm_int.Z_of_uint i32m d in
+  forall x s f mem d n address count d' n' v hs,
+    let n_z := Z.of_N count in
+    let d_z := Z.of_N address in
     smem s f.(f_inst) x = Some mem ->
+    Addressing.address_of_value mem.(meminst_type).(mt_address_type) d = Some address ->
+    Addressing.address_of_value mem.(meminst_type).(mt_address_type) n = Some count ->
     (Z.add n_z d_z <= Z.of_N (mem_length mem))%Z ->
     (n_z <> 0)%Z ->
-    n' = Wasm_int.int_of_Z i32m (Z.sub n_z 1) ->
-    d' = Wasm_int.int_of_Z i32m (Z.add d_z 1) ->
-    reduce hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); $VN (VAL_int32 n); AI_basic (BI_memory_fill x)]
-      hs s f [::$VN (VAL_int32 d); $VN (VAL_int32 v); AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 x));
-                $VN (VAL_int32 d'); $VN (VAL_int32 v); $VN (VAL_int32 n'); AI_basic (BI_memory_fill x)]
+    n' = Addressing.value_of_address mem.(meminst_type).(mt_address_type) (N.pred count) ->
+    d' = Addressing.value_of_address mem.(meminst_type).(mt_address_type) (N.succ address) ->
+    reduce hs s f [::$VN d; $VN (VAL_int32 v); $VN n; AI_basic (BI_memory_fill x)]
+      hs s f [::$VN d; $VN (VAL_int32 v); AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 x));
+                $VN d'; $VN (VAL_int32 v); $VN n'; AI_basic (BI_memory_fill x)]
 | r_memory_copy_bound :
-  forall x y src dst n mem_dst mem s f hs,
-    let n_z := Wasm_int.Z_of_uint i32m n in
-    let src_z := Wasm_int.Z_of_uint i32m src in
-    let dst_z := Wasm_int.Z_of_uint i32m dst in
+  forall x y src dst n source destination count mem_dst mem s f hs,
+    let n_z := Z.of_N count in
+    let src_z := Z.of_N source in
+    let dst_z := Z.of_N destination in
     smem s f.(f_inst) x = Some mem_dst ->
     smem s f.(f_inst) y = Some mem ->
+    Addressing.address_of_value mem_dst.(meminst_type).(mt_address_type) dst = Some destination ->
+    Addressing.address_of_value mem.(meminst_type).(mt_address_type) src = Some source ->
+    Addressing.address_of_value
+      (Addressing.copy_address_type mem_dst.(meminst_type).(mt_address_type)
+                                   mem.(meminst_type).(mt_address_type)) n = Some count ->
     ((Z.add src_z n_z > Z.of_N (mem_length mem))%Z \/
      (Z.add dst_z n_z > Z.of_N (mem_length mem_dst))%Z) ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy x y)]
+    reduce hs s f [::$VN dst; $VN src; $VN n; AI_basic (BI_memory_copy x y)]
       hs s f [::AI_trap]
 | r_memory_copy_return :
-  forall x y src dst n mem_dst mem s f hs,
-    let n_z := Wasm_int.Z_of_uint i32m n in
-    let src_z := Wasm_int.Z_of_uint i32m src in
-    let dst_z := Wasm_int.Z_of_uint i32m dst in
+  forall x y src dst n source destination count mem_dst mem s f hs,
+    let n_z := Z.of_N count in
+    let src_z := Z.of_N source in
+    let dst_z := Z.of_N destination in
     smem s f.(f_inst) x = Some mem_dst ->
     smem s f.(f_inst) y = Some mem ->
+    Addressing.address_of_value mem_dst.(meminst_type).(mt_address_type) dst = Some destination ->
+    Addressing.address_of_value mem.(meminst_type).(mt_address_type) src = Some source ->
+    Addressing.address_of_value
+      (Addressing.copy_address_type mem_dst.(meminst_type).(mt_address_type)
+                                   mem.(meminst_type).(mt_address_type)) n = Some count ->
     (Z.add src_z n_z <= Z.of_N (mem_length mem))%Z ->
     (Z.add dst_z n_z <= Z.of_N (mem_length mem_dst))%Z ->
     (n_z = 0)%Z ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy x y)]
+    reduce hs s f [::$VN dst; $VN src; $VN n; AI_basic (BI_memory_copy x y)]
       hs s f [::]
 | r_memory_copy_forward :
-  forall x y src dst n mem_dst mem src' dst' n' s f hs,
-    let n_z := Wasm_int.Z_of_uint i32m n in
-    let src_z := Wasm_int.Z_of_uint i32m src in
-    let dst_z := Wasm_int.Z_of_uint i32m dst in
+  forall x y src dst n source destination count mem_dst mem src' dst' n' s f hs,
+    let n_z := Z.of_N count in
+    let src_z := Z.of_N source in
+    let dst_z := Z.of_N destination in
     smem s f.(f_inst) x = Some mem_dst ->
     smem s f.(f_inst) y = Some mem ->
+    Addressing.address_of_value mem_dst.(meminst_type).(mt_address_type) dst = Some destination ->
+    Addressing.address_of_value mem.(meminst_type).(mt_address_type) src = Some source ->
+    Addressing.address_of_value
+      (Addressing.copy_address_type mem_dst.(meminst_type).(mt_address_type)
+                                   mem.(meminst_type).(mt_address_type)) n = Some count ->
     (Z.add src_z n_z <= Z.of_N (mem_length mem))%Z ->
     (Z.add dst_z n_z <= Z.of_N (mem_length mem_dst))%Z ->
     (n_z <> 0)%Z ->
     (dst_z <= src_z)%Z ->
-    n' = Wasm_int.int_of_Z i32m (Z.sub n_z 1) ->
-    src' = Wasm_int.int_of_Z i32m (Z.add src_z 1) ->
-    dst' = Wasm_int.int_of_Z i32m (Z.add dst_z 1) ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy x y)]
-      hs s f [:: $VN (VAL_int32 dst); $VN (VAL_int32 src); AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0 y)); AI_basic (BI_store T_i32 (Some (Tp_i8)) (Build_memarg N0 N0 x));
-              $VN (VAL_int32 dst'); $VN (VAL_int32 src'); $VN (VAL_int32 n'); AI_basic (BI_memory_copy x y)]
+    n' = Addressing.value_of_address
+      (Addressing.copy_address_type mem_dst.(meminst_type).(mt_address_type)
+                                   mem.(meminst_type).(mt_address_type)) (N.pred count) ->
+    src' = Addressing.value_of_address mem.(meminst_type).(mt_address_type) (N.succ source) ->
+    dst' = Addressing.value_of_address mem_dst.(meminst_type).(mt_address_type) (N.succ destination) ->
+    reduce hs s f [::$VN dst; $VN src; $VN n; AI_basic (BI_memory_copy x y)]
+      hs s f [:: $VN dst; $VN src; AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0 y)); AI_basic (BI_store T_i32 (Some (Tp_i8)) (Build_memarg N0 N0 x));
+              $VN dst'; $VN src'; $VN n'; AI_basic (BI_memory_copy x y)]
 | r_memory_copy_backward :
-  forall x y src dst n mem_dst mem src' dst' n' s f hs,
-    let n_z := Wasm_int.Z_of_uint i32m n in
-    let src_z := Wasm_int.Z_of_uint i32m src in
-    let dst_z := Wasm_int.Z_of_uint i32m dst in
+  forall x y src dst n source destination count mem_dst mem src' dst' n' s f hs,
+    let n_z := Z.of_N count in
+    let src_z := Z.of_N source in
+    let dst_z := Z.of_N destination in
     smem s f.(f_inst) x = Some mem_dst ->
     smem s f.(f_inst) y = Some mem ->
+    Addressing.address_of_value mem_dst.(meminst_type).(mt_address_type) dst = Some destination ->
+    Addressing.address_of_value mem.(meminst_type).(mt_address_type) src = Some source ->
+    Addressing.address_of_value
+      (Addressing.copy_address_type mem_dst.(meminst_type).(mt_address_type)
+                                   mem.(meminst_type).(mt_address_type)) n = Some count ->
     (Z.add src_z n_z <= Z.of_N (mem_length mem))%Z ->
     (Z.add dst_z n_z <= Z.of_N (mem_length mem_dst))%Z ->
     (n_z <> 0)%Z ->
     (dst_z > src_z)%Z ->
-    n' = Wasm_int.int_of_Z i32m (Z.sub n_z 1) ->
-    src' = Wasm_int.int_of_Z i32m (Z.add src_z (Z.sub n_z 1)) ->
-    dst' = Wasm_int.int_of_Z i32m (Z.add dst_z (Z.sub n_z 1)) ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_copy x y)]
-      hs s f [:: $VN (VAL_int32 dst'); $VN (VAL_int32 src'); AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0 y)); AI_basic (BI_store T_i32 (Some (Tp_i8)) (Build_memarg N0 N0 x));
-              $VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n'); AI_basic (BI_memory_copy x y)]
+    n' = Addressing.value_of_address
+      (Addressing.copy_address_type mem_dst.(meminst_type).(mt_address_type)
+                                   mem.(meminst_type).(mt_address_type)) (N.pred count) ->
+    src' = Addressing.value_of_address mem.(meminst_type).(mt_address_type) (N.pred (N.add source count)) ->
+    dst' = Addressing.value_of_address mem_dst.(meminst_type).(mt_address_type) (N.pred (N.add destination count)) ->
+    reduce hs s f [::$VN dst; $VN src; $VN n; AI_basic (BI_memory_copy x y)]
+      hs s f [:: $VN dst'; $VN src'; AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0 y)); AI_basic (BI_store T_i32 (Some (Tp_i8)) (Build_memarg N0 N0 x));
+              $VN dst; $VN src; $VN n'; AI_basic (BI_memory_copy x y)]
 | r_memory_init_bound :
-  forall x y src dst n mem data s f hs,
+  forall x y src dst address n mem data s f hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let src_z := Wasm_int.Z_of_uint i32m src in
-    let dst_z := Wasm_int.Z_of_uint i32m dst in
+    let dst_z := Z.of_N address in
     smem s f.(f_inst) x = Some mem ->
+    Addressing.address_of_value mem.(meminst_type).(mt_address_type) dst = Some address ->
     sdata s f.(f_inst) y = Some data ->
     ((Z.add src_z n_z > Z.of_nat (data_size data))%Z \/
      (Z.add dst_z n_z > Z.of_N (mem_length mem))%Z) ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_init x y)]
+    reduce hs s f [::$VN dst; $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_init x y)]
       hs s f [::AI_trap]
 | r_memory_init_return :
-  forall x y src dst n mem data s f hs,
+  forall x y src dst address n mem data s f hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let src_z := Wasm_int.Z_of_uint i32m src in
-    let dst_z := Wasm_int.Z_of_uint i32m dst in
+    let dst_z := Z.of_N address in
     smem s f.(f_inst) x = Some mem ->
+    Addressing.address_of_value mem.(meminst_type).(mt_address_type) dst = Some address ->
     sdata s f.(f_inst) y = Some data ->
     (Z.add src_z n_z <= Z.of_nat (data_size data))%Z ->
     (Z.add dst_z n_z <= Z.of_N (mem_length mem))%Z ->
     (n_z = 0)%Z ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_init x y)]
+    reduce hs s f [::$VN dst; $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_init x y)]
       hs s f [::]
 | r_memory_init_step :
-  forall x y src dst n mem data src' dst' n' b s f hs,
+  forall x y src dst address n mem data src' dst' n' b s f hs,
     let n_z := Wasm_int.Z_of_uint i32m n in
     let src_z := Wasm_int.Z_of_uint i32m src in
-    let dst_z := Wasm_int.Z_of_uint i32m dst in
+    let dst_z := Z.of_N address in
     smem s f.(f_inst) x = Some mem ->
+    Addressing.address_of_value mem.(meminst_type).(mt_address_type) dst = Some address ->
     sdata s f.(f_inst) y = Some data ->
     (Z.add src_z n_z <= Z.of_nat (data_size data))%Z ->
     (Z.add dst_z n_z <= Z.of_N (mem_length mem))%Z ->
@@ -693,10 +750,10 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
     lookup_N data.(datainst_data) (Wasm_int.N_of_uint i32m src) = Some b ->
     n' = Wasm_int.int_of_Z i32m (Z.sub n_z 1) ->
     src' = Wasm_int.int_of_Z i32m (Z.add src_z 1) ->
-    dst' = Wasm_int.int_of_Z i32m (Z.add dst_z 1) ->
-    reduce hs s f [::$VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_init x y)]
-      hs s f [:: $VN (VAL_int32 dst); v_to_e (VAL_num (wasm_deserialise [::b] T_i32)); AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 x));
-              $VN (VAL_int32 dst'); $VN (VAL_int32 src'); $VN (VAL_int32 n'); AI_basic (BI_memory_init x y)]
+    dst' = Addressing.value_of_address mem.(meminst_type).(mt_address_type) (N.succ address) ->
+    reduce hs s f [::$VN dst; $VN (VAL_int32 src); $VN (VAL_int32 n); AI_basic (BI_memory_init x y)]
+      hs s f [:: $VN dst; v_to_e (VAL_num (wasm_deserialise [::b] T_i32)); AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 x));
+              $VN dst'; $VN (VAL_int32 src'); $VN (VAL_int32 n'); AI_basic (BI_memory_init x y)]
 | r_data_drop:
   forall x hs s f s',
     sdata_drop s f.(f_inst) x = Some s' ->

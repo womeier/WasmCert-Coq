@@ -130,8 +130,9 @@ Definition module_data_mode_checker (C: t_context) (dmode: module_datamode): boo
   | MD_passive => true
   | MD_active x offset =>
       match lookup_N C.(tc_mems) x with
-      | Some _ =>
-          (type_checker.b_e_type_checker C offset (Tf nil [::T_num T_i32])) &&
+      | Some mt =>
+          (type_checker.b_e_type_checker C offset
+            (Tf nil [::Addressing.address_value_type mt.(mt_address_type)])) &&
             const_exprs C offset
       | None => false
       end

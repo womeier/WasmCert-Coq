@@ -251,34 +251,40 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
         lookup_N (tc_elems C) x = Some t
   | BI_load t tp_sx marg =>
       exists mt,
-      tf = (Tf [::T_num T_i32] [::T_num t]) /\
+      tf = (Tf [::Addressing.address_value_type mt.(mt_address_type)] [::T_num t]) /\
         lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
-        load_store_t_bounds marg.(memarg_align) (option_projl tp_sx) t
+        load_store_t_bounds marg.(memarg_align) (option_projl tp_sx) t /\
+        Addressing.offset_valid mt.(mt_address_type) marg.(memarg_offset)
   | BI_load_vec lvarg marg =>
       exists mt,
-      tf = (Tf [::T_num T_i32] [::T_vec T_v128]) /\
+      tf = (Tf [::Addressing.address_value_type mt.(mt_address_type)] [::T_vec T_v128]) /\
         lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
-        load_vec_bounds lvarg marg
+        load_vec_bounds lvarg marg /\
+        Addressing.offset_valid mt.(mt_address_type) marg.(memarg_offset)
   | BI_load_vec_lane width marg x =>
       exists mt,
-      tf = (Tf [::T_num T_i32; T_vec T_v128] [::T_vec T_v128]) /\
+      tf = (Tf [::Addressing.address_value_type mt.(mt_address_type); T_vec T_v128] [::T_vec T_v128]) /\
         lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
-        load_store_vec_lane_bounds width marg x
+        load_store_vec_lane_bounds width marg x /\
+        Addressing.offset_valid mt.(mt_address_type) marg.(memarg_offset)
   | BI_store t tp marg =>
       exists mt,
-      tf = (Tf [::T_num T_i32; T_num t] [::]) /\
+      tf = (Tf [::Addressing.address_value_type mt.(mt_address_type); T_num t] [::]) /\
         lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
-        load_store_t_bounds marg.(memarg_align) tp t
+        load_store_t_bounds marg.(memarg_align) tp t /\
+        Addressing.offset_valid mt.(mt_address_type) marg.(memarg_offset)
   | BI_store_vec marg =>
       exists mt,
-      tf = (Tf [::T_num T_i32; T_vec T_v128] [::]) /\
+      tf = (Tf [::Addressing.address_value_type mt.(mt_address_type); T_vec T_v128] [::]) /\
         lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
-        load_vec_bounds LVA_none marg
+        load_vec_bounds LVA_none marg /\
+        Addressing.offset_valid mt.(mt_address_type) marg.(memarg_offset)
   | BI_store_vec_lane width marg x =>
       exists mt,
-      tf = (Tf [::T_num T_i32; T_vec T_v128] [::]) /\
+      tf = (Tf [::Addressing.address_value_type mt.(mt_address_type); T_vec T_v128] [::]) /\
         lookup_N (tc_mems C) marg.(memarg_memory) = Some mt /\
-        load_store_vec_lane_bounds width marg x
+        load_store_vec_lane_bounds width marg x /\
+        Addressing.offset_valid mt.(mt_address_type) marg.(memarg_offset)
   | BI_memory_size x =>
       exists mt,
       tf = (Tf [::] [::Addressing.address_value_type mt.(mt_address_type)]) /\
@@ -290,16 +296,20 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
         lookup_N (tc_mems C) x = Some mt
   | BI_memory_fill x =>
       exists mt,
-      tf = (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::]) /\
+      tf = (Tf [::Addressing.address_value_type mt.(mt_address_type); T_num T_i32;
+                   Addressing.address_value_type mt.(mt_address_type)] [::]) /\
         lookup_N (tc_mems C) x = Some mt
   | BI_memory_copy x y =>
       exists mt_dst mt,
-      tf = (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::]) /\
+      tf = (Tf [::Addressing.address_value_type mt_dst.(mt_address_type);
+                   Addressing.address_value_type mt.(mt_address_type);
+                   Addressing.address_value_type
+                     (Addressing.copy_address_type mt_dst.(mt_address_type) mt.(mt_address_type))] [::]) /\
         lookup_N (tc_mems C) x = Some mt_dst /\
         lookup_N (tc_mems C) y = Some mt
   | BI_memory_init x y =>
       exists mt dt,
-      tf = (Tf [::T_num T_i32; T_num T_i32; T_num T_i32] [::]) /\
+      tf = (Tf [::Addressing.address_value_type mt.(mt_address_type); T_num T_i32; T_num T_i32] [::]) /\
         lookup_N (tc_mems C) x = Some mt /\
         lookup_N (tc_datas C) y = Some dt
   | BI_data_drop x =>

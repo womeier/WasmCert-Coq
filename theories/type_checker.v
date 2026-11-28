@@ -403,49 +403,55 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           end
       | BI_load t tp_sx marg =>
           match lookup_N C.(tc_mems) marg.(memarg_memory) with
-          | Some _ =>
-              if load_store_t_bounds marg.(memarg_align) (option_projl tp_sx) t
-              then type_update ts [::(T_num T_i32)] [::T_num t]
+          | Some mt =>
+              if load_store_t_bounds marg.(memarg_align) (option_projl tp_sx) t &&
+                 Addressing.offset_valid mt.(mt_address_type) marg.(memarg_offset)
+              then type_update ts [::Addressing.address_value_type mt.(mt_address_type)] [::T_num t]
               else None
           | None => None
           end
       | BI_load_vec lvarg marg =>
           match lookup_N C.(tc_mems) marg.(memarg_memory) with
-          | Some _ =>
-              if load_vec_bounds lvarg marg
-              then type_update ts [::(T_num T_i32)] [::T_vec T_v128]
+          | Some mt =>
+              if load_vec_bounds lvarg marg &&
+                 Addressing.offset_valid mt.(mt_address_type) marg.(memarg_offset)
+              then type_update ts [::Addressing.address_value_type mt.(mt_address_type)] [::T_vec T_v128]
               else None
           | None => None
           end
       | BI_load_vec_lane width marg x =>
           match lookup_N C.(tc_mems) marg.(memarg_memory) with
-          | Some _ =>
-              if load_store_vec_lane_bounds width marg x
-              then type_update ts [:: T_vec T_v128; T_num T_i32] [::T_vec T_v128]
+          | Some mt =>
+              if load_store_vec_lane_bounds width marg x &&
+                 Addressing.offset_valid mt.(mt_address_type) marg.(memarg_offset)
+              then type_update ts [::T_vec T_v128; Addressing.address_value_type mt.(mt_address_type)] [::T_vec T_v128]
               else None
           | None => None
           end
       | BI_store t tp marg =>
           match lookup_N C.(tc_mems) marg.(memarg_memory) with
-          | Some _ =>
-              if load_store_t_bounds marg.(memarg_align) tp t
-              then type_update ts [::T_num t; T_num T_i32] [::]
+          | Some mt =>
+              if load_store_t_bounds marg.(memarg_align) tp t &&
+                 Addressing.offset_valid mt.(mt_address_type) marg.(memarg_offset)
+              then type_update ts [::T_num t; Addressing.address_value_type mt.(mt_address_type)] [::]
               else None
           | None => None
           end
       | BI_store_vec marg =>
           match lookup_N C.(tc_mems) marg.(memarg_memory) with
-          | Some _ =>
-              if store_vec_bounds marg
-              then type_update ts [::T_vec T_v128; T_num T_i32] [::]
+          | Some mt =>
+              if store_vec_bounds marg &&
+                 Addressing.offset_valid mt.(mt_address_type) marg.(memarg_offset)
+              then type_update ts [::T_vec T_v128; Addressing.address_value_type mt.(mt_address_type)] [::]
               else None
           | None => None
           end
       | BI_store_vec_lane width marg x =>
           match lookup_N C.(tc_mems) marg.(memarg_memory) with
-          | Some _ =>
-              if load_store_vec_lane_bounds width marg x
-              then type_update ts [::T_vec T_v128; T_num T_i32] [::]
+          | Some mt =>
+              if load_store_vec_lane_bounds width marg x &&
+                 Addressing.offset_valid mt.(mt_address_type) marg.(memarg_offset)
+              then type_update ts [::T_vec T_v128; Addressing.address_value_type mt.(mt_address_type)] [::]
               else None
           | None => None
           end
@@ -464,22 +470,28 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           end
       | BI_memory_fill x =>
           match lookup_N C.(tc_mems) x with
-          | Some _ =>
-              type_update ts [::(T_num T_i32); (T_num T_i32); (T_num T_i32)] nil
+          | Some mt =>
+              type_update ts [::Addressing.address_value_type mt.(mt_address_type);
+                T_num T_i32; Addressing.address_value_type mt.(mt_address_type)] nil
           | None => None
           end
       | BI_memory_copy x y =>
           match lookup_N C.(tc_mems) x, lookup_N C.(tc_mems) y with
-          | Some _, Some _ =>
-              type_update ts [::(T_num T_i32); (T_num T_i32); (T_num T_i32)] nil
+          | Some mt_dst, Some mt_src =>
+              type_update ts
+                [::Addressing.address_value_type
+                     (Addressing.copy_address_type mt_dst.(mt_address_type) mt_src.(mt_address_type));
+                   Addressing.address_value_type mt_src.(mt_address_type);
+                   Addressing.address_value_type mt_dst.(mt_address_type)] nil
           | _, _ => None
           end
       | BI_memory_init x y =>
           match lookup_N C.(tc_mems) x with
-          | Some _ =>
+          | Some mt =>
               match lookup_N C.(tc_datas) y with
               | Some _ =>
-                  type_update ts [::(T_num T_i32); (T_num T_i32); (T_num T_i32)] nil
+                  type_update ts [::T_num T_i32; T_num T_i32;
+                    Addressing.address_value_type mt.(mt_address_type)] nil
               | None => None
               end
           | None => None

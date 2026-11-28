@@ -174,6 +174,11 @@ Qed.
 Definition offset_valid (a: address_type) (offset: N) : bool :=
   N.ltb offset (address_bound a).
 
+Lemma offset_valid_zero a : is_true (offset_valid a 0).
+Proof. destruct a; vm_compute; reflexivity. Qed.
+
+#[global] Hint Resolve offset_valid_zero : core.
+
 Definition range_valid (start len size: N) : bool :=
   N.leb (start + len) size.
 

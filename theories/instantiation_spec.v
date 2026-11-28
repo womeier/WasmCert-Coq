@@ -338,7 +338,8 @@ Definition datamode_valid (c: t_context) (dmode: module_datamode) : Prop :=
   | MD_active midx es =>
       exists memtype,
       lookup_N c.(tc_mems) midx = Some memtype /\
-      typing.be_typing c es (Tf nil [::T_num T_i32]) /\
+      typing.be_typing c es
+        (Tf nil [::Addressing.address_value_type memtype.(mt_address_type)]) /\
       const_exprs c es
   end.
 

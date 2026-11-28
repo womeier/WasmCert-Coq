@@ -570,7 +570,32 @@ Proof.
     econstructor; first by eauto.
     + by eauto.
      + rewrite_context_agree. congruence.
-  (* memory copy: both memory types may change independently. *)
+  (* Memory accesses retain both address width and offset validity. *)
+  - destruct (context_agree_mem_type Hext H) as [mt [Hnth Hagree]].
+    unfold mem_agree in Hagree; move/eqP in Hagree. rewrite Hagree.
+    eapply bet_load with (mem := mt); eauto.
+    unfold Addressing.offset_valid in *. by rewrite <- Hagree.
+  - destruct (context_agree_mem_type Hext H) as [mt [Hnth Hagree]].
+    unfold mem_agree in Hagree; move/eqP in Hagree. rewrite Hagree.
+    eapply bet_load_vec with (mem := mt); eauto.
+    unfold Addressing.offset_valid in *. by rewrite <- Hagree.
+  - destruct (context_agree_mem_type Hext H) as [mt [Hnth Hagree]].
+    unfold mem_agree in Hagree; move/eqP in Hagree. rewrite Hagree.
+    eapply bet_load_vec_lane with (mem := mt); eauto.
+    unfold Addressing.offset_valid in *. by rewrite <- Hagree.
+  - destruct (context_agree_mem_type Hext H) as [mt [Hnth Hagree]].
+    unfold mem_agree in Hagree; move/eqP in Hagree. rewrite Hagree.
+    eapply bet_store with (mem := mt); eauto.
+    unfold Addressing.offset_valid in *. by rewrite <- Hagree.
+  - destruct (context_agree_mem_type Hext H) as [mt [Hnth Hagree]].
+    unfold mem_agree in Hagree; move/eqP in Hagree. rewrite Hagree.
+    eapply bet_store_vec with (mem := mt); eauto.
+    unfold Addressing.offset_valid in *. by rewrite <- Hagree.
+  - destruct (context_agree_mem_type Hext H) as [mt [Hnth Hagree]].
+    unfold mem_agree in Hagree; move/eqP in Hagree. rewrite Hagree.
+    eapply bet_store_vec_lane with (mem := mt); eauto.
+    unfold Addressing.offset_valid in *. by rewrite <- Hagree.
+  (* memory size *)
   - destruct (context_agree_mem_type Hext H) as [mt [Hnth Hagree]].
     unfold mem_agree in Hagree; move/eqP in Hagree.
     rewrite Hagree. by eapply bet_memory_size.
@@ -578,10 +603,22 @@ Proof.
   - destruct (context_agree_mem_type Hext H) as [mt [Hnth Hagree]].
     unfold mem_agree in Hagree; move/eqP in Hagree.
     rewrite Hagree. by eapply bet_memory_grow.
+  (* memory fill *)
+  - destruct (context_agree_mem_type Hext H) as [mt [Hnth Hagree]].
+    unfold mem_agree in Hagree; move/eqP in Hagree.
+    rewrite Hagree. by eapply bet_memory_fill.
   (* memory copy: both memory types may change independently. *)
   - destruct (context_agree_mem_type Hext H) as [mt_dst [Hdst Hagree_dst]].
     destruct (context_agree_mem_type Hext H0) as [mt_src [Hsrc Hagree_src]].
+    unfold mem_agree in Hagree_dst, Hagree_src.
+    move/eqP in Hagree_dst; move/eqP in Hagree_src.
+    rewrite Hagree_dst Hagree_src.
     by eapply bet_memory_copy; eauto.
+  (* memory init *)
+  - destruct (context_agree_mem_type Hext H) as [mt [Hnth Hagree]].
+    unfold mem_agree in Hagree; move/eqP in Hagree.
+    rewrite Hagree. eapply bet_memory_init; eauto.
+    by rewrite_context_agree.
 Qed.
 
 (* Two agreeing contexts respect typing of each other *)
@@ -1987,7 +2024,8 @@ derived from the two transitive pairs on the suffixes. Stated as an individual l
   - (* Memory copy 1 *)
     destruct mem.
     remove_bools_options.
-    rewrite -cat1s; apply et_composition' with (t2s := [::T_num T_i32; T_num T_i32]).
+    rewrite -cat1s; apply et_composition' with
+      (t2s := [::Addressing.address_value_type mem_dst.(meminst_type).(mt_address_type); T_num T_i32]).
     { resolve_e_typing.
       simplify_lists.
       apply instr_subtyping_weaken; by resolve_subtyping.
@@ -1996,7 +2034,8 @@ derived from the two transitive pairs on the suffixes. Stated as an individual l
   - (* Memory copy 2 *)
     destruct mem.
     remove_bools_options.
-    rewrite -cat1s; apply et_composition' with (t2s := [::T_num T_i32; T_num T_i32]).
+    rewrite -cat1s; apply et_composition' with
+      (t2s := [::Addressing.address_value_type mem_dst.(meminst_type).(mt_address_type); T_num T_i32]).
     { resolve_e_typing.
       simplify_lists.
       apply instr_subtyping_weaken; by resolve_subtyping.

@@ -314,7 +314,7 @@ Definition parse_alignment_exponent {n} : byte_parser N n :=
   parse_u32_as_N.
 
 Definition parse_static_offset {n} : byte_parser N n :=
-  parse_u32_as_N.
+  parse_u64_as_N.
 
 Definition parse_memarg {n} : byte_parser memarg n :=
   parse_alignment_exponent >>= (fun a =>
@@ -899,7 +899,14 @@ Definition parse_table_type {n} : byte_parser table_type n :=
                        tt_address_type := AT_i32 |}) <$> parse_reference_type) <*> parse_limits.
 
 Definition parse_memory_type {n} : byte_parser memory_type n :=
-  memory_type32 <$> parse_limits.
+  (memory_type32 <$> parse_limits) <|>
+  (exact_byte x04 &>
+    ((fun min => {| mt_limits := {| lim_min := min; lim_max := None |};
+                    mt_address_type := AT_i64 |}) <$> parse_u64_as_N)) <|>
+  (exact_byte x05 &>
+    ((fun min max => {| mt_limits := {| lim_min := min; lim_max := Some max |};
+                        mt_address_type := AT_i64 |}) <$> parse_u64_as_N)
+      <*> parse_u64_as_N).
 
 Definition parse_mut {n} : byte_parser mutability n :=
   exact_byte x00 $> MUT_const <|>

@@ -7,7 +7,22 @@
 (test
   (name addressing_extracted)
   (modules addressing_extracted)
-  (libraries wasmcert_extracted parray zarith))
+   (libraries wasmcert_extracted parray zarith))
+
+(rule
+ (target memory64_binary.wast)
+ (deps memory64_binary.py)
+ (action
+  (with-stdout-to %{target}
+   (run python3 %{dep:memory64_binary.py}))))
+
+(rule
+ (alias runtest)
+ (deps memory64_binary.wast ../run_wast.sh)
+ (action
+  (setenv EXE %{exe:../src/wasm_coq_interpreter.exe}
+   (setenv JOBS 1
+    (run bash %{dep:../run_wast.sh} . memory64_binary)))))
 
 (rule
  (target memory_capacity_binary.wast)

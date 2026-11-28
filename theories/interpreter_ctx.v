@@ -485,6 +485,62 @@ Ltac unfold_frame_type Hftype :=
   let Hvaltype := fresh "Hvaltype" in
   destruct Hftype as [ts0 [-> Hvaltype]]; simpl in *.
 
+(* Resolve the selected memory before decoding its address operand.  Failure
+   certificates use the actual core context/store correspondence. *)
+Ltac lookup_memory s fc x mem Hmemory :=
+  destruct (smem s fc.(FC_frame).(f_inst) x) as [mem|] eqn:Hmemory;
+  [ idtac |
+    resolve_invalid_typing;
+    match goal with Hframe: frame_typing _ _ _ |- _ => unfold_frame_type Hframe end;
+    match goal with
+    | Hit: inst_typing s _ = Some ?C,
+      Hlookup: lookup_N (tc_mems ?C) x = Some ?mt |- _ =>
+        destruct (inst_typing_mem_lookup_inv Hit Hlookup) as [a [Htype Hindex]];
+        unfold smem in Hmemory; rewrite Hindex in Hmemory;
+        unfold ext_mem_typing in Htype;
+        destruct (lookup_N (s_mems s) a); discriminate
+    end ].
+
+Ltac decode_memory_address s fc x mem v Hmemory address Haddress :=
+  destruct (Addressing.address_of_value mem.(meminst_type).(mt_address_type) v)
+    as [address|] eqn:Haddress;
+  [ idtac |
+    resolve_invalid_typing;
+    match goal with Hframe: frame_typing _ _ _ |- _ => unfold_frame_type Hframe end;
+    match goal with
+    | Hit: inst_typing s _ = Some ?C,
+      Hlookup: lookup_N (tc_mems ?C) x = Some ?mt |- _ =>
+        pose proof (smem_type_context Hit Hlookup Hmemory) as Hmt;
+        subst mt
+    end;
+    destruct (mt_address_type (meminst_type mem)); destruct v;
+      cbn [Addressing.address_of_value] in Haddress; try discriminate;
+      unfold Addressing.address_value_type in *;
+      resolve_invalid_value ].
+
+Ltac decode_memory_copy_length s fc x y mem_dst mem_src v Hdst Hsrc count Hcount :=
+  destruct (Addressing.address_of_value
+    (Addressing.copy_address_type mem_dst.(meminst_type).(mt_address_type)
+                                 mem_src.(meminst_type).(mt_address_type)) v)
+    as [count|] eqn:Hcount;
+  [ idtac |
+    resolve_invalid_typing;
+    match goal with Hframe: frame_typing _ _ _ |- _ => unfold_frame_type Hframe end;
+    match goal with
+    | Hit: inst_typing s _ = Some ?C,
+      Hd: lookup_N (tc_mems ?C) x = Some ?mt_dst,
+      Hs: lookup_N (tc_mems ?C) y = Some ?mt_src |- _ =>
+        pose proof (smem_type_context Hit Hd Hdst) as Hmt_dst;
+        pose proof (smem_type_context Hit Hs Hsrc) as Hmt_src;
+        try subst mt_dst; try subst mt_src
+    end;
+    destruct (mt_address_type (meminst_type mem_dst));
+    destruct (mt_address_type (meminst_type mem_src)); destruct v;
+      cbn [Addressing.address_of_value Addressing.copy_address_type] in Hcount;
+      try discriminate;
+      unfold Addressing.address_value_type, Addressing.copy_address_type in *;
+      resolve_invalid_value ].
+
 Notation "$u32oz v" := (Wasm_int.int_of_Z i32m v) (at level 90).
 Notation "$zou32 v" := (Wasm_int.Z_of_uint i32m v) (at level 90).
 Notation "$nou32 v" := (Wasm_int.N_of_uint i32m v) (at level 90).
@@ -1211,13 +1267,12 @@ the condition that all values should live in the operand stack. *)
 
     (* AI_basic (BI_load t ops (Some (tp, sx)) marg) *)
     - destruct vs0 as [|v vs0]; first by no_args.
-      assert_i32 v.
-      (* VAL_int32 v :: ves' *)
-      destruct (smem s fc.(FC_frame).(f_inst) marg.(memarg_memory)) as [mem_s_j|] eqn:?.
-      (* Some mem_s_j *)
+      assert_value_num v.
+      lookup_memory s fc (memarg_memory marg) mem_s_j Hmemory.
+      decode_memory_address s fc (memarg_memory marg) mem_s_j v Hmemory address Haddress.
       { destruct ops as [[tp sx] | ].
         (* Some (tp, sx) *)
-        - destruct (load_packed sx (mem_s_j) ($nou32 v) marg.(memarg_offset) (tp_length tp) (tnum_length t)) as [bs|] eqn:Hload.
+        - destruct (load_packed sx mem_s_j address marg.(memarg_offset) (tp_length tp) (tnum_length t)) as [bs|] eqn:Hload.
           (* Some bs *)
           + apply <<hs, (s, (fc, lcs) :: ccs', (VAL_num (wasm_deserialise bs t) :: vs0, es0), None), d>> => //.
             resolve_reduce_ctx vs0 es0.
@@ -1226,7 +1281,7 @@ the condition that all values should live in the operand stack. *)
           + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
             resolve_reduce_ctx vs0 es0.
             by eapply r_load_packed_failure; subst; eauto.
-        - destruct (load (mem_s_j) ($nou32 v) marg.(memarg_offset) (tnum_length t)) as [bs|] eqn:Hload.
+        - destruct (load mem_s_j address marg.(memarg_offset) (tnum_length t)) as [bs|] eqn:Hload.
           (* Some bs *)
           + apply <<hs, (s, (fc, lcs) :: ccs', (VAL_num (wasm_deserialise bs t) :: vs0, es0), None), d>> => //.
             resolve_reduce_ctx vs0 es0.
@@ -1236,23 +1291,13 @@ the condition that all values should live in the operand stack. *)
             resolve_reduce_ctx vs0 es0.
             by eapply r_load_failure; subst; eauto.
       }
-      (* None *)
-      { resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        { inst_typing_lookup; by remove_bools_options. }
-        { eapply inst_typing_mem_lookup_inv in Hconjl0 as [? [??]]; eauto.
-          by simplify_multieq.
-        }
-      }
 
     (* AI_basic (BI_load_vec lvarg marg) *)
     - destruct vs0 as [|v vs0]; first by no_args.
-      assert_i32 v.
-      (* VAL_int32 v :: ves' *)
-      destruct (smem s fc.(FC_frame).(f_inst) marg.(memarg_memory)) as [mem_s_j|] eqn:?.
-      (* Some mem_s_j *)
-      { destruct (load_vec mem_s_j ($nou32 v) lvarg marg) as [v' | ] eqn:Hload_vec.
+      assert_value_num v.
+      lookup_memory s fc (memarg_memory marg) mem_s_j Hmemory.
+      decode_memory_address s fc (memarg_memory marg) mem_s_j v Hmemory address Haddress.
+      { destruct (load_vec mem_s_j address lvarg marg) as [v' | ] eqn:Hload_vec.
         - apply <<hs, (s, (fc, lcs) :: ccs', (VAL_vec v' :: vs0, es0), None), d>> => //.
           resolve_reduce_ctx vs0 es0.
           by eapply r_load_vec_success; subst; eauto.
@@ -1260,24 +1305,14 @@ the condition that all values should live in the operand stack. *)
           resolve_reduce_ctx vs0 es0.
           by eapply r_load_vec_failure; subst; eauto.
       }
-      (* None *)
-      { resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        { inst_typing_lookup; by remove_bools_options. }
-        { eapply inst_typing_mem_lookup_inv in Hconjl0 as [? [??]]; eauto.
-          by simplify_multieq.
-        }
-      }
 
     (* AI_basic (BI_load_vec_lane width marg x) *)
     - destruct vs0 as [|v2 [|v1 vs0]]; try by no_args.
-      assert_i32 v1.
+      assert_value_num v1.
       assert_value_vec v2.
-      (* VAL_int32 v :: ves' *)
-      destruct (smem s fc.(FC_frame).(f_inst) marg.(memarg_memory)) as [mem_s_j|] eqn:?.
-      (* Some mem_s_j *)
-      { destruct (load_vec_lane mem_s_j ($nou32 v1) v2 width marg x) as [v' | ] eqn:Hload_vec_lane.
+      lookup_memory s fc (memarg_memory marg) mem_s_j Hmemory.
+      decode_memory_address s fc (memarg_memory marg) mem_s_j v1 Hmemory address Haddress.
+      { destruct (load_vec_lane mem_s_j address v2 width marg x) as [v' | ] eqn:Hload_vec_lane.
         - apply <<hs, (s, (fc, lcs) :: ccs', (VAL_vec v' :: vs0, es0), None), d>> => //.
           resolve_reduce_ctx vs0 es0.
           by eapply r_load_vec_lane_success; subst; eauto.
@@ -1285,24 +1320,17 @@ the condition that all values should live in the operand stack. *)
           resolve_reduce_ctx vs0 es0.
           by eapply r_load_vec_lane_failure; subst; eauto.
       }
-      (* None *)
-      { resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        { inst_typing_lookup; by remove_bools_options. }
-        { eapply inst_typing_mem_lookup_inv in Hconjl0 as [? [??]]; eauto.
-          by simplify_multieq.
-        }
-      }
 
     (* AI_basic (BI_store t (Some tp) a off) *)
     - destruct vs0 as [|v2 [|v1 vs0]]; try by no_args.
-      assert_i32 v1.
+      assert_value_num v1.
       assert_value_num v2.
       destruct (typeof_num v2 == t) eqn:Heq; move/eqP in Heq; last by discriminate_value_type; apply num_subtyping in H; inversion H; subst.
+      lookup_memory s fc (memarg_memory marg) mem_s_j Hmemory.
+      decode_memory_address s fc (memarg_memory marg) mem_s_j v1 Hmemory address Haddress.
       destruct op as [tp | ].
       (* packed *)
-      + destruct (smem_store_packed s fc.(FC_frame).(f_inst) marg.(memarg_memory) ($nou32 v1) marg.(memarg_offset) v2 tp) as [s' | ] eqn:Hsmem.
+      + destruct (smem_store_packed s fc.(FC_frame).(f_inst) marg.(memarg_memory) address marg.(memarg_offset) v2 tp) as [s' | ] eqn:Hsmem.
         * apply <<hs, (s', (fc, lcs) :: ccs', (vs0, es0), None), d>> => //.
           resolve_reduce_ctx vs0 es0.
           by eapply r_store_packed_success; subst; eauto.
@@ -1311,7 +1339,7 @@ the condition that all values should live in the operand stack. *)
           resolve_reduce_ctx vs0 es0.
           by eapply r_store_packed_failure; subst; eauto.
       (* None *)
-      + destruct (smem_store s fc.(FC_frame).(f_inst) marg.(memarg_memory) ($nou32 v1) marg.(memarg_offset) v2 t) as [s' | ] eqn:Hsmem.
+      + destruct (smem_store s fc.(FC_frame).(f_inst) marg.(memarg_memory) address marg.(memarg_offset) v2 t) as [s' | ] eqn:Hsmem.
         * apply <<hs, (s', (fc, lcs) :: ccs', (vs0, es0), None), d>> => //.
           resolve_reduce_ctx vs0 es0.
           by eapply r_store_success; subst; eauto.
@@ -1322,9 +1350,11 @@ the condition that all values should live in the operand stack. *)
           
     (* AI_basic (BI_store_vec marg) *)
     - destruct vs0 as [|v2 [|v1 vs0]]; try by no_args.
-      assert_i32 v1.
+      assert_value_num v1.
       assert_value_vec v2.
-      destruct (smem_store_vec s fc.(FC_frame).(f_inst) ($nou32 v1) v2 marg) as [s' | ] eqn:Hstore_vec.
+      lookup_memory s fc (memarg_memory marg) mem_s_j Hmemory.
+      decode_memory_address s fc (memarg_memory marg) mem_s_j v1 Hmemory address Haddress.
+      destruct (smem_store_vec s fc.(FC_frame).(f_inst) address v2 marg) as [s' | ] eqn:Hstore_vec.
       - apply <<hs, (s', (fc, lcs) :: ccs', (vs0, es0), None), d>> => //.
         resolve_reduce_ctx vs0 es0.
         by eapply r_store_vec_success; subst; eauto.
@@ -1334,9 +1364,11 @@ the condition that all values should live in the operand stack. *)
         
     (* AI_basic (BI_store_vec_lane width marg x) *)
     - destruct vs0 as [|v2 [|v1 vs0]]; try by no_args.
-      assert_i32 v1.
+      assert_value_num v1.
       assert_value_vec v2.
-      destruct (smem_store_vec_lane s fc.(FC_frame).(f_inst) ($nou32 v1) v2 width marg x) as [s' | ] eqn:Hstore_vec_lane.
+      lookup_memory s fc (memarg_memory marg) mem_s_j Hmemory.
+      decode_memory_address s fc (memarg_memory marg) mem_s_j v1 Hmemory address Haddress.
+      destruct (smem_store_vec_lane s fc.(FC_frame).(f_inst) address v2 width marg x) as [s' | ] eqn:Hstore_vec_lane.
       - apply <<hs, (s', (fc, lcs) :: ccs', (vs0, es0), None), d>> => //.
         resolve_reduce_ctx vs0 es0.
         by eapply r_store_vec_lane_success; subst; eauto.
@@ -1408,19 +1440,19 @@ the condition that all values should live in the operand stack. *)
 
     (* AI_basic BI_memory_fill *)
     - destruct vs0 as [|v3 [|v2 [|v1 vs0]]]; try by no_args.
-      (* Takes i32; i32; i32 *)
-      assert_i32 v3.
+      assert_value_num v3.
       assert_i32 v2.
-      assert_i32 v1.
-      destruct (smem s fc.(FC_frame).(f_inst) x) as [mem|] eqn:Hsmem.
-      (* Some *)
-      + destruct (Z.ltb (Z.of_N (mem_length mem)) (Z.add ($zou32 v1) ($zou32 v3))) eqn:Hlt; move/Z.ltb_spec0 in Hlt.
+      assert_value_num v1.
+      lookup_memory s fc x selected_mem Hsmem.
+      decode_memory_address s fc x selected_mem v1 Hsmem address Hdst.
+      decode_memory_address s fc x selected_mem v3 Hsmem byte_count Hcount.
+      destruct (Z.ltb (Z.of_N (mem_length selected_mem)) (Z.add (Z.of_N address) (Z.of_N byte_count))) eqn:Hlt; move/Z.ltb_spec0 in Hlt.
         (* true *)
         * apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
           resolve_reduce_ctx vs0 es0.
           by eapply r_memory_fill_bound; eauto; lias.
         (* false *)
-        * destruct (Z.eqb ($zou32 v3) Z0) eqn:Heq0; move/Z.eqb_spec in Heq0.
+        * destruct (Z.eqb (Z.of_N byte_count) Z0) eqn:Heq0; move/Z.eqb_spec in Heq0.
           (* Return *)
           { apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), None), d>> => //.
             resolve_reduce_ctx vs0 es0.
@@ -1428,96 +1460,75 @@ the condition that all values should live in the operand stack. *)
           }
           (* Step *)
           { apply <<hs, (s, (fc, lcs) :: ccs',
-                          ((VAL_num (VAL_int32 v2)) :: (VAL_num (VAL_int32 v1)) :: vs0,
-                            [::$VN (VAL_int32 ($u32oz (Z.add ($zou32 v1) 1%Z)));
+                          ((VAL_num (VAL_int32 v2)) :: (VAL_num v1) :: vs0,
+                            [::$VN (Addressing.value_of_address selected_mem.(meminst_type).(mt_address_type) (N.succ address));
                              $VN (VAL_int32 v2);
-                             $VN (VAL_int32 ($u32oz (Z.sub ($zou32 v3) 1%Z)));
+                             $VN (Addressing.value_of_address selected_mem.(meminst_type).(mt_address_type) (N.pred byte_count));
                             AI_basic (BI_memory_fill x)] ++ es0),
                           Some (AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 x)))), d>> => //.
             resolve_reduce_ctx vs0 es0.
             by eapply r_memory_fill_step; eauto; lias.
           }
-      (* None *)
-      + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        { eapply inst_typing_mem_lookup_inv in Hconjr as [? [Hextmt ?]]; eauto.
-          unfold ext_mem_typing in Hextmt; remove_bools_options.
-          by simplify_multieq.
-        }
-        { eapply inst_typing_mem_lookup_inv in Hconjr as [? [??]]; eauto.
-          by simplify_multieq.
-        }
         
     (* AI_basic BI_memory_copy *)
     - destruct vs0 as [|n [|src [|dst vs0]]]; try by no_args.
-      (* Takes i32; i32; i32 *)
-      assert_i32 n.
-      assert_i32 src.
-      assert_i32 dst.
-      destruct (smem s fc.(FC_frame).(f_inst) x) as [mem_dst|] eqn:Hsmem_dst.
-      2: { resolve_invalid_typing.
-           unfold_frame_type Hftype.
-           unfold_store_operations.
-           { eapply inst_typing_mem_lookup_inv in Hconjl0 as [? [Hextmt ?]]; eauto.
-             unfold ext_mem_typing in Hextmt; remove_bools_options.
-             by simplify_multieq.
-           }
-           { eapply inst_typing_mem_lookup_inv in Hconjl0 as [? [??]]; eauto.
-             by simplify_multieq.
-           }
-      }
-      destruct (smem s fc.(FC_frame).(f_inst) y) as [mem|] eqn:Hsmem.
-      (* Some *)
-      + destruct (Z.ltb (Z.of_N (mem_length mem)) (($zou32 src) + ($zou32 n))) eqn:Hboundy; move/Z.ltb_spec0 in Hboundy.
+      assert_value_num n.
+      assert_value_num src.
+      assert_value_num dst.
+      lookup_memory s fc x mem_dst Hsmem_dst.
+      lookup_memory s fc y source_mem Hsmem.
+      decode_memory_address s fc x mem_dst dst Hsmem_dst destination Hdst.
+      decode_memory_address s fc y source_mem src Hsmem source Hsrc.
+      decode_memory_copy_length s fc x y mem_dst source_mem n Hsmem_dst Hsmem byte_count Hcount.
+      destruct (Z.ltb (Z.of_N (mem_length source_mem)) (Z.of_N source + Z.of_N byte_count)) eqn:Hboundy; move/Z.ltb_spec0 in Hboundy.
         (* y Out of bound *)
         { apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
           resolve_reduce_ctx vs0 es0.
           by eapply r_memory_copy_bound; eauto; lias.
         }
-        destruct (Z.ltb (Z.of_N (mem_length mem_dst)) (($zou32 dst) + ($zou32 n))) eqn:Hboundx; move/Z.ltb_spec0 in Hboundx.
+        destruct (Z.ltb (Z.of_N (mem_length mem_dst)) (Z.of_N destination + Z.of_N byte_count)) eqn:Hboundx; move/Z.ltb_spec0 in Hboundx.
         (* x Out of bound *)
         { apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
           resolve_reduce_ctx vs0 es0.
           by eapply r_memory_copy_bound; eauto; lias.
         }
         (* In bound for both memories *)
-        { destruct (Z.eqb ($zou32 n) Z0)%Z eqn:Hn0; move/Z.eqb_spec in Hn0; simpl in *; subst.
+        { destruct (Z.eqb (Z.of_N byte_count) Z0)%Z eqn:Hn0; move/Z.eqb_spec in Hn0; simpl in *; subst.
           (* Return *)
           { apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), None), d>> => //.
             resolve_reduce_ctx vs0 es0.
             by eapply r_memory_copy_return; eauto; simpl in *; lias.
           }
-          destruct (Z.leb ($zou32 dst) ($zou32 src)) eqn:Hdir; move/Z.leb_spec0 in Hdir.
+          destruct (Z.leb (Z.of_N destination) (Z.of_N source)) eqn:Hdir; move/Z.leb_spec0 in Hdir.
           (* copy -- forward *)
           { apply <<hs, (s, (fc, lcs) :: ccs',
-                          ((VAL_num (VAL_int32 src)) :: (VAL_num (VAL_int32 dst)) :: vs0,
-                            [::(AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 x))); $VN (VAL_int32 ($u32oz (Z.add ($zou32 dst) 1))); $VN (VAL_int32 ($u32oz (Z.add ($zou32 src) 1%Z))); $VN (VAL_int32 ($u32oz (Z.sub ($zou32 n) 1))); AI_basic (BI_memory_copy x y)] ++ es0),
+                          ((VAL_num src) :: (VAL_num dst) :: vs0,
+                            [::AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 x));
+                               $VN (Addressing.value_of_address mem_dst.(meminst_type).(mt_address_type) (N.succ destination));
+                               $VN (Addressing.value_of_address source_mem.(meminst_type).(mt_address_type) (N.succ source));
+                               $VN (Addressing.value_of_address
+                                 (Addressing.copy_address_type mem_dst.(meminst_type).(mt_address_type)
+                                                              source_mem.(meminst_type).(mt_address_type)) (N.pred byte_count));
+                               AI_basic (BI_memory_copy x y)] ++ es0),
                           Some (AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0 y)))), d>> => //.
             resolve_reduce_ctx vs0 es0.
             by eapply r_memory_copy_forward; eauto; simpl in *; lias.
           }
           (* copy -- backward *)
           { apply <<hs, (s, (fc, lcs) :: ccs',
-                          ((VAL_num (VAL_int32 ($u32oz (Z.add ($zou32 src) (Z.sub ($zou32 n) 1))))) ::
-                             (VAL_num (VAL_int32 ($u32oz (Z.add ($zou32 dst) (Z.sub ($zou32 n) 1))))) ::
+                          ((VAL_num (Addressing.value_of_address source_mem.(meminst_type).(mt_address_type) (N.pred (N.add source byte_count)))) ::
+                             (VAL_num (Addressing.value_of_address mem_dst.(meminst_type).(mt_address_type) (N.pred (N.add destination byte_count)))) ::
                              vs0,
-                            [::(AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 x))); $VN (VAL_int32 dst); $VN (VAL_int32 src); $VN (VAL_int32 ($u32oz (Z.sub ($zou32 n) 1%Z))); AI_basic (BI_memory_copy x y)] ++ es0),
+                            [::AI_basic (BI_store T_i32 (Some Tp_i8) (Build_memarg N0 N0 x));
+                               $VN dst; $VN src;
+                               $VN (Addressing.value_of_address
+                                 (Addressing.copy_address_type mem_dst.(meminst_type).(mt_address_type)
+                                                              source_mem.(meminst_type).(mt_address_type)) (N.pred byte_count));
+                               AI_basic (BI_memory_copy x y)] ++ es0),
                           Some (AI_basic (BI_load T_i32 (Some (Tp_i8, SX_U)) (Build_memarg N0 N0 y)))), d>> => //.
             resolve_reduce_ctx vs0 es0.
             eapply r_memory_copy_backward; eauto; simpl in *; try by lias.
           }
-        }
-      (* None *)
-      + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        { eapply inst_typing_mem_lookup_inv in Hconjr0 as [? [Hextmt ?]]; eauto.
-          unfold ext_mem_typing in Hextmt; remove_bools_options.
-          by simplify_multieq.
-        }
-        { eapply inst_typing_mem_lookup_inv in Hconjr0 as [? [??]]; eauto.
-          by simplify_multieq.
         }
         
     (* AI_basic BI_memory_init *)
@@ -1525,10 +1536,10 @@ the condition that all values should live in the operand stack. *)
       (* Takes i32; i32; i32 *)
       assert_i32 n.
       assert_i32 src.
-      assert_i32 dst.
-      destruct (smem s fc.(FC_frame).(f_inst) x) as [mem|] eqn:Hsmem.
-      (* Some *)
-      + destruct (sdata s fc.(FC_frame).(f_inst) y) as [data|] eqn:Hsdata.
+      assert_value_num dst.
+      lookup_memory s fc x selected_mem Hsmem.
+      decode_memory_address s fc x selected_mem dst Hsmem address Hdst.
+      destruct (sdata s fc.(FC_frame).(f_inst) y) as [data|] eqn:Hsdata.
         (* Some *)
         * destruct (Z.ltb (Z.of_nat (data_size data)) (($zou32 src) + ($zou32 n))) eqn:Hboundy; move/Z.ltb_spec0 in Hboundy.
           (* y Out of bound *)
@@ -1536,7 +1547,7 @@ the condition that all values should live in the operand stack. *)
             resolve_reduce_ctx vs0 es0.
             by eapply r_memory_init_bound; eauto; lias.
           }
-          destruct (Z.ltb (Z.of_N (mem_length mem)) (($zou32 dst) + ($zou32 n))) eqn:Hboundx; move/Z.ltb_spec0 in Hboundx.
+          destruct (Z.ltb (Z.of_N (mem_length selected_mem)) (Z.of_N address + ($zou32 n))) eqn:Hboundx; move/Z.ltb_spec0 in Hboundx.
           (* x Out of bound *)
           { apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
             resolve_reduce_ctx vs0 es0.
@@ -1553,8 +1564,8 @@ the condition that all values should live in the operand stack. *)
             { destruct (lookup_N data.(datainst_data) ($nou32 src)) as [b | ] eqn:Hnthdata.
               (* Step *)
               { apply <<hs, (s, (fc, lcs) :: ccs',
-                              ((VAL_num (wasm_deserialise [::b] T_i32)) :: (VAL_num (VAL_int32 dst)) :: vs0,
-                                [::$VN (VAL_int32 ($u32oz (Z.add ($zou32 dst) 1)));
+                              ((VAL_num (wasm_deserialise [::b] T_i32)) :: (VAL_num dst) :: vs0,
+                                [::$VN (Addressing.value_of_address selected_mem.(meminst_type).(mt_address_type) (N.succ address));
                                  $VN (VAL_int32 ($u32oz (Z.add ($zou32 src) 1)));
                                  $VN (VAL_int32 ($u32oz (Z.sub ($zou32 n) 1)));
                                  AI_basic (BI_memory_init x y)
@@ -1596,17 +1607,6 @@ the condition that all values should live in the operand stack. *)
             by simplify_multieq.
           }
 
-      (* None *)
-      + resolve_invalid_typing.
-        unfold_frame_type Hftype.
-        unfold_store_operations.
-        { eapply inst_typing_mem_lookup_inv in Hconjl0 as [? [Hextmt ?]]; eauto.
-          unfold ext_mem_typing in Hextmt; remove_bools_options.
-          by simplify_multieq.
-        }
-        { eapply inst_typing_mem_lookup_inv in Hconjl0 as [? [??]]; eauto.
-          by simplify_multieq.
-        }
           
     (* AI_basic BI_data_drop x *)
     - destruct (sdata_drop s fc.(FC_frame).(f_inst) x) as [s'|] eqn:Hs'.

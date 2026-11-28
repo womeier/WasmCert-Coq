@@ -41,6 +41,9 @@ Definition binary_of_N (n: N) : list byte :=
 Definition binary_of_u32 (n: u32) : list byte :=
   binary_of_N n.
 
+Definition binary_of_u64 (n: u64) : list byte :=
+  binary_of_N n.
+
 Definition binary_of_u32_nat (n : nat) : list byte :=
   leb128.encode_unsigned (N.of_nat n).
 
@@ -76,7 +79,7 @@ Definition binary_of_memarg (marg: memarg) : list byte :=
   binary_of_u32 (memarg_flags marg) ++
     (if N.eqb marg.(memarg_memory) 0 then nil
      else binary_of_memidx marg.(memarg_memory)) ++
-    binary_of_u32 marg.(memarg_offset).
+    binary_of_u64 marg.(memarg_offset).
 
 Definition binary_of_i32 (x : i32) : list byte :=
   leb128.encode_signed (Wasm_int.Int32.signed x).
@@ -525,11 +528,11 @@ Definition binary_of_name (n : name) : list byte :=
 
 Definition binary_of_limits (l : limits) : list byte :=
   match l.(lim_max) with
-  | None => x00 :: leb128.encode_unsigned (bin_of_nat l.(lim_min))
+  | None => x00 :: leb128.encode_unsigned l.(lim_min)
   | Some max =>
     x01 ::
-    leb128.encode_unsigned (bin_of_nat l.(lim_min)) ++
-    leb128.encode_unsigned (bin_of_nat max)
+    leb128.encode_unsigned l.(lim_min) ++
+    leb128.encode_unsigned max
   end.
 
 Definition binary_of_table_type (t_ty : table_type) : list byte :=
@@ -547,7 +550,15 @@ Definition binary_of_global_type (g_ty : global_type) : list byte :=
   binary_of_mutability g_ty.(tg_mut).
 
 Definition binary_of_memory_type (m : memory_type) : list byte :=
-  binary_of_limits m.
+  match m.(mt_address_type) with
+  | AT_i32 => binary_of_limits m
+  | AT_i64 =>
+      match m.(mt_limits).(lim_max) with
+      | None => x04 :: leb128.encode_unsigned m.(mt_limits).(lim_min)
+      | Some max => x05 :: leb128.encode_unsigned m.(mt_limits).(lim_min) ++
+                           leb128.encode_unsigned max
+      end
+  end.
 
 Definition binary_of_import_desc (imp_desc : module_import_desc) : list byte :=
   match imp_desc with
