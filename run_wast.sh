@@ -20,7 +20,7 @@ fi
 
 exe="${EXE:-_build/default/src/wasm_coq_interpreter.exe}"
 if [[ ! -x "$exe" ]]; then
-  dune build
+  dune build -j 1
 fi
 
 results_dir=$(mktemp -d)
@@ -61,13 +61,13 @@ run_one() {
   else
     local result_line
     if result_line=$(printf '%s' "$cleaned" | grep "Result: "); then
-      if [[ "$result_line" != *$'\n'* && "$result_line" =~ Result:\ ([0-9]+)/([0-9]+) ]]; then
+      if [[ "$result_line" != *$'\n'* && "$result_line" =~ Result:\ ([0-9]+)/([0-9]+)([[:space:]]|$) ]]; then
         local passed="${BASH_REMATCH[1]}" total="${BASH_REMATCH[2]}"
-        if (( total == 0 || passed > total )); then
+        if (( 10#$total == 0 || 10#$passed > 10#$total )); then
           summary="PARSE ERROR: $base — empty or inconsistent result counts"
           echo "0 0 1" > "$results_dir/$base"
         else
-          echo "$passed $total 0" > "$results_dir/$base"
+          echo "$((10#$passed)) $((10#$total)) 0" > "$results_dir/$base"
           summary="DONE: $base — $result_line"
         fi
       else
@@ -99,7 +99,12 @@ printf '%s\n' "${files[@]}" | xargs -P "$jobs" -I {} bash -c 'run_one "$@"' _ {}
 total_passed=0
 total_tests=0
 total_errors=0
-for f in "$results_dir"/*; do
+reports=( "$results_dir"/* )
+if (( ${#reports[@]} != ${#files[@]} )); then
+  echo "FAILED: expected ${#files[@]} result reports, found ${#reports[@]}." >&2
+  exit 1
+fi
+for f in "${reports[@]}"; do
   read -r p t e < "$f"
   total_passed=$((total_passed + p))
   total_tests=$((total_tests + t))

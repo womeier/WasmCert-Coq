@@ -497,4 +497,35 @@ let () =
   check "main instance typing checks source finality agreement"
     (Runtime.instance_context mixed_store
       { mixed_instance with inst_types = forged_source } = None);
+  let forward_base =
+    [[declares true [] (Comp_struct
+       [cf MUT_const (CV_ref (true, CH_defined (CT_def (id 1 0))))])];
+     [declares true [] (Comp_struct [])]]
+  in
+  check "portability permits valid forward destination field references"
+    (Types.validate forward_base);
+  let portable =
+    { blank with mod_types =
+      [[st true [] (Comp_struct [])];
+       [st true [] (Comp_struct [field 0])];
+       [st true [] (Comp_func
+         (Tf ([T_ref { ref_nullable = true; ref_heap = HT_type BigZ.zero }],
+              [T_ref { ref_nullable = true; ref_heap = HT_type BigZ.one }])))]];
+      mod_funcs = [] }
+  in
+  let ported_store, ported_instance =
+    instantiate { Runtime.empty_store_record with s_types = forward_base } portable
+  in
+  check "production portability reuses groups in reverse destination order"
+    (ported_instance.inst_defined_types = [id 1 0; id 0 0; id 2 0]);
+  check "production portability appends only the fresh function group"
+    (List.length ported_store.s_types = 3 &&
+     List.filteri (fun i _ -> i < 2) ported_store.s_types = forward_base);
+  check "production portability preserves full source identity agreement"
+    (Runtime.instance_context ported_store ported_instance <> None);
+  check "production portability substitutes payload source indices"
+    (Runtime.expand_function ported_store ported_instance (BigZ.of_int 2) =
+      Some (Closed_ft
+        ([CV_ref (true, CH_defined (CT_def (id 1 0)))],
+         [CV_ref (true, CH_defined (CT_def (id 0 0)))])));
   Printf.printf "GC extraction: %d/%d checks passed\n" !checks !checks

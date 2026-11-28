@@ -29,3 +29,22 @@
  (action
   (run python3 %{dep:gc_declarations_binary.py}
    %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps run_wast_runner_test.sh ../run_wast.sh)
+ (action (run bash %{dep:run_wast_runner_test.sh} %{dep:../run_wast.sh})))
+
+(rule
+ (alias runtest)
+ (deps strict_assertions_test.sh strict_assertions.wast strict_assertions_wrong_stage.wast)
+ (action
+  (run bash %{dep:strict_assertions_test.sh}
+   %{exe:../src/wasm_coq_interpreter.exe}
+   %{dep:strict_assertions.wast} %{dep:strict_assertions_wrong_stage.wast})))
+
+(rule
+ (alias runtest)
+ (deps extended_const.wast)
+ (action
+  (bash "set -o pipefail; %{exe:../src/wasm_coq_interpreter.exe} --wast %{dep:extended_const.wast} | grep 'Result: 22/22 '")))

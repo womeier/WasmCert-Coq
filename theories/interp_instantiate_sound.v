@@ -5,6 +5,7 @@
 From mathcomp Require Import ssreflect ssrbool ssrnat eqtype seq.
 From Wasm Require Import interpreter_ctx instantiation_func instantiation_properties type_checker_reflects_typing.
 From Wasm Require Import gc_declaration_typing.
+From Wasm Require Import extended_const.
 From Stdlib Require Import Program.
 
 (* see common.v *)
@@ -90,18 +91,7 @@ Proof.
   }
   (* globals *)
   { clear -Hglobalcheck hfc.
-    unfold gather_m_g_types.
-    apply Forall2_spec; first by rewrite List.length_map.
-    move => n mglob gt Hgnth Hmgnth.
-    erewrite List.map_nth_error in Hmgnth; last by eauto.
-    injection Hmgnth as <-.
-    unfold module_global_typing.
-    destruct mglob => /=.
-    eapply all_projection in Hglobalcheck; eauto.
-    unfold module_global_type_checker in Hglobalcheck.
-    move/andP in Hglobalcheck; destruct Hglobalcheck as [? Hbet].
-    repeat split => //.
-    by move/b_e_type_checker_reflects_typing in Hbet.
+    by apply/extended_globals_type_checker_reflects.
   }
   (* elem *)
   { clear -Helemcheck Hmetypes hfc.
@@ -225,11 +215,10 @@ Proof.
   by repeat rewrite eq_refl => /=.
 Qed.
 
-(* Breaking circularity: the global initialisers need to be well-typed under a
-   context with only the imported globals added. *)
+(* Each initializer sees imports and the types of preceding defined globals. *)
 Lemma module_typecheck_glob_aux: forall m t_imps t_exps str,
     module_type_checker m = (Some (t_imps, t_exps), str) ->
-    exists c, all (module_global_type_checker c) m.(mod_globals).
+    exists c, extended_globals_type_checker c m.(mod_globals).
 Proof.
   move => m t_imps t_exps str.
   unfold module_type_checker, module_components_type_checker.
@@ -273,7 +262,7 @@ Proof.
     eqn:Hidentity => //.
   destruct (those _) as [t_imps | ] eqn:Hextcheck => //.
   destruct (all2 import_subtyping _ _) eqn:Hextsubtyping => //.
-  destruct (get_global_inits _ _ (mod_globals m)) as [g_inits |] eqn:Hglobinit => //.
+  destruct (interp_global_chain _ _ (mod_globals m)) as [[[s_init f_init_final] g_inits] |] eqn:Hglobinit => //.
   destruct (get_elem_inits _ _ (mod_elems m)) as [r_inits |] eqn:Heleminit => //.
   destruct (interp_alloc_module s m v_imps g_inits r_inits registry typeids) as [s' inst'] eqn:Halloc => //.
   injection Hinterp as <- <- Heq.
@@ -285,7 +274,7 @@ Proof.
   
   assert (alloc_module s m v_imps g_inits r_inits (s', inst')) as Hallocmodule.
   { eapply interp_alloc_sound; eauto.
-    - by apply those_length in Hglobinit; rewrite length_is_size size_map -length_is_size in Hglobinit.
+    - by eapply interp_global_chain_length; eauto.
     - by apply those_length in Heleminit; rewrite length_is_size size_map -length_is_size in Heleminit.
   }
   
@@ -301,9 +290,7 @@ Proof.
   
   assert (Hgvs_len : length g_inits = length m.(mod_globals)).
   {
-    apply those_length in Hglobinit.
-    rewrite length_is_size size_map in Hglobinit.
-    by rewrite length_is_size.
+    by eapply interp_global_chain_length; eauto.
   }
   
   assert (Hrvs_len : length r_inits = length m.(mod_elems)).
@@ -331,6 +318,11 @@ Proof.
   specialize (alloc_data_iota_N Hallocdatas) as Hdataaddrs.
 
   extract_premise.
+  specialize (interp_global_chain_results _ _ _ _ _ _ Hglobinit)
+    as [Hinitfuncs [Hinitglobals Hinitresults]].
+  specialize (interp_global_chain_shape _ _ _ _ _ _ Hglobinit)
+    as [Hinitstore Hinitaddrs].
+  rewrite global_instances_map in Hinitstore.
 
   destruct s, s1, s2, s3, s4, s5, s6; simpl in *.
   repeat split => //.
@@ -341,84 +333,35 @@ Proof.
     unfold instantiate_globals.
     apply Forall2_spec => //.
     move => n mglob gv Hnth1 Hnth2.
-    eapply those_map_lookup in Hglobinit as [gi [Hmap Hnth]]; last by eauto.
-    apply module_typecheck_glob_aux in Hmodcheck as [C Hmodcheck].
-    unfold module_global_type_checker in Hmodcheck.
-    eapply all_projection in Hmodcheck; eauto.
-    destruct mglob.
-    move/andP in Hmodcheck.
-    destruct Hmodcheck as [Hconstexpr Hbetype].
-    move/b_e_type_checker_reflects_typing in Hbetype.
-    eapply const_exprs_impl in Hconstexpr; last by eauto.
-    destruct Hconstexpr as [e [-> Hconst]].
-    unfold const_expr in Hconst.
-    destruct e => //; subst; simpl in Hmap.
-    1,2,3: (* const_num/const_vec/ref_null *)
-      injection Hmap as <-;
-      simpl in *;
-      simplify_multieq;
-      by constructor.
-    { (* ref_func *)
-      remove_bools_options; simplify_multieq.
-      by constructor; apply r_ref_func => /=.
-    }
-    { (* global_get *)
-      remove_bools_options; simplify_multieq.
-      constructor; apply r_global_get => /=.
-      unfold sglob_val, sglob, sglob_ind in *; simpl in *.
-      remove_bools_options.
-      unfold lookup_N in *.
-      by erewrite nth_error_app_Some; eauto.
-    }
+    eapply Forall2_lookup in Hinitresults as [gi [Hnth Hmap]]; last by eauto.
+    simplify_multieq.
+    apply interp_get_const_sound.
+    eapply (interp_get_const_environment s_init f_init_final); last exact Hmap.
+    + by rewrite Hinitfuncs.
+    + move => i v.
+      unfold sglob_val, sglob, sglob_ind.
+      by rewrite Hinitstore Hinitaddrs.
   - subst.
     unfold instantiate_elems.
     apply Forall2_spec => //.
     move => n melem vs Hnth1 Hnth2.
     eapply those_map_lookup in Heleminit as [ei [Hmap Hnth]]; last by eauto.
-    apply module_typecheck_elem_aux in Hmodcheck as [C Hmodcheck].
-    unfold module_elem_type_checker in Hmodcheck.
-    eapply all_projection in Hmodcheck; eauto.
-    destruct melem.
-    move/andP in Hmodcheck; destruct Hmodcheck as [Hmodcheck Hmode].
-    move/andP in Hmodcheck; destruct Hmodcheck as [Hconstexpr Hbetype].
     simplify_multieq.
     apply Forall2_spec => //=.
     + apply those_length in Hmap.
       by rewrite List.length_map in Hmap; simpl in Hmap.
     + move => i bes vref Hnthinit Hnthei.
-      eapply all_projection in Hbetype; eauto.
-      eapply all_projection in Hconstexpr; eauto.
       eapply those_map_lookup in Hmap as [vref' [Hmap Hnth']]; eauto.
-      move/b_e_type_checker_reflects_typing in Hbetype.
-      eapply const_exprs_impl in Hconstexpr; last by eauto.
-      destruct Hconstexpr as [e [-> Hconst]].
-      unfold const_expr in Hconst.
-      destruct e => //; subst; simpl in Hmap.
-      { (* ref_null *)
-        injection Hmap as <-.
-        simpl in *.
-        simplify_multieq.
-        by constructor.
-      }
-      { (* ref_func *)
-        remove_bools_options; simplify_multieq.
-        constructor => /=.
-        unfold interp_get_vref in Hmap.
-        simpl in Hmap; remove_bools_options.
-        by apply r_ref_func.
-      }
-      { (* global_get *)
-        unfold interp_get_vref in Hmap; simpl in Hmap.
-        remove_bools_options; simplify_multieq; destruct v => //.
-        injection Hmap as ->.
-        constructor.
-        replace (vref_to_e vref') with (v_to_e (VAL_ref vref')) => //.
-        eapply r_global_get => /=.
-        unfold sglob_val, sglob, sglob_ind in *; simpl in *.
-        remove_bools_options.
-        unfold lookup_N in *.
-        by erewrite nth_error_app_Some; eauto.
-      }
+      unfold interp_get_vref in Hmap.
+      destruct (interp_get_const _ _ bes) as [[v|v|v]|] eqn:Heval => //.
+      injection Hmap as <-.
+      simplify_multieq.
+      apply (interp_get_const_sound _ _ _ _ (VAL_ref v)).
+      eapply (interp_get_const_environment s_init f_init_final); last exact Heval.
+      * by rewrite Hinitfuncs.
+      * move => j w.
+        unfold sglob_val, sglob, sglob_ind.
+        by rewrite Hinitstore Hinitaddrs.
 Qed.
 
 End Host.

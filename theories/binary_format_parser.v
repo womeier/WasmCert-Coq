@@ -161,7 +161,9 @@ Definition parse_dataidx {n} : byte_parser dataidx n :=
   parse_u32_as_N.
 
 Definition parse_laneidx {n} : byte_parser laneidx n :=
-  parse_u8_as_N.
+  (* A lane index is one raw byte, not an unsigned LEB128 integer.
+     The shape-specific bound is checked by validation, not decoding. *)
+  to_N <$> anyTok.
 
 Definition parse_number_type {n} : byte_parser number_type n :=
   (exact_byte x7f $> T_i32) <|>
