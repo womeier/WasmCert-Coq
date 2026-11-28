@@ -4,6 +4,7 @@
 From Stdlib Require Import List Strings.Byte NArith PeanoNat.
 From parseque Require Import Parseque Success.
 From Wasm Require Import binary_format_parser binary_uleb128 datatypes_properties.
+From Wasm Require Import binary_parser_combinator_properties.
 
 Definition decode_return_call (input : list Byte.byte) :=
   match input with
@@ -453,5 +454,39 @@ Proof.
   apply tail_prefix_consumed_grammar.
   apply (proj1 (tail_call_parser_sound_complete n m Hle input
     (Success.value result) (@Sized.value _ _ _ (Success.leftovers result)))).
+  rewrite Hrun. reflexivity.
+Qed.
+
+(** Direct adapters to the now-integrated common parser-soundness interface.
+    Both the grouped dispatcher and separate primitive-list entries are covered. *)
+Theorem parse_tail_call_grammar_sound n :
+    parser_sound (parse_tail_call :
+      Parser (SizedList Byte.byte) Byte.byte option basic_instruction n)
+      tail_instruction_encoding.
+Proof. exact (parse_tail_call_consumed_sound n). Qed.
+
+Theorem parse_return_call_grammar_sound n :
+    parser_sound (parse_return_call :
+      Parser (SizedList Byte.byte) Byte.byte option basic_instruction n)
+      tail_instruction_encoding.
+Proof.
+  intros m bound input result Hrun.
+  unfold output_bytes, input_bytes.
+  apply tail_prefix_consumed_grammar. left.
+  apply decode_return_call_correct.
+  rewrite <- (return_call_parser_correct n m bound input).
+  rewrite Hrun. reflexivity.
+Qed.
+
+Theorem parse_return_call_indirect_grammar_sound n :
+    parser_sound (parse_return_call_indirect :
+      Parser (SizedList Byte.byte) Byte.byte option basic_instruction n)
+      tail_instruction_encoding.
+Proof.
+  intros m bound input result Hrun.
+  unfold output_bytes, input_bytes.
+  apply tail_prefix_consumed_grammar. right.
+  apply decode_return_call_indirect_correct.
+  rewrite <- (return_call_indirect_parser_correct n m bound input).
   rewrite Hrun. reflexivity.
 Qed.

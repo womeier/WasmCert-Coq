@@ -8,7 +8,7 @@ From Wasm Require Import datatypes_properties binary_format_parser
   binary_format_parser_properties binary_vector_properties
   binary_locals_properties tail_call_parser_properties
   tail_call_sequence_properties tail_call_codec_properties
-  binary_locals_printer_properties.
+  binary_locals_printer_properties binary_parser_combinator_properties.
 
 Lemma parse_code_func_tail_prefix : forall n opcode b input instruction suffix
     (Hle : (List.length (x00 :: opcode :: b :: input) <= n)%nat),
@@ -632,6 +632,28 @@ Definition expression_print_prefix (es : list basic_instruction) : Prop :=
         Parser (SizedList Byte.byte) Byte.byte option (list basic_instruction) n)
         Hle input) = Some (es, suffix).
 
+(** Consume the shared framework's actual [parser_complete] result directly.
+    The recursive grammar and its completeness/printer proof remain owned by
+    that framework; this lemma does not introduce another recursive grammar. *)
+Lemma expression_print_prefix_from_common :
+    forall (Encoding : list Byte.byte -> list basic_instruction -> Prop) es,
+    (forall n, parser_complete (parse_expr :
+      Parser (SizedList Byte.byte) Byte.byte option (list basic_instruction) n)
+      Encoding) ->
+    Encoding (binary_of_expr es) es ->
+    expression_print_prefix es.
+Proof.
+  intros Encoding es Hcomplete Hencoded n m bound input suffix Hinput.
+  change (input_bytes input = List.app (binary_of_expr es) suffix) in Hinput.
+  destruct (Hcomplete n m bound input (binary_of_expr es) suffix es
+    Hinput Hencoded) as [result [Hrun [Hvalue Hsuffix]]].
+  unfold output_bytes, input_bytes in Hsuffix.
+  rewrite Hrun.
+  change (Some (Success.value result,
+    @Sized.value _ _ _ (Success.leftovers result)) = Some (es, suffix)).
+  now rewrite Hvalue, Hsuffix.
+Qed.
+
 Theorem code_func_locals_print_prefix_from_expression :
     forall n m (Hle : (m <= n)%nat) (input : SizedList Byte.byte m)
       locals es suffix,
@@ -755,6 +777,26 @@ Proof.
   pose proof (code_locals_print_prefix_from_expression _ type locals es nil
     (Nat.le_refl _) Hlength Hlocals Hexpr Hsize) as Hprefix.
   now rewrite List.app_nil_r in Hprefix.
+Qed.
+
+Corollary code_locals_roundtrip_from_common :
+    forall (Encoding : list Byte.byte -> list basic_instruction -> Prop)
+      type locals es,
+    (N.of_nat (List.length locals) < 4294967296)%N ->
+    List.Forall printable_local_type locals ->
+    (forall n, parser_complete (parse_expr :
+      Parser (SizedList Byte.byte) Byte.byte option (list basic_instruction) n)
+      Encoding) ->
+    Encoding (binary_of_expr es) es ->
+    (N.of_nat (List.length (binary_of_code_func locals es)) <= 4294967295)%N ->
+    binary_format_parser.run (binary_of_code (Build_module_func type locals es))
+      (fun n => (parse_code :
+        Parser (SizedList Byte.byte) Byte.byte option module_func_without_type n))
+      = Some (locals, es).
+Proof.
+  intros Encoding type locals es Hlength Hlocals Hcomplete Hencoded Hsize.
+  apply code_locals_roundtrip_from_expression; try assumption.
+  eapply expression_print_prefix_from_common; eassumption.
 Qed.
 
 Lemma empty_expression_print_prefix : expression_print_prefix nil.

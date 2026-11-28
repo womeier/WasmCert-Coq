@@ -179,7 +179,7 @@ Proof.
       _bind _alt _fmap _pure _fail optionRawMonad optionRawAlternative
       optionRawFunctor optionRawApplicative pure fail].
     cbn -[parse_u32_as_N].
-    rewrite Hneq. cbn -[parse_u32_as_N].
+    cbn -[parse_u32_as_N].
     match goal with
     | |- context [runParser ?reader ?bound ?tokens] =>
         change (option_map observe_reader (runParser reader bound tokens) =
@@ -338,7 +338,7 @@ Proof.
         _bind _alt _fmap _pure _fail optionRawMonad optionRawAlternative
         optionRawFunctor optionRawApplicative pure fail] in Hobs.
       cbn -[parse_u32_as_N] in Hobs.
-      rewrite Hneq in Hobs. cbn -[parse_u32_as_N] in Hobs.
+      cbn -[parse_u32_as_N] in Hobs.
       match goal with
       | Hobs : context [runParser ?reader ?bound ?tokens] |- _ =>
           pose proof (parse_u32_as_N_correct n _ bound tokens) as Hheader;

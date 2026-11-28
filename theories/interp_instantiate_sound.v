@@ -4,7 +4,9 @@
 
 From mathcomp Require Import ssreflect ssrbool ssrnat eqtype seq.
 From Wasm Require Import interpreter_ctx instantiation_func instantiation_properties type_checker_reflects_typing.
+From Wasm Require Import local_initialization_properties.
 From Stdlib Require Import Program Arith.PeanoNat.
+From Wasm Require Import gc_declaration_typing.
 
 (* see common.v *)
 Set SsrOldRewriteGoalsOrder.
@@ -19,9 +21,15 @@ Lemma module_type_checker_sound: forall m t_imps t_exps str,
 Proof.
   move => m t_imps t_exps str Hmodcheck.
   unfold module_type_checker in Hmodcheck.
+  destruct (close_and_validate_type_groups nil (module_type_groups m))
+    as [[registry ids]|] eqn:Hclosed => //.
+  destruct (source_type_identitiesb registry ids (List.concat (mod_types m)) ids)
+    eqn:Hidentity => //.
+  split; first by exists registry, ids; split.
+  unfold module_components_type_checker in Hmodcheck.
   destruct m.
-  destruct (gather_m_f_types mod_types mod_funcs) as [fts | ] eqn:Hmftypes => //;
-                                                                               destruct (module_imports_typer mod_types mod_imports) as [impts | ] eqn:Hmitypes => //.
+  destruct (gather_m_f_types (List.concat mod_types) mod_funcs) as [fts | ] eqn:Hmftypes => //;
+    destruct (module_imports_typer (List.concat mod_types) mod_imports) as [impts | ] eqn:Hmitypes => //.
   destruct (gather_m_e_types (ext_t_tables impts ++ map modtab_type mod_tables) mod_elems) as [ets | ] eqn:Hmetypes => //.
   destruct (gather_m_d_types (ext_t_mems impts ++ map modmem_type mod_mems) mod_datas) as [dts | ] eqn:Hmdtypes => //.
   destruct (all _ _ && _ && _ && _ && _ && _ && _ && _ && _) eqn:Hallcond => //.
@@ -34,14 +42,14 @@ Proof.
   move/andP in Hallcond; destruct Hallcond as [Hallcond Hmemcheck].
   move/andP in Hallcond; destruct Hallcond as [Hfunccheck Htablecheck].
   move/andP in Hfunccheck; destruct Hfunccheck as [Htypescheck Hfunccheck].
-  unfold module_typing.
+  unfold module_components_typing.
   injection Hmodcheck as ->->.
   
   exists fts, (map modtab_type mod_tables), (map modmem_type mod_mems), (gather_m_g_types mod_globals), ets, dts.
   repeat split => //.
 
   (* types *)
-  { by apply Forall_all. }
+  { apply Forall_spec. intros n x Lookup. by rewrite source_subtype_valid_true. }
   
   (* funcs *)
   { clear - Hfunccheck Hmftypes hfc.
@@ -58,8 +66,12 @@ Proof.
     split => //.
     rewrite Hmap in Hfunccheck.
     remove_bools_options.
-    split => //; last by apply/eqP.
-    by apply/b_e_type_checker_reflects_typing.
+    split.
+    { by apply/b_e_type_checker_reflects_typing. }
+    destruct (check_local_init_sequence modfunc_body
+      (initial_local_state r modfunc_locals)) eqn:Hinit.
+    - eexists. by apply check_local_init_sequence_sound; eauto.
+    - by rewrite eq_refl in H0.
   }
   (* tables *)
   { apply Forall2_spec => //; first by rewrite List.length_map.
@@ -182,13 +194,14 @@ Lemma external_type_checker_sound: forall s ext t,
   external_typing s ext t.
 Proof.
   move => s ext t Hextcheck.
-  destruct ext as [a|a|a|a]; simpl in Hextcheck; try exact Hextcheck.
-  unfold ext_func_defined_type, funcinst_defined_type in Hextcheck.
-  destruct (lookup_N (s_funcs s) a) as [cl|] eqn:Hlookup; try discriminate.
-  destruct (close_defined_type (cl_type cl)) as [dt|] eqn:Hclose; try discriminate.
-  rewrite (close_defined_type_expands Hclose) in Hextcheck.
+  destruct ext as [a|a|a|a]; try exact Hextcheck.
+  unfold external_type_checker in Hextcheck.
+  destruct (lookup_N (s_funcs s) a) as [[ft inst code|ft hf]|] eqn:E;
+    try exact Hextcheck.
+  destruct (gc_type_context.canonical_function_identityb (s_types s) ft);
+    try discriminate.
   inversion Hextcheck; subst.
-  by unfold external_typing, ext_typing, ext_func_typing; rewrite Hlookup.
+  by unfold external_typing, ext_typing, ext_func_typing; rewrite E.
 Qed.
 
 Lemma external_type_checker_complete s ext t :
@@ -198,12 +211,12 @@ Lemma external_type_checker_complete s ext t :
 Proof.
   move => Hstore Hext.
   destruct ext as [a|a|a|a]; try exact Hext.
-  unfold external_typing, ext_typing in Hext.
-  destruct (ext_func_typing s a) as [ft|] eqn:Hft;
-    simpl in Hext; try discriminate.
-  inversion Hext; subst t.
-  destruct (ext_func_defined_type_complete Hstore Hft) as [dt [Hdt Hexpand]].
-  by unfold external_type_checker; rewrite Hdt Hexpand.
+  unfold external_type_checker.
+  destruct (lookup_N (s_funcs s) a) as [[ft inst code|ft hf]|] eqn:E;
+    try exact Hext.
+  destruct (store_typing_func_lookup Hstore E) as [tf [_ [_ Hidentity]]].
+  rewrite Hidentity.
+  by unfold external_typing, ext_typing, ext_func_typing in Hext; rewrite E in Hext.
 Qed.
 
 Lemma external_type_checker_correct s ext t :
@@ -215,16 +228,19 @@ Proof.
   - by apply external_type_checker_complete.
 Qed.
 
-Lemma interp_alloc_sound: forall s m v_imps g_inits r_inits t_inits s' inst,
+Lemma interp_alloc_sound_canonical: forall s m v_imps g_inits r_inits t_inits registry typeids s' inst,
+  close_and_validate_type_groups s.(s_types) (module_type_groups m) = Some (registry, typeids) ->
+  source_type_identitiesb registry typeids (List.concat m.(mod_types)) typeids = true ->
   length g_inits = length m.(mod_globals) ->
   length r_inits = length m.(mod_elems) ->
   length t_inits = length m.(mod_tables) ->
-  interp_alloc_module s m v_imps g_inits r_inits t_inits = (s', inst) ->
+  interp_alloc_module s m v_imps g_inits r_inits t_inits registry typeids = (s', inst) ->
   alloc_module s m v_imps g_inits r_inits t_inits (s', inst).
 Proof.
-  move => s m v_imps g_inits r_inits t_inits s' inst Hgvs_len Hrvs_len Htvs_len Halloc.
+  move => s m v_imps g_inits r_inits t_inits registry typeids s' inst Hclosed Hidentity Hgvs_len Hrvs_len Htvs_len Halloc.
   unfold interp_alloc_module in Halloc.
   unfold alloc_module; simpl in *.
+  exists registry, typeids.
   destruct (alloc_funcs _ _ _) as [s1 ifs] eqn:Hallocfuncs.
   destruct (alloc_tabs_with_init _ _) as [s2 its] eqn:Halloctabs.
   destruct (alloc_mems _ _) as [s3 ims] eqn:Hallocmems.
@@ -257,8 +273,11 @@ Lemma module_typecheck_glob_aux: forall m t_imps t_exps str,
     exists c, all (module_global_type_checker c) m.(mod_globals).
 Proof.
   move => m t_imps t_exps str.
-  unfold module_type_checker.
+  unfold module_type_checker, module_components_type_checker.
   move => Hmodcheck.
+  destruct (close_and_validate_type_groups nil (module_type_groups m))
+    as [[registry typeids]|] => //.
+  destruct (source_type_identitiesb registry typeids (List.concat (mod_types m)) typeids) => //.
   destruct m.
   remove_bools_options.
   simpl in *.
@@ -270,8 +289,11 @@ Lemma module_typecheck_elem_aux: forall m t_imps t_exps str,
     exists c, all (module_elem_type_checker c) m.(mod_elems).
 Proof.
   move => m t_imps t_exps str.
-  unfold module_type_checker.
+  unfold module_type_checker, module_components_type_checker.
   move => Hmodcheck.
+  destruct (close_and_validate_type_groups nil (module_type_groups m))
+    as [[registry typeids]|] => //.
+  destruct (source_type_identitiesb registry typeids (List.concat (mod_types m)) typeids) => //.
   destruct m.
   remove_bools_options.
   simpl in *.
@@ -283,8 +305,11 @@ Lemma module_typecheck_table_aux: forall m t_imps t_exps str,
     exists c, all (module_table_type_checker c) m.(mod_tables).
 Proof.
   move => m t_imps t_exps str.
-  unfold module_type_checker.
+  unfold module_type_checker, module_components_type_checker.
   move => Hmodcheck.
+  destruct (close_and_validate_type_groups nil (module_type_groups m))
+    as [[registry typeids]|] => //.
+  destruct (source_type_identitiesb registry typeids (List.concat (mod_types m)) typeids) => //.
   destruct m.
   remove_bools_options.
   simpl in *.
@@ -309,12 +334,16 @@ Proof.
   unfold interp_instantiate, instantiate.
   move => Hinterp.
   destruct (module_type_checker m) as [[[t_imps_mod t_exps]|] str'] eqn:Hmodcheck => //.
+  destruct (close_and_validate_type_groups (s_types s) (module_type_groups m))
+    as [[registry typeids]|] eqn:Hclosed => //.
+  destruct (source_type_identitiesb registry typeids (List.concat (mod_types m)) typeids)
+    eqn:Hidentity => //.
   destruct (those _) as [t_imps | ] eqn:Hextcheck => //.
   destruct (all2 import_subtyping _ _) eqn:Hextsubtyping => //.
   destruct (get_table_inits _ _ (mod_tables m)) as [t_inits|] eqn:Htableinit => //.
   destruct (get_global_inits _ _ (mod_globals m)) as [g_inits |] eqn:Hglobinit => //.
   destruct (get_elem_inits _ _ (mod_elems m)) as [r_inits |] eqn:Heleminit => //.
-  destruct (interp_alloc_module s m v_imps g_inits r_inits t_inits) as [s' inst'] eqn:Halloc => //.
+  destruct (interp_alloc_module s m v_imps g_inits r_inits t_inits registry typeids) as [s' inst'] eqn:Halloc => //.
   injection Hinterp as <- <- Heq.
 
   exists t_imps_mod, t_imps, t_exps, hs, inst', g_inits, r_inits, t_inits.
@@ -323,7 +352,7 @@ Proof.
   assert (module_typing m t_imps_mod t_exps) as Hmodtype; first by eapply module_type_checker_sound; eauto.
   
   assert (alloc_module s m v_imps g_inits r_inits t_inits (s', inst')) as Hallocmodule.
-  { apply interp_alloc_sound => //.
+  { eapply interp_alloc_sound_canonical; eauto.
     - by apply those_length in Hglobinit; rewrite length_is_size size_map -length_is_size in Hglobinit.
     - by apply those_length in Heleminit; rewrite length_is_size size_map -length_is_size in Heleminit.
     - by apply those_length in Htableinit; rewrite length_is_size size_map -length_is_size in Htableinit.

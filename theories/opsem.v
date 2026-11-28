@@ -97,7 +97,17 @@ Inductive reduce_simple : seq administrative_instruction -> seq administrative_i
   | rs_ref_is_null_false:
     forall ref,
     (forall t, ref <> VAL_ref_null t) ->
-    reduce_simple [:: $V (VAL_ref ref); AI_basic BI_ref_is_null] [::$VN (VAL_int32 Wasm_int.Int32.zero)]
+     reduce_simple [:: $V (VAL_ref ref); AI_basic BI_ref_is_null] [::$VN (VAL_int32 Wasm_int.Int32.zero)]
+  | rs_ref_i31 : forall n,
+    reduce_simple [:: $VN (VAL_int32 n); AI_basic BI_ref_i31]
+      [:: $V (VAL_ref (VAL_ref_i31 (i31bits_of_i32 n)))]
+  | rs_i31_get : forall signed n,
+    reduce_simple [:: $V (VAL_ref (VAL_ref_i31 n)); AI_basic (BI_i31_get signed)]
+      [:: $VN (VAL_int32 (i32_of_i31bits
+        (match signed with SX_S => true | SX_U => false end) n))]
+  | rs_i31_get_null : forall signed h,
+    reduce_simple [:: $V (VAL_ref (VAL_ref_null h)); AI_basic (BI_i31_get signed)]
+      [:: AI_trap]
                   
   (** control-flow operations **)
   | rs_unreachable :
@@ -186,6 +196,13 @@ Inductive reduce_simple : seq administrative_instruction -> seq administrative_i
     (forall h, ref <> VAL_ref_null h) ->
     reduce_simple [::$V (VAL_ref ref); AI_basic (BI_br_on_non_null x)]
       [::$V (VAL_ref ref); AI_basic (BI_br x)]
+  | rs_br_on_null_null : forall x h,
+    reduce_simple [::$V (VAL_ref (VAL_ref_null h)); AI_basic (BI_br_on_null x)]
+      [::AI_basic (BI_br x)]
+  | rs_br_on_null : forall x ref,
+    (forall h, ref <> VAL_ref_null h) ->
+    reduce_simple [::$V (VAL_ref ref); AI_basic (BI_br_on_null x)]
+      [::$V (VAL_ref ref)]
 .
 
 Inductive reduce : host_state -> store_record -> frame -> list administrative_instruction ->
@@ -223,13 +240,13 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
       forall s f x (y: typeidx) a cl i hs,
         stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_func a) ->
         lookup_N s.(s_funcs) a = Some cl ->
-        lookup_N f.(f_inst).(inst_types) y = Some (cl_type cl) ->
+        lookup_function_type f.(f_inst).(inst_types) y = Some (cl_type cl) ->
         reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_call_indirect x y)] hs s f [::AI_invoke a]
   | r_call_indirect_failure_mismatch :
       forall s f x (y: typeidx) a cl i hs,
         stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_func a) ->
         lookup_N s.(s_funcs) a = Some cl ->
-        lookup_N f.(f_inst).(inst_types) y <> Some (cl_type cl) ->
+        lookup_function_type f.(f_inst).(inst_types) y <> Some (cl_type cl) ->
         reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_call_indirect x y)] hs s f [::AI_trap]
   | r_call_indirect_failure_bound :
       forall s f x (y: typeidx) i hs,
@@ -256,7 +273,7 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
         reduce hs s f [::v_to_e v; AI_basic (BI_return_call_indirect x y)] hs s f [::AI_trap]
 
   | r_invoke_native :
-      forall addr cl ts1 ts2 code x ts es ves vs n m k defaults s f inst hs,
+      forall addr cl ts1 ts2 code x ts es ves vs n m k s f inst hs,
         lookup_N s.(s_funcs) addr = Some cl ->
         cl = FC_func_native (Tf ts1 ts2) inst code ->
         code = Build_module_func x ts es ->
@@ -265,8 +282,9 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
         length ts = k ->
         length ts1 = n ->
         length ts2 = m ->
-        default_vals ts = Some defaults ->
-        reduce hs s f (ves ++ [::AI_invoke addr]) hs s f [::AI_frame m (Build_frame (vs ++ defaults) inst) [::AI_label m [::] (to_e_list es)]]
+        reduce hs s f (ves ++ [::AI_invoke addr]) hs s f
+          [::AI_frame m (Build_frame (map Some vs ++ map default_val ts) inst)
+            [::AI_label m [::] (to_e_list es)]]
   | r_invoke_host_success :
       forall a cl h t1s t2s ves vcs m n s s' r f hs hs',
         lookup_N s.(s_funcs) a = Some cl ->
@@ -304,13 +322,13 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
   (** get, set, load, and store operations **)
   | r_local_get :
       forall f v j s hs,
-        lookup_N f.(f_locs) j = Some v ->
+        lookup_N f.(f_locs) j = Some (Some v) ->
         reduce hs s f [::AI_basic (BI_local_get j)] hs s f [::v_to_e v]
   | r_local_set :
       forall f f' i v s vd hs,
         f'.(f_inst) = f.(f_inst) ->
         N.to_nat i < length f.(f_locs) ->
-        f'.(f_locs) = set_nth vd f.(f_locs) (N.to_nat i) v ->
+        f'.(f_locs) = set_nth (Some vd) f.(f_locs) (N.to_nat i) (Some v) ->
         reduce hs s f [::v_to_e v; AI_basic (BI_local_set i)] hs s f' [::]
   | r_global_get :
       forall s f i v hs,

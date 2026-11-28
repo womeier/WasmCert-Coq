@@ -2,7 +2,143 @@
 From Stdlib Require Import Strings.Byte ZArith.
 From parseque Require Import Parseque.
 From Wasm Require Import binary_format_parser binary_format_printer
-                         binary_uleb128_printer datatypes_properties check_toks.
+                         binary_uleb128_printer datatypes_properties check_toks gc_types.
+Open Scope list_scope.
+
+(** A vector's u32 length may have a non-minimal LEB128 representation.
+    In particular, a padded zero length must not require an element parser
+    to consume a token.  These tests use the actual whole-module parser. *)
+Definition empty_module_header : list Byte.byte :=
+  x00 :: x61 :: x73 :: x6d :: x01 :: x00 :: x00 :: x00 :: nil.
+
+Lemma padded_empty_type_vector :
+  run_parse_module
+    (empty_module_header ++ (x01 :: x02 :: x80 :: x00 :: nil)) =
+  run_parse_module empty_module_header.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma maximally_padded_empty_type_vector :
+  run_parse_module
+    (empty_module_header ++
+      (x01 :: x05 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil)) =
+  run_parse_module empty_module_header.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma overlong_empty_type_vector_rejected :
+  run_parse_module
+    (empty_module_header ++
+      (x01 :: x06 :: x80 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma overflowing_type_vector_length_rejected :
+  run_parse_module
+    (empty_module_header ++
+      (x01 :: x05 :: x80 :: x80 :: x80 :: x80 :: x10 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+(** Heap indices are unsigned indices encoded with signed LEB128. *)
+Lemma heap_index_64 :
+  run_parse_heap_typeidx (xc0 :: x00 :: nil) = Some 64%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_64_requires_positive_sign :
+  run_parse_heap_typeidx (x40 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_u32_max :
+  run_parse_heap_typeidx (xff :: xff :: xff :: xff :: x0f :: nil) =
+  Some 4294967295%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_padded_zero :
+  run_parse_heap_typeidx (x80 :: x80 :: x80 :: x80 :: x00 :: nil) = Some 0%N.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_overlong_zero_rejected :
+  run_parse_heap_typeidx (x80 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_overflow_rejected :
+  run_parse_heap_typeidx (x80 :: x80 :: x80 :: x80 :: x10 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_abstract_type_rejected :
+  run_parse_heap_typeidx (x70 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma heap_index_leftovers_rejected :
+  run_parse_heap_typeidx (x00 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+(* Indexed source codecs do not reinterpret a module-local index as a runtime
+   canonical name. Production runtime parsing awaits canonical null lowering. *)
+Lemma source_nullable_index_zero :
+  run_parse_source_reference_type (x63 :: x00 :: nil) =
+    Some (Ref_type true (HT_type 0%N)).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_nonnull_index_zero :
+  run_parse_source_reference_type (x64 :: x00 :: nil) =
+    Some (Ref_type false (HT_type 0%N)).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_null_index_zero :
+  run_parse_source_ref_null (xd0 :: x00 :: nil) =
+    Some (BI_ref_null (HT_type 0%N)).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_index_64_signed_encoding :
+  run_parse_source_heap_type (xc0 :: x00 :: nil) = Some (HT_type 64%N).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_index_u32_max :
+  run_parse_source_reference_type
+    (x63 :: xff :: xff :: xff :: xff :: x0f :: nil) =
+    Some (Ref_type true (HT_type 4294967295%N)).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_null_padded_index_zero :
+  run_parse_source_ref_null (xd0 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil) =
+    Some (BI_ref_null (HT_type 0%N)).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_reference_prefix_preserves_suffix :
+  run_parse_prefix (fun _ => parse_source_reference_type)
+    (x63 :: x00 :: x0b :: nil) =
+    Some (Ref_type true (HT_type 0%N), x0b :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_null_prefix_preserves_suffix :
+  run_parse_prefix (fun _ => parse_source_ref_null)
+    (xd0 :: x00 :: x15 :: x00 :: x0b :: nil) =
+    Some (BI_ref_null (HT_type 0%N), x15 :: x00 :: x0b :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_index_overlong_rejected :
+  run_parse_source_ref_null
+    (xd0 :: x80 :: x80 :: x80 :: x80 :: x80 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_index_overflow_rejected :
+  run_parse_source_reference_type
+    (x63 :: x80 :: x80 :: x80 :: x80 :: x10 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_negative_index_rejected :
+  run_parse_source_heap_type (x40 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_truncated_index_rejected :
+  run_parse_source_reference_type (x64 :: x80 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_null_requires_heap_not_reference_type :
+  run_parse_source_ref_null (xd0 :: x63 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_nullable_abstract_unchanged :
+  run_parse_source_reference_type (x63 :: x70 :: nil) = Some T_funcref.
+Proof. vm_compute. reflexivity. Qed.
 
 Open Scope string_scope.
 Import Stdlib.Strings.String.StringSyntax.
@@ -167,10 +303,33 @@ Lemma parse_br_on_non_null_single_byte (b : Byte.byte) :
     else None.
 Proof. destruct b; vm_compute; reflexivity. Qed.
 
+Lemma parse_br_on_null_single_byte (b : Byte.byte) :
+  run_parse_bes (xd5 :: b :: nil) =
+    if (Byte.to_N b <? 128)%N then
+      Some (BI_br_on_null (Byte.to_N b) :: nil)
+    else None.
+Proof. destruct b; vm_compute; reflexivity. Qed.
+
+Lemma print_br_on_null :
+  binary_of_expr (BI_br_on_null 0%N :: nil) = xd5 :: x00 :: x0b :: nil.
+Proof. reflexivity. Qed.
+
 Definition initialized_funcref_table :=
   Build_module_table
     (Build_table_type (Build_limits 2%N None) T_funcref)
     (Some (BI_ref_func 0%N :: nil)).
+
+Lemma parse_nonnullable_funcref :
+  check_toks (x64 :: x70 :: nil)
+    (fun n => parse_reference_type (n := n)) =
+    Running.Singleton (Ref_type false HT_func).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma parse_explicit_nullable_externref :
+  check_toks (x63 :: x6f :: nil)
+    (fun n => parse_reference_type (n := n)) =
+    Running.Singleton T_externref.
+Proof. vm_compute. reflexivity. Qed.
 
 Lemma parse_table_initializer :
   check_toks (x40 :: x00 :: x70 :: x00 :: x02 :: xd2 :: x00 :: x0b :: nil)
@@ -244,8 +403,8 @@ Lemma indexed_scalar_simd_round_trips :
 Proof. vm_compute. reflexivity. Qed.
 
 Lemma indexed_memarg_encoding :
-  (* The shared LEB encoder emits a legal padded encoding of flags 64. *)
-  binary_of_memarg indexed_memarg = xc0 :: x00 :: x80 :: x01 :: xd2 :: x09 :: nil.
+  (* The shared unsigned encoder now emits the canonical flags byte 64. *)
+  binary_of_memarg indexed_memarg = x40 :: x80 :: x01 :: xd2 :: x09 :: nil.
 Proof. vm_compute. reflexivity. Qed.
 
 Lemma explicit_zero_memory_index_accepted :
@@ -430,7 +589,7 @@ Lemma empty_module_round_trip : run_parse_module (binary_of_module empty_module)
 Proof. vm_compute. reflexivity. Qed.
 
 Definition two_memory_legacy_access := {|
-  mod_types := Tf nil (T_num T_i32 :: nil) :: nil;
+  mod_types := (Sub_type true nil (Comp_func (Tf nil (T_num T_i32 :: nil))) :: nil) :: nil;
   mod_funcs := {|
     modfunc_type := 0%N;
     modfunc_locals := nil;
@@ -465,7 +624,7 @@ Lemma two_memory_module_round_trip :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition two_memory_data_init := {|
-  mod_types := Tf nil nil :: nil;
+  mod_types := (Sub_type true nil (Comp_func (Tf nil nil)) :: nil) :: nil;
   mod_funcs := {|
     modfunc_type := 0%N;
     modfunc_locals := nil;
@@ -495,7 +654,7 @@ Lemma indexed_init_module_round_trip_includes_data_count :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_type := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs := nil;
   mod_tables := nil;
   mod_mems := nil;
@@ -512,7 +671,7 @@ Lemma module_type_round_trip :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_type_fun := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs :=
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := nil |} nil;
   mod_tables := nil;
@@ -530,7 +689,7 @@ Lemma module_type_fun_round_trip :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_42 := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs :=
     let e := BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 42))) in
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := cons e nil |} nil;
@@ -609,8 +768,27 @@ Lemma tail_code_large_local_vector_byte_roundtrip :
       BI_return_call_indirect 257%N 128%N :: nil).
 Proof. vm_compute. reflexivity. Qed.
 
+(** All ten production abstract heap types, in both nullabilities. This is a
+    function-code BYTE round trip, not a claim about indexed runtime closing
+    or validation/inhabitation of each nondefaultable local type. *)
+Definition abstract_reference_local_codec_cases :=
+  List.concat (List.map
+    (fun heap =>
+      T_ref (Ref_type true (shared_heap_of_abstract heap)) ::
+      T_ref (Ref_type false (shared_heap_of_abstract heap)) :: nil)
+    (AH_any :: AH_eq :: AH_i31 :: AH_struct :: AH_array ::
+      AH_none :: AH_func :: AH_nofunc :: AH_extern :: AH_noextern :: nil)).
+
+Lemma tail_code_abstract_reference_locals_byte_roundtrip :
+  binary_format_parser.run
+    (binary_of_code (Build_module_func 0%N abstract_reference_local_codec_cases
+      (BI_return_call 128%N :: nil)))
+    (fun n => (parse_code : byte_parser module_func_without_type n)) =
+    Some (abstract_reference_local_codec_cases, BI_return_call 128%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
 Definition module_42_exported := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs :=
     let e := BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 42))) in
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := cons e nil |} nil;
@@ -629,7 +807,7 @@ Lemma module_42_exported_round_trip :
 Proof. vm_compute. reflexivity. Qed.
 
 Definition module_tableops := {|
-  mod_types := cons (Tf nil (cons (T_num T_i32) nil)) nil;
+  mod_types := cons (cons (Sub_type true nil (Comp_func (Tf nil (cons (T_num T_i32) nil)))) nil) nil;
   mod_funcs :=
     let e := BI_const_num (VAL_int32 (Wasm_int.Int32.repr (Z.of_nat 1))) in
     cons {| modfunc_type := 0%N; modfunc_locals := nil; modfunc_body := cons e nil |} nil;

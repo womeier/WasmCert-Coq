@@ -151,6 +151,40 @@ Definition read_u32 {n} (input : Toks n) :=
   | None => None
   end.
 
+Lemma getTok_consumed_one : forall n (input : Toks n) first,
+    Success.getTok input = Some first ->
+    (n - Success.size first = 1)%nat.
+Proof.
+  intros n input first Htok.
+  destruct n as [|n].
+  - pose proof (Success.small first). lia.
+  - unfold Success.getTok in Htok.
+    destruct (uncons input) as [[b tail]|]; [|discriminate].
+    cbn [option_map Success.fromView uncurry] in Htok.
+    inversion Htok; subst first.
+    cbn [Success.size]. lia.
+Qed.
+
+Lemma read_uleb_consumed_bound : forall fuel n (input : Toks n) result,
+    read_uleb fuel input = Some result ->
+    (n - Success.size result <= fuel)%nat.
+Proof.
+  induction fuel as [|fuel IH]; intros n input result Hread; [discriminate |].
+  cbn [read_uleb] in Hread.
+  destruct (Success.getTok input) as [first|] eqn:Hfirst; [|discriminate].
+  pose proof (getTok_consumed_one n input first Hfirst) as Hcount.
+  destruct (N.ltb (Byte.to_N (Success.value first)) 128).
+  - inversion Hread; subst result. cbn [Success.map Success.size]. lia.
+  - destruct (read_uleb fuel (Success.leftovers first)) as [next|] eqn:Hnext;
+      [|discriminate].
+    cbn [option_map] in Hread. inversion Hread; subst result.
+    specialize (IH _ _ next Hnext).
+    pose proof (Success.small first).
+    pose proof (Success.small next).
+    cbn [Success.map Success.and Success.lt_lift Success.le_lift Success.size].
+    lia.
+Qed.
+
 Definition read_u32_pair {n} (input : Toks n) :=
   match read_u32 input with
   | Some first =>

@@ -103,6 +103,22 @@ Definition type_update_ref_is_null (ct : checker_type) : option checker_type :=
       else None
   end.
 
+Definition is_i31_t (t : value_type) : bool :=
+  match t with
+  | T_ref (Ref_type _ HT_i31) | T_bot => true
+  | _ => false
+  end.
+
+Definition type_update_i31_get (ct : checker_type) : option checker_type :=
+  match ct.(CT_type) with
+  | nil =>
+      if ct.(CT_unr) then Some <<[::T_num T_i32], true>> else None
+  | t :: ts' =>
+      if is_i31_t t then
+        Some <<(T_num T_i32 :: ts'), ct.(CT_unr)>>
+      else None
+  end.
+
 Definition type_update_drop (ct : checker_type) : option checker_type :=
   match ct.(CT_type) with
   | nil =>
@@ -117,8 +133,16 @@ Definition type_update_ref_as_non_null (ct : checker_type) : option checker_type
   match ct.(CT_type) with
   | nil =>
       if ct.(CT_unr) then Some <<[::T_bot], true>> else None
-  | t :: _ => if is_ref_t t then Some ct else None
+  | t :: ts => if is_ref_t t
+               then Some <<non_nullable_type t :: ts, ct.(CT_unr)>> else None
   end.
+
+Definition type_update_br_on_null (ct : checker_type)
+    (labels : list value_type) : option checker_type :=
+  let t := head T_bot ct.(CT_type) in
+  if is_ref_t t then
+    type_update ct (t :: labels) (non_nullable_type t :: labels)
+  else None.
 
 (** With subtyping in Wasm 2.0, br_table now needs to find the common subtype to be consumed. **)
 
@@ -169,6 +193,9 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       | BI_const_vec v => type_update ts [::] [::T_vec (typeof_vec v)]
       | BI_ref_null t => type_update ts [::]  [::T_ref (Ref_type true t)]
       | BI_ref_is_null => type_update_ref_is_null ts
+      | BI_ref_i31 =>
+          type_update ts [::T_num T_i32] [::T_ref (Ref_type false HT_i31)]
+      | BI_i31_get _ => type_update_i31_get ts
       | BI_ref_as_non_null => type_update_ref_as_non_null ts
       (* Parsing and dispatch are available, but accepting these instructions
          requires closed indexed function reference typing. Never substitute
@@ -178,15 +205,22 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           match lookup_N C.(tc_labels) x with
           | Some label_types =>
               if (label_types != nil) && is_ref_t (head T_bot label_types)
-              then type_update ts label_types (behead label_types)
+               then type_update ts
+                 (nullable_type (head T_bot label_types) :: behead label_types)
+                 (behead label_types)
               else None
-          | None => None
-          end
+           | None => None
+           end
+       | BI_br_on_null x =>
+           match lookup_N C.(tc_labels) x with
+           | Some labels => type_update_br_on_null ts labels
+           | None => None
+           end
       | BI_ref_func x =>
           match lookup_N C.(tc_funcs) x with
           | Some _ =>
               if x \in C.(tc_refs)
-              then type_update ts [::] [::T_ref T_funcref]
+               then type_update ts [::] [::T_ref (Ref_type false HT_func)]
               else None
           | _ => None
           end
@@ -293,8 +327,8 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       | BI_call_indirect x y =>
           match lookup_N C.(tc_tables) x with
           | Some tabt =>
-               if reference_type_match C.(tc_types) tabt.(tt_elem_type) T_funcref then
-                match lookup_N (tc_types C) y with
+                if ref_heap tabt.(tt_elem_type) == HT_func then
+                match lookup_function_type (tc_types C) y with
                 | Some (Tf tn tm) =>
                     type_update ts ((T_num T_i32 :: tn)) tm
                 | None => None 
@@ -308,7 +342,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
               match lookup_N (tc_funcs C) x with
               | None => None 
               | Some (Tf tn tm) =>
-                  if (t2s == tm) then
+                  if (tm <ts: t2s) then
                     type_update_top ts (tn) nil
                   else None
               end
@@ -319,10 +353,10 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           | Some t2s =>
               match lookup_N C.(tc_tables) x with
               | Some tabt =>
-                   if reference_type_match C.(tc_types) tabt.(tt_elem_type) T_funcref then
-                    match lookup_N (tc_types C) y with
+                    if ref_heap tabt.(tt_elem_type) == HT_func then
+                    match lookup_function_type (tc_types C) y with
                     | Some (Tf tn tm) =>
-                        if (t2s == tm) then
+                        if (tm <ts: t2s) then
                           type_update_top ts ((T_num T_i32 :: tn)) nil
                         else None
                     | None => None 
@@ -529,9 +563,17 @@ Definition rev_tf (tf: function_type) :=
   | Tf tn tm => Tf (rev tn) (rev tm)
   end.
 
+Definition rev_source_subtype (t : source_subtype) : source_subtype :=
+  Sub_type t.(subtype_final) t.(subtype_supers)
+    (match t.(subtype_composite) with
+     | Comp_func f => Comp_func (rev_tf f)
+     | Comp_struct fields => Comp_struct fields
+     | Comp_array field => Comp_array field
+     end).
+
 Definition context_reverse (C: t_context): t_context :=
   {|
-    tc_types := map rev_tf C.(tc_types);
+    tc_types := map rev_source_subtype C.(tc_types);
     tc_funcs := map rev_tf C.(tc_funcs);
     tc_tables := C.(tc_tables);
     tc_mems := C.(tc_mems);

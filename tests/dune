@@ -59,3 +59,17 @@
  (action
   (run bash %{dep:wast_assertion_phases_test.sh} %{dep:../run_wast.sh}
    %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps gc_i31_binary.py)
+ (action
+  (run python3 %{dep:gc_i31_binary.py}
+   %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps gc_declarations_binary.py)
+ (action
+  (run python3 %{dep:gc_declarations_binary.py}
+   %{exe:../src/wasm_coq_interpreter.exe})))

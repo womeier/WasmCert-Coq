@@ -28,7 +28,9 @@ lockfile="$results_dir/.lock"
 : > "$lockfile"
 trap 'rm -rf "$results_dir"' EXIT
 
-# Worker function: write "passed total infrastructure_failures" to a result file.
+# Worker function: write "passed total errors" to a result file.
+# A crash or missing/malformed summary must fail the aggregate run, even when
+# other files passed.  In particular, it must not disappear as "0 0".
 # Output is grouped per-file under flock so parallel jobs don't interleave their reports.
 run_one() {
   local wastfile="$1"
@@ -59,8 +61,8 @@ run_one() {
     failed=1
   else
     local result_line
-    if result_line=$(printf '%s' "$cleaned" | grep -m1 "Result: "); then
-      if [[ "$result_line" =~ Result:\ ([0-9]+)/([0-9]+) ]] &&
+    if result_line=$(printf '%s' "$cleaned" | grep "Result: "); then
+      if [[ "$result_line" != *$'\n'* && "$result_line" =~ Result:\ ([0-9]+)/([0-9]+) ]] &&
          (( BASH_REMATCH[2] > 0 && BASH_REMATCH[1] <= BASH_REMATCH[2] )); then
         echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]} 0" > "$results_dir/$base"
         summary="DONE: $base — $result_line"
@@ -99,15 +101,20 @@ printf '%s\n' "${files[@]}" | xargs -P "$jobs" -I {} bash -c 'run_one "$@"' _ {}
 # Aggregate results
 total_passed=0
 total_tests=0
-infrastructure_failures=0
+total_errors=0
 for f in "$results_dir"/*; do
-  read -r p t failures < "$f"
+  read -r p t e < "$f"
   total_passed=$((total_passed + p))
   total_tests=$((total_tests + t))
-  infrastructure_failures=$((infrastructure_failures + failures))
+  total_errors=$((total_errors + e))
 done
 
 echo "================"
+if (( total_errors != 0 )); then
+  echo "FAILED: $total_errors file(s) crashed or had missing/invalid result summaries." >&2
+  echo "Reported assertions (excluding those files): $total_passed/$total_tests" >&2
+  exit 1
+fi
 if (( total_tests == 0 )); then
   echo "No tests run." >&2
   exit 1
@@ -115,10 +122,6 @@ fi
 
 percentage=$(awk "BEGIN { printf \"%.2f\", ($total_passed / $total_tests) * 100 }")
 echo "Total Passed: $total_passed/$total_tests ($percentage%)"
-if (( infrastructure_failures > 0 )); then
-  echo "FAILED: $infrastructure_failures file(s) crashed or produced an invalid/missing result."
-  exit 1
-fi
 
 if (( total_passed < total_tests )); then
   echo "FAILED: $((total_tests - total_passed)) test(s) did not pass."

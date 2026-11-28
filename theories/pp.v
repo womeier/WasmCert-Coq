@@ -399,6 +399,7 @@ Definition pp_value_ref (v : value_ref) : string :=
   | VAL_ref_null t => pp_reference_type (Ref_type true t) ++ ".null" ++ newline
   | VAL_ref_func a => "funcref " ++ pp_addr a ++ newline
   | VAL_ref_extern a => "externref " ++ pp_addr a ++ newline
+  | VAL_ref_i31 n => "i31ref " ++ pp_Z (Wasm_int.Int31.unsigned n) ++ newline
   end.
 
 Definition pp_value (v: value) : string :=
@@ -415,6 +416,16 @@ Definition pp_values_hint_empty (vs : list value) : string :=
   match vs with
   | nil => "(empty)"
   | _ => pp_values vs
+  end.
+
+Definition pp_local_values (vs : list (option value)) : string :=
+  match vs with
+  | nil => pp_values_hint_empty nil
+  | _ => String.concat "" (List.map
+      (fun slot => match slot with
+                   | Some v => pp_value v
+                   | None => "<uninitialized>"
+                   end) vs)
   end.
 
 Definition pp_unary_op_i (uoi : unop_i) : string :=
@@ -606,9 +617,13 @@ Fixpoint pp_basic_instruction (i : indentation) (be : basic_instruction) : strin
   | BI_ref_is_null => indent i (with_fg be_style "ref.is_null " ++ newline)
   | BI_ref_func addr => indent i (with_fg be_style "ref.func " ++ pp_addr addr ++ newline)
   | BI_ref_as_non_null => indent i (with_fg be_style "ref.as_non_null" ++ newline)
+  | BI_ref_i31 => indent i (with_fg be_style "ref.i31" ++ newline)
+  | BI_i31_get SX_S => indent i (with_fg be_style "i31.get_s" ++ newline)
+  | BI_i31_get SX_U => indent i (with_fg be_style "i31.get_u" ++ newline)
   | BI_call_ref x => indent i (with_fg be_style "call_ref " ++ pp_id x ++ newline)
   | BI_return_call_ref x => indent i (with_fg be_style "return_call_ref " ++ pp_id x ++ newline)
   | BI_br_on_non_null x => indent i (with_fg be_style "br_on_non_null " ++ pp_id x ++ newline)
+  | BI_br_on_null x => indent i (with_fg be_style "br_on_null " ++ pp_id x ++ newline)
   | BI_block tf bes =>
     indent i (with_fg be_style "block" ++ with_fg type_style (pp_block_type tf) ++ newline)
     ++ pp_basic_instructions bes (S i)
@@ -774,6 +789,8 @@ Fixpoint pp_administrative_instruction (n : indentation) (e : administrative_ins
     indent n (with_fg ae_style "ref " ++ pp_addr a ++ newline)
   | AI_ref_extern a =>
     indent n (with_fg ae_style "ref_extern " ++ pp_addr a ++ newline)
+  | AI_ref_i31 v =>
+    indent n (with_fg ae_style "ref_i31 " ++ pp_Z (Wasm_int.Int31.unsigned v) ++ newline)
   | AI_invoke a =>
     indent n (with_fg ae_style "invoke " ++ pp_addr a ++ newline)
   | AI_return_invoke a =>
@@ -788,7 +805,7 @@ Fixpoint pp_administrative_instruction (n : indentation) (e : administrative_ins
   | AI_frame n f es =>
     indent n (with_fg ae_style "frame " ++ string_of_nat n ++ newline) ++
     (* TODO: inst? *)
-    indent n (with_fg ae_style "with values " ++ pp_values_hint_empty f.(f_locs) ++ newline) ++
+    indent n (with_fg ae_style "with values " ++ pp_local_values f.(f_locs) ++ newline) ++
     pp_administrative_instructions (n.+1) es ++
     indent n (with_fg ae_style "end frame" ++ newline)
   end.
@@ -835,7 +852,7 @@ Definition pp_store (n : indentation) (s : store_record) : string :=
 Definition pp_config_tuple_except_store (cfg : store_record * frame * list administrative_instruction) : string :=
   let '(s, f, es) := cfg in
   pp_administrative_instructions_hint_empty 0 es ++
-  "with values " ++ pp_values_hint_empty f.(f_locs) ++ newline.
+  "with values " ++ pp_local_values f.(f_locs) ++ newline.
 
 Definition pp_cfg_tuple_ctx_except_store (cfg: cfg_tuple_ctx) : string :=
   let '(s, ccs, sc, oe) := cfg in

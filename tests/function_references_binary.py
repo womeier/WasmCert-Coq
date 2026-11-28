@@ -11,7 +11,8 @@ import sys
 import tempfile
 
 
-def module(body, table=None, declare=True, imports=None, globals=None):
+def module(body, table=None, declare=True, imports=None, globals=None, locals=None,
+           callee_body="412a", callee_locals="00"):
     prefix = bytes.fromhex(
         "0061736d01000000 0105016000017f"
     )
@@ -31,8 +32,10 @@ def module(body, table=None, declare=True, imports=None, globals=None):
     prefix += bytes.fromhex("070801046d61696e0001")
     if declare:
         prefix += bytes.fromhex("09050103000100")
-    first = bytes.fromhex("0400412a0b")
-    second = bytes([len(body) + 2, 0]) + body + b"\x0b"
+    callee = bytes.fromhex(callee_locals + callee_body + "0b")
+    first = bytes([len(callee)]) + callee
+    declarations = b"\x00" if locals is None else bytes.fromhex(locals)
+    second = bytes([len(body) + len(declarations) + 1]) + declarations + body + b"\x0b"
     code = b"\x02" + first + second
     assert len(code) < 128
     return prefix + b"\x0a" + bytes([len(code)]) + code
@@ -60,6 +63,24 @@ cases = [
     ("branch_numeric_result", "027fd070d60041070b", 123, "instantiation error:"),
     ("branch_numeric_operand", "02704100d600d0700bd1", 123, "instantiation error:"),
     ("branch_invalid_label", "d070d6014107", 123, "instantiation error:"),
+    ("nonnull_ref_func_block", "026470d2000bd1", 0, "i32.const 0"),
+    ("nonnull_refinement_trap", "026470d070d40bd1", 0, "Execution returned a trap"),
+    ("nullable_cannot_satisfy_nonnull", "026470d0700bd1",
+     123, "Module type checking failure:"),
+    ("ref_null_requires_heap_not_reference_type", "d06370d1",
+     123, "error in parsing module"),
+    ("null_branch_consumes_reference", "027f412ad070d5001a1a41070b",
+     0, "i32.const 42"),
+    ("nonnull_null_branch_retains_reference", "027f412ad200d5001a1a41070b",
+     0, "i32.const 7"),
+    ("external_null_branch", "027f412ad06fd5001a1a41070b",
+     0, "i32.const 42"),
+    ("null_branch_numeric_operand", "4100d500", 123, "Module type checking failure:"),
+    ("null_branch_missing_operand", "d500", 123, "Module type checking failure:"),
+    ("null_branch_invalid_label", "d070d501", 123, "Module type checking failure:"),
+    ("null_branch_missing_label_argument", "d070d500", 123, "Module type checking failure:"),
+    ("null_branch_truncated_index", "d580", 123, "error in parsing module"),
+    ("null_branch_overflow_index", "d58080808010", 123, "error in parsing module"),
 ]
 
 table_cases = [
@@ -97,14 +118,42 @@ table_cases = [
      "014000700002d200", 123, "error in parsing module"),
     ("table_legacy_default", "41002500d141012500d16a",
      "01700002", 0, "i32.const 2"),
+    ("table_nonnull_function_initializer", "41002500d141012500d16a",
+     "01400064700002d2000b", 0, "i32.const 0"),
+    ("table_nonnull_indirect_call", "4100110000",
+     "01400064700001d2000b", 0, "i32.const 42"),
+    ("table_nonnull_indirect_tail_call", "4100130000",
+     "01400064700001d2000b", 0, "i32.const 42"),
+    ("table_nonnull_default_rejected", "4107",
+     "0164700002", 123, "Module type checking failure:"),
+    ("table_nonnull_null_initializer_rejected", "4107",
+     "01400064700002d0700b", 123, "Module type checking failure:"),
+    ("table_explicit_nullable_default", "41002500d1",
+     "0163700001", 0, "i32.const 1"),
+    ("table_nullable_refined_nonnull_result", "02647041002500d40bd1",
+     "014000700001d2000b", 0, "i32.const 0"),
+    ("table_nullable_without_refinement_rejected", "026470410025000bd1",
+     "014000700001d2000b", 123, "Module type checking failure:"),
+    ("table_nullable_branches_to_nonnull_label", "02647041002500d600000bd1",
+     "014000700001d2000b", 0, "i32.const 0"),
+    ("table_null_nonnull_branch_falls_through", "02647041002500d600000bd1",
+     "014000700001d0700b", 0, "Execution returned a trap"),
+    ("table_null_branch_refines_fallthrough_for_nonnull_store",
+     "410041002500d500260141002501d1",
+     "024000700001d2000b400064700001d2000b", 0, "i32.const 0"),
+    ("table_null_branch_skips_nonnull_store",
+     "410741002500d500260141002501d1",
+     "024000700001d0700b400064700001d2000b", 0, "i32.const 7"),
 ]
 
 exe = str(pathlib.Path(sys.argv[1]).resolve())
 
 
-def check_case(directory, name, body, status, expected, *, table=None, declare=True):
+def check_case(directory, name, body, status, expected, *, table=None, declare=True, locals=None,
+               callee_body="412a", callee_locals="00"):
     path = pathlib.Path(directory) / (name + ".wasm")
-    path.write_bytes(module(bytes.fromhex(body), table, declare))
+    path.write_bytes(module(bytes.fromhex(body), table, declare, locals=locals,
+                            callee_body=callee_body, callee_locals=callee_locals))
     result = subprocess.run(
         [exe, str(path), "-r", "main"], capture_output=True, text=True
     )
@@ -143,12 +192,121 @@ def check_imported_initializer(directory):
         raise AssertionError(f"table_imported_immutable: exit {result.returncode}; {output!r}")
 
 
+def check_exported_reference_argument(directory):
+    data = bytes.fromhex(
+        "0061736d01000000 010a026000017f60016f017f 0303020001 "
+        "070801046d61696e0001 0a0c020400412a0b05002000d10b"
+    )
+    encoded = "".join(f"\\{b:02x}" for b in data)
+    path = pathlib.Path(directory) / "exported_reference_argument.wast"
+    path.write_text(
+        f'(module binary "{encoded}")\n'
+        '(assert_return (invoke "main" (ref.extern 23)) (i32.const 0))\n'
+        '(assert_return (invoke "main" (ref.null extern)) (i32.const 1))\n'
+    )
+    result = subprocess.run([exe, "--wast", str(path)], capture_output=True, text=True)
+    output = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout + result.stderr)
+    if result.returncode != 0 or "Result: 3/3 (100.00%)" not in output:
+        raise AssertionError(f"exported_reference_argument: exit {result.returncode}; {output!r}")
+
+
+initialization_cases = [
+    ("nonnull_unused_slot", "4107", 0, "i32.const 7"),
+    ("nonnull_set_get", "d20021002000d1", 0, "i32.const 0"),
+    ("nonnull_tee_get", "d2002200d11a2000d1", 0, "i32.const 0"),
+    ("nonnull_read_before_write", "2000d1", 123, "Module type checking failure:"),
+    ("nonnull_unreachable_read", "002000d1", 123, "Module type checking failure:"),
+    ("nonnull_null_write", "d07021004107", 123, "Module type checking failure:"),
+    ("nonnull_block_internal_write_read", "0240d200210020001a0b4107",
+     0, "i32.const 7"),
+    ("nonnull_block_forgets_write", "0240d20021000b2000d1",
+     123, "Module type checking failure:"),
+    ("nonnull_parent_write_survives_block", "d2002100024020001a0b2000d1",
+     0, "i32.const 0"),
+    ("nonnull_loop_internal_write_read", "0340d200210020001a0b4107",
+     0, "i32.const 7"),
+    ("nonnull_loop_reads_before_write", "034020001ad20021000b4107",
+     123, "Module type checking failure:"),
+    ("nonnull_loop_forgets_write", "0340d20021000b2000d1",
+     123, "Module type checking failure:"),
+    ("nonnull_if_arms_independent", "41010440d20021000520001a0b4107",
+     123, "Module type checking failure:"),
+    ("nonnull_if_forgets_both_writes", "41010440d200210005d20021000b2000d1",
+     123, "Module type checking failure:"),
+    ("nonnull_parent_write_visible_in_if", "d20021004101044020001a0520001a0b2000d1",
+     0, "i32.const 0"),
+    ("nonnull_null_refinement_traps_before_write", "d070d421002000d1",
+     0, "Execution returned a trap"),
+]
+
+def check_tail_covariance(directory, indirect, name, callee_results, caller_results,
+                          callee_body, status, expected):
+    # Keep this independent of indexed-reference closing: these are abstract
+    # function/extern heaps with genuine non-null -> nullable result covariance.
+    def section(tag, payload):
+        assert len(payload) < 128
+        return bytes([tag, len(payload)]) + payload
+
+    types = bytes.fromhex("036000" + callee_results + "6000" + caller_results + "6000017f")
+    data = bytes.fromhex("0061736d01000000") + section(1, types)
+    data += section(3, bytes.fromhex("03000102"))
+    if indirect:
+        data += section(4, bytes.fromhex("01700001"))
+    data += section(7, bytes.fromhex("01046d61696e0002"))
+    data += section(9, bytes.fromhex("010041000b0100") if indirect
+                    else bytes.fromhex("0103000100"))
+    bodies = [callee_body, "4100130000" if indirect else "1200", "1001d1"]
+    code = b"\x03"
+    for body in bodies:
+        encoded = bytes.fromhex("00" + body + "0b")
+        code += bytes([len(encoded)]) + encoded
+    data += section(10, code)
+    path = pathlib.Path(directory) / (("indirect_" if indirect else "direct_") + name + ".wasm")
+    path.write_bytes(data)
+    result = subprocess.run([exe, str(path), "-r", "main"], capture_output=True, text=True)
+    output = re.sub(r"\x1b\[[0-9;]*m", "", result.stdout + result.stderr)
+    if result.returncode != status or expected not in output:
+        raise AssertionError(f"{path.stem}: exit {result.returncode}; {output!r}")
+
+
+tail_covariance_cases = [
+    ("nonnull_to_nullable", "016470", "0170", "d200", 0, "i32.const 0"),
+    ("nonnull_equal", "016470", "016470", "d200", 0, "i32.const 0"),
+    ("nullable_equal", "0170", "0170", "d070", 0, "i32.const 1"),
+    ("nullable_to_nonnull_rejected", "0170", "016470", "d070",
+     123, "Module type checking failure:"),
+    ("unrelated_heap_rejected", "016f", "0170", "d06f",
+     123, "Module type checking failure:"),
+    ("result_arity_rejected", "00", "0170", "",
+     123, "Module type checking failure:"),
+]
+
+
 with tempfile.TemporaryDirectory() as directory:
     for name, body, status, expected in cases:
         check_case(directory, name, body, status, expected)
     for name, body, table, status, expected in table_cases:
         check_case(directory, name, body, status, expected, table=table, declare=False)
     check_imported_initializer(directory)
+    check_exported_reference_argument(directory)
+    check_case(directory, "default_local_slot", "2000", 0, "i32.const 0",
+               locals="01017f")
+    check_case(directory, "set_local_slot", "410721002000", 0, "i32.const 7",
+               locals="01017f")
+    check_case(directory, "tee_local_slot", "4107220020006a", 0, "i32.const 14",
+               locals="01017f")
+    check_case(directory, "nullable_local_slot", "2000d1", 0, "i32.const 1",
+               locals="010170")
+    for name, body, status, expected in initialization_cases:
+        check_case(directory, name, body, status, expected, locals="01016470")
+    for opcode, name in [("10", "native"), ("12", "tail_native")]:
+        check_case(directory, name + "_nonnull_callee_slots", opcode + "00",
+                   0, "i32.const 42", callee_locals="01016470",
+                   callee_body="d20021002000d11a412a")
+    for indirect in [False, True]:
+        for case in tail_covariance_cases:
+            check_tail_covariance(directory, indirect, *case)
 
-total = len(cases) + len(table_cases) + 1
+total = (len(cases) + len(table_cases) + len(initialization_cases)
+         + 2 * len(tail_covariance_cases) + 8)
 print(f"function-reference binary runtime regressions: {total}/{total}")

@@ -4,7 +4,7 @@ From parseque Require Import Parseque Success.
 From mathcomp Require Import ssrbool eqtype.
 From Wasm Require Import datatypes_properties binary_format_printer
   binary_format_parser binary_locals_properties binary_vector_properties
-  binary_uleb128 binary_uleb128_printer.
+  binary_uleb128 binary_uleb128_printer gc_types.
 
 Definition unpack_locals (decls : list (nat * value_type)) : list value_type :=
   List.concat (List.map (fun '(count, type) => List.repeat type count) decls).
@@ -141,7 +141,8 @@ Qed.
 Definition printable_local_type type :=
   match type with
   | T_num _ | T_vec _ => True
-  | T_ref reference => reference = T_funcref \/ reference = T_externref
+  | T_ref reference =>
+      exists abstract, reference = shared_reference_of_abstract abstract
   | T_bot => False
   end.
 
@@ -152,7 +153,9 @@ Proof.
   intros [number | vector | reference |] suffix Htype.
   - destruct number; constructor.
   - destruct vector; constructor.
-  - destruct Htype as [-> | ->]; constructor.
+  - destruct Htype as [[nullable heap] Hreference]. subst reference.
+    destruct nullable, heap;
+      eapply valtype_abstract_reference; constructor; constructor.
   - contradiction.
 Qed.
 

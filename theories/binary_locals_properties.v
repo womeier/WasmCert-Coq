@@ -1,9 +1,10 @@
-(** Binary local-declaration grammars for the concrete types currently modeled.
-    Typed reference encodings require the shared function-reference extension. *)
+(** Binary local-declaration grammars for the production abstract type fragment.
+    Indexed source references remain behind the shared canonical closing boundary. *)
 From Stdlib Require Import List Strings.Byte NArith.
 From parseque Require Import Parseque Success.
 From Wasm Require Import datatypes_properties binary_format_parser
-  binary_format_parser_properties binary_vector_properties binary_uleb128.
+  binary_format_parser_properties binary_vector_properties binary_uleb128
+  gc_binary gc_binary_parser_properties gc_types.
 
 Inductive concrete_valtype_prefix :
     list Byte.byte -> value_type -> list Byte.byte -> Prop :=
@@ -20,7 +21,11 @@ Inductive concrete_valtype_prefix :
 | valtype_funcref : forall suffix,
     concrete_valtype_prefix (x70 :: suffix) (T_ref T_funcref) suffix
 | valtype_externref : forall suffix,
-    concrete_valtype_prefix (x6f :: suffix) (T_ref T_externref) suffix.
+    concrete_valtype_prefix (x6f :: suffix) (T_ref T_externref) suffix
+| valtype_abstract_reference : forall input reference suffix,
+    abstract_reference_encoding input reference suffix ->
+    concrete_valtype_prefix input
+      (T_ref (shared_reference_of_abstract reference)) suffix.
 
 Lemma parse_concrete_valtype_prefix : forall n m (input : SizedList Byte.byte m)
     type suffix (Hle : (m <= n)%nat),
@@ -32,7 +37,13 @@ Lemma parse_concrete_valtype_prefix : forall n m (input : SizedList Byte.byte m)
 Proof.
   intros n m [input Hlength] type suffix Hle Hgrammar.
   cbn [Sized.value] in Hgrammar.
-  inversion Hgrammar; subst; reflexivity.
+  inversion Hgrammar; subst; try reflexivity.
+  match goal with
+  | Href : abstract_reference_encoding _ _ _ |- _ => destruct Href
+  end;
+    match goal with
+    | Hheap : abstract_heap_encoding _ _ |- _ => destruct Hheap
+    end; reflexivity.
 Qed.
 
 Lemma parse_concrete_valtype_sound : forall n m (input : SizedList Byte.byte m)
@@ -43,11 +54,35 @@ Lemma parse_concrete_valtype_sound : forall n m (input : SizedList Byte.byte m)
         Hle input) = Some (type, suffix) ->
     concrete_valtype_prefix (@Sized.value _ _ _ input) type suffix.
 Proof.
-  intros n m [input Hlength] type suffix Hle Hobs.
-  destruct input as [|b input]; cbn in Hlength; subst m.
-  - discriminate.
-  - destruct b; cbn in Hobs; try discriminate;
-      inversion Hobs; subst; constructor.
+  intros n m input type suffix Hle Hobs.
+  unfold parse_value_type in Hobs.
+  apply parser_alt_prefix_inv in Hobs as [Hnum | Hrest].
+  - apply parser_map_prefix_inv in Hnum as [number [Htype Hnumber]].
+    subst type. destruct input as [input Hlength].
+    destruct input as [|b input]; cbn in Hlength; subst m; [discriminate |].
+    destruct b; cbn in Hnumber; try discriminate;
+      inversion Hnumber; subst; constructor.
+  - apply parser_alt_prefix_inv in Hrest as [Hvec | Href].
+    + apply parser_map_prefix_inv in Hvec as [vector [Htype Hvector]].
+      subst type. destruct input as [input Hlength].
+      destruct input as [|b input]; cbn in Hlength; subst m; [discriminate |].
+      destruct b; cbn in Hvector; try discriminate;
+        inversion Hvector; subst; constructor.
+    + apply parser_map_prefix_inv in Href as [reference [Htype Hreference]].
+      subst type. unfold parse_reference_type in Hreference.
+      apply parser_map_prefix_inv in Hreference as [abstract [Hreference Habstract]].
+      subst reference.
+      destruct (runParser (parse_gc_abstract_reference_type :
+        Parser (SizedList Byte.byte) Byte.byte option abstract_reference_type n)
+        Hle input) as [result|] eqn:Hrun; [|discriminate].
+      cbn [observe_reader] in Habstract.
+      inversion Habstract; subst abstract suffix.
+      destruct (parse_gc_abstract_reference_sound n m Hle input result Hrun)
+        as [bytes [Hinput Hbytes]].
+      unfold binary_parser_combinator_properties.output_bytes,
+        binary_parser_combinator_properties.input_bytes in Hinput.
+      apply valtype_abstract_reference. rewrite Hinput.
+      now apply abstract_reference_encoding_suffix.
 Qed.
 
 Inductive local_decl_prefix :

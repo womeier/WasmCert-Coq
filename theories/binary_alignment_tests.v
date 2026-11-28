@@ -8,7 +8,7 @@ From Wasm Require Import binary_format_parser binary_format_printer instantiatio
   datatypes_properties.
 
 Definition alignment_module_at (align offset : N) (drop : bool) := {|
-  mod_types := Tf nil nil :: nil;
+  mod_types := (Sub_type true nil (Comp_func (Tf nil nil)) :: nil) :: nil;
   mod_funcs :=
     {| modfunc_type := 0%N; modfunc_locals := nil;
        modfunc_body :=
