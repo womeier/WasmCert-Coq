@@ -15,6 +15,36 @@ Unset Printing Implicit Defensive.
 
 Definition v128_size: N := 16%N.
 
+Definition memarg_flags (marg: memarg) : N :=
+  if N.eqb marg.(memarg_memory) 0 then marg.(memarg_align)
+  else N.add marg.(memarg_align) 64.
+
+(* Bit 6 requests an explicit memory index; higher flag bits are reserved. *)
+Definition decode_memarg_flags (flags: N) : option (N * bool) :=
+  if N.ltb flags 64 then Some (flags, false)
+  else if N.ltb flags 128 then Some (N.sub flags 64, true)
+  else None.
+
+(* Shared by binary parsing and printing: bulk data instructions require a
+   data-count section, including when nested inside structured instructions. *)
+Fixpoint be_datacount_required (be: basic_instruction) :=
+  let bes_required bes :=
+    List.fold_left orb (List.map be_datacount_required bes) false in
+  match be with
+  | BI_memory_init _ _ | BI_data_drop _ => true
+  | BI_block _ bes | BI_loop _ bes => bes_required bes
+  | BI_if _ bes1 bes2 => orb (bes_required bes1) (bes_required bes2)
+  | _ => false
+  end.
+
+Fixpoint bes_datacount_required (bes: expr) :=
+  match bes with
+  | nil => false
+  | cons be bes' =>
+      if be_datacount_required be then true
+      else bes_datacount_required bes'
+  end.
+
 Section Operations.
   Context `{memory: BlockUpdateMemory} `{hfc: host_function_class}.
 
@@ -109,7 +139,13 @@ Definition mem_grow (m : meminst) (len_delta : N) : option meminst :=
     end
   else None.
 
+(** All memories in this pre-address-width AST are memory32. Final binary
+    syntax accepts u64 offsets; validation retains the memory32 bound. *)
+Definition memarg_offset32_valid (m_arg : memarg) : bool :=
+  N.ltb m_arg.(memarg_offset) 4294967296%N.
+
 Definition load_vec_bounds (lv_arg: load_vec_arg) (m_arg: memarg) : bool :=
+  memarg_offset32_valid m_arg &&
   match lv_arg with
   | LVA_extend ptv sx =>
       let (n, m) := ptv in
@@ -123,10 +159,12 @@ Definition load_vec_bounds (lv_arg: load_vec_arg) (m_arg: memarg) : bool :=
   end.
 
 Definition load_store_vec_lane_bounds (width: vwidth) (m_arg: memarg) (x: laneidx) : bool :=
-   (N.leb (N.pow 2 (memarg_align m_arg)) (width / 8%N))%N &&
-     (N.ltb x (128%N / width)%N).
+   memarg_offset32_valid m_arg &&
+   ((N.leb (N.pow 2 (memarg_align m_arg)) (width / 8%N))%N &&
+      (N.ltb x (128%N / width)%N)).
 
 Definition store_vec_bounds (m_arg: memarg) : bool :=
+      memarg_offset32_valid m_arg &&
       N.leb (N.pow 2 m_arg.(memarg_align)) v128_size.
 
 (* TODO: We crucially need documentation here. *)
@@ -878,11 +916,11 @@ Definition sglob (s : store_record) (i : moduleinst) (j : globalidx) : option gl
 Definition sglob_val (s : store_record) (i : moduleinst) (j : globalidx) : option value :=
   option_map g_val (sglob s i j).
 
-Definition smem_ind (s : store_record) (i : moduleinst) : option memaddr :=
-  lookup_N i.(inst_mems) 0%N.
+Definition smem_ind (s : store_record) (i : moduleinst) (x: memidx) : option memaddr :=
+  lookup_N i.(inst_mems) x.
 
-Definition smem (s: store_record) (inst: moduleinst) : option meminst :=
-  match lookup_N inst.(inst_mems) 0%N with
+Definition smem (s: store_record) (inst: moduleinst) (x: memidx) : option meminst :=
+  match lookup_N inst.(inst_mems) x with
   | Some a => lookup_N s.(s_mems) a
   | None => None
   end.
@@ -991,8 +1029,8 @@ Definition load_vec_lane (m: meminst) (n: N) (v: value_vec) (width: vwidth) (mar
     end
   else None.
 
-Definition smem_store (s: store_record) (inst: moduleinst) (n: N) (off: static_offset) (v: value_num) (t: number_type) : option store_record :=
-  match lookup_N inst.(inst_mems) 0%N with
+Definition smem_store (s: store_record) (inst: moduleinst) (x: memidx) (n: N) (off: static_offset) (v: value_num) (t: number_type) : option store_record :=
+  match lookup_N inst.(inst_mems) x with
   | Some addr =>
       match lookup_N s.(s_mems) addr with
       | Some mem =>
@@ -1006,8 +1044,8 @@ Definition smem_store (s: store_record) (inst: moduleinst) (n: N) (off: static_o
   | None => None
   end.
 
-Definition smem_store_packed (s: store_record) (inst: moduleinst) (n: N) (off: static_offset) (v: value_num) (tp: packed_type) : option store_record :=
-  match lookup_N inst.(inst_mems) 0%N with
+Definition smem_store_packed (s: store_record) (inst: moduleinst) (x: memidx) (n: N) (off: static_offset) (v: value_num) (tp: packed_type) : option store_record :=
+  match lookup_N inst.(inst_mems) x with
   | Some addr =>
       match lookup_N s.(s_mems) addr with
       | Some mem =>
@@ -1041,7 +1079,7 @@ Definition store_vec_lane (m: meminst) (n: N) (v: value_vec) (width: vwidth) (ma
   else None.
 
 Definition smem_store_vec (s: store_record) (inst: moduleinst) (n: N) (v: value_vec) (marg: memarg) : option store_record :=
-  match lookup_N inst.(inst_mems) 0%N with
+  match lookup_N inst.(inst_mems) marg.(memarg_memory) with
   | Some addr =>
       match lookup_N s.(s_mems) addr with
       | Some mem =>
@@ -1056,7 +1094,7 @@ Definition smem_store_vec (s: store_record) (inst: moduleinst) (n: N) (v: value_
   end.
 
 Definition smem_store_vec_lane (s: store_record) (inst: moduleinst) (n: N) (v: value_vec) (width: vwidth) (marg: memarg) (x: laneidx) : option store_record :=
-  match lookup_N inst.(inst_mems) 0%N with
+  match lookup_N inst.(inst_mems) marg.(memarg_memory) with
   | Some addr =>
       match lookup_N s.(s_mems) addr with
       | Some mem =>
@@ -1070,8 +1108,8 @@ Definition smem_store_vec_lane (s: store_record) (inst: moduleinst) (n: N) (v: v
   | None => None
   end.
 
-Definition smem_grow (s: store_record) (inst: moduleinst) (n: N) : option (store_record * N) :=
-  match lookup_N inst.(inst_mems) 0%N with
+Definition smem_grow (s: store_record) (inst: moduleinst) (x: memidx) (n: N) : option (store_record * N) :=
+  match lookup_N inst.(inst_mems) x with
   | Some addr =>
       match lookup_N s.(s_mems) addr with
       | Some mem =>
@@ -1420,6 +1458,11 @@ Definition load_store_t_bounds (a : alignment_exponent) (tp : option packed_type
   | None => N.leb (N.pow 2 a) (tnum_length t)
   | Some tp' => N.leb (N.pow 2 a) (tp_length tp') && (tp_length tp' < tnum_length t) && (is_int_t t)
   end.
+
+Definition load_store_memarg_bounds (m_arg : memarg)
+    (tp : option packed_type) (t : number_type) : bool :=
+  memarg_offset32_valid m_arg &&
+  load_store_t_bounds m_arg.(memarg_align) tp t.
 
 Definition cvt_wrap t v : option value_num :=
   match t with

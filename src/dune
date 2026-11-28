@@ -4,11 +4,16 @@
   (theories Wasm Stdlib compcert Flocq mathcomp ExtLib elpi elpi_elpi HB parseque)
   (flags -w "-extraction-reserved-identifier")
 )
-
+(library
+  (name wasmcert_runtime)
+  (wrapped false)
+  (modules extract SIMD_ops utils ocaml_host)
+  (libraries wasm parray zarith unix))
 
 (executable
   (name wasm_coq_interpreter)
-  (libraries cmdliner wasm unix parray zarith)
+  (modules (:standard \ extract SIMD_ops utils ocaml_host))
+  (libraries cmdliner wasm unix parray zarith wasmcert_runtime)
   (modes (best exe))
   (public_name wasm_coq_interpreter)
   (promote (into ../))
@@ -25,4 +30,3 @@
 ; - 20: this argument will not be used by the function.
 ; - 34: unused type
 ; - 32: unused value.
-

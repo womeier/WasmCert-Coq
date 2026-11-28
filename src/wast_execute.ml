@@ -147,6 +147,24 @@ let wasm_assert_rets verbosity rets ret_exps =
   let assert_results = List.map2 (fun x y -> wasm_assert_ret verbosity x y) rets ret_exps in
   List.fold_left (fun a b -> a && b) true assert_results
 
+(* Keep parsing separate from validation/linking. A failure in a later phase
+   must not satisfy assert_malformed (or a parse failure assert_invalid). *)
+let parse_wast_module verbosity moddef =
+  try
+    match moddef.it with
+    | Textual ast_module ->
+      Parse.parse_module verbosity false (Wasm.Encode.encode ast_module)
+    | Encoded (_, bin_module) ->
+      Parse.parse_module verbosity false bin_module
+    | Quoted (_, text_module) ->
+      Parse.parse_module verbosity true text_module
+  with Wasm.Parse_error.Syntax (_, message) -> error message
+
+let require_valid_module m =
+  match Extract.module_type_checker m with
+  | (Some _, _) -> pure ()
+  | (None, _) -> error "Expected a valid module before linking/instantiation"
+
 let load_wast_module verbosity hs s ovar moddef mod_counter =
   begin try
   match moddef.it with 
@@ -175,7 +193,22 @@ let load_wast_module verbosity hs s ovar moddef mod_counter =
   | Encoded (modnamestr, bin_module) -> 
     let* m = Parse.parse_module verbosity false bin_module in
     let modname = if modnamestr = "" then ("default_module_" ^ (string_of_int mod_counter)) else modnamestr in
+    let* varname = begin match ovar with
+    | Some v ->
+      let (_, varmap) = hs in
+      begin match StringMap.find_opt v.it varmap with
+      | Some _ -> error ("Module variable name " ^ v.it ^ " already exists")
+      | None -> pure v.it
+      end
+    | None -> pure ""
+    end in
     let* (hs', s', inst_res) = Execute.instantiate_host verbosity hs s modname m in
+    let hs' =
+      if varname != "" then
+        let (exts, varmap) = hs' in
+        (exts, StringMap.add varname modname varmap)
+      else hs'
+    in
       debug_info verbosity stage (fun _ -> "Successfully instantiated module " ^ modname ^ ".\n");
       pure (hs', s', inst_res, mod_counter+1, modname)
   | Quoted (modnamestr, text_module) -> 
@@ -313,40 +346,40 @@ let run_wast_command verbosity max_call_depth cmd hs s mod_counter default_modul
         error "Unsupported wast action: Get"
       end
     | AssertInvalid (moddef, _str) ->
-      (* very ugly... *)
-      let res = (load_wast_module verbosity hs s None moddef mod_counter) in
-      begin match to_out res with
-      (* AssertInvalid shouldn't enter execution stage, so any OK result is counted as a failure *)
-      | OK _ -> 
-        error "Unexpected successful instantiation of an invalid module"
-      (* Trap still needs to update the store*)
-      | Error _ -> 
+      let* m = parse_wast_module verbosity moddef in
+      begin match Extract.module_type_checker m with
+      | (Some _, _) ->
+        error "Unexpected successful validation of an invalid module"
+      | (None, _) ->
         debug_info verbosity stage (fun _ -> "Test passed: correctly rejected an invalid module\n");
         pure (hs, s, mod_counter, default_module_name, Verdict_OK)
       end
-    (* The following three assertiosn are grouped into one *)
-    | AssertMalformed (moddef, _str)
-    | AssertUnlinkable (moddef, _str)
-    | AssertUninstantiable (moddef, _str) ->
-      let res = (load_wast_module verbosity hs s None moddef mod_counter) in
-      begin match to_out res with
+    | AssertMalformed (moddef, _str) ->
+      begin match to_out (parse_wast_module verbosity moddef) with
       | OK _ ->
-        (* This is really stupid. Is there a better way to match on host_event? *)
-        let* res_result = res in 
-        begin match res_result with
-        (* Only an OK with Cfg_res represents a successful instantiation *)
-        | (_, _, Cfg_res _, _, _) -> 
-          error "Unexpected successful instantiation of a malformed module"
-        (* OK with a trap is a failure which passes the test, but the store needs to be updated *)
-        | (_, _, Cfg_trap (s', _), _, _) -> 
-          debug_info verbosity stage (fun _ -> "Test passed: post-instantiation initialisation trapped, leading to instantiation failure correctly\n");
-          pure (hs, s', mod_counter, default_module_name, Verdict_OK)
-        | _ ->
-          error "Unexpected post-instantiation initialisation error"
-        end
-      | _ -> 
-        debug_info verbosity stage (fun _ -> "Test passed: correctly rejected a malformed/unlinkable/uninstantiable module\n");
+        error "Unexpected successful parsing of a malformed module"
+      | Error _ ->
+        debug_info verbosity stage (fun _ -> "Test passed: correctly rejected a malformed module\n");
         pure (hs, s, mod_counter, default_module_name, Verdict_OK)
+      end
+    | AssertUnlinkable (moddef, _str) ->
+      let* m = parse_wast_module verbosity moddef in
+      let* () = require_valid_module m in
+      begin match to_out (Execute.instantiate verbosity hs s m) with
+      | Error _ ->
+        debug_info verbosity stage (fun _ -> "Test passed: correctly rejected an unlinkable module\n");
+        pure (hs, s, mod_counter, default_module_name, Verdict_OK)
+      | OK _ -> error "Unexpected successful linking of an unlinkable module"
+      end
+    | AssertUninstantiable (moddef, _str) ->
+      let* m = parse_wast_module verbosity moddef in
+      let* () = require_valid_module m in
+      let* res = Execute.instantiate verbosity hs s m in
+      begin match res with
+      | Cfg_trap (s', _) ->
+        debug_info verbosity stage (fun _ -> "Test passed: instantiation trapped as expected\n");
+        pure (hs, s', mod_counter, default_module_name, Verdict_OK)
+      | _ -> error "Expected an instantiation trap"
       end
     end
   | Register (newname_utf8, ovar) ->
@@ -368,7 +401,8 @@ let run_wast_command verbosity max_call_depth cmd hs s mod_counter default_modul
     end in
     (* Updating the module exports map *)
     let exts' = begin match StringMap.find_opt oldname exts with 
-    | Some modmap -> exts |> StringMap.remove oldname |> StringMap.add newname modmap
+    (* Register adds an alias, retaining named modules and all earlier aliases. *)
+    | Some modmap -> StringMap.add newname modmap exts
     | None -> 
       (* This must mean that whatever module being registered has no export, so the registration is technically redundant. *)
       debug_info verbosity intermediate (fun _ -> "Warning: potential redundant registration since no export is found\n");
