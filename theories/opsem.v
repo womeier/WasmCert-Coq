@@ -199,6 +199,17 @@ Inductive reduce_simple : seq administrative_instruction -> seq administrative_i
       reduce_simple
         [::AI_handler n cs (v_to_e_list vs ++ [::AI_return_invoke a] ++ es)]
         (v_to_e_list vs ++ [::AI_return_invoke a])
+  | rs_ref_as_non_null_null : forall t,
+    reduce_simple [:: $V (VAL_ref (VAL_ref_null t)); AI_basic BI_ref_as_non_null] [::AI_trap]
+  | rs_ref_as_non_null : forall ref,
+    (forall t, ref <> VAL_ref_null t) ->
+    reduce_simple [:: $V (VAL_ref ref); AI_basic BI_ref_as_non_null] [::$V (VAL_ref ref)]
+  | rs_br_on_non_null_null : forall x h,
+    reduce_simple [::$V (VAL_ref (VAL_ref_null h)); AI_basic (BI_br_on_non_null x)] [::]
+  | rs_br_on_non_null : forall x ref,
+    (forall h, ref <> VAL_ref_null h) ->
+    reduce_simple [::$V (VAL_ref ref); AI_basic (BI_br_on_non_null x)]
+      [::$V (VAL_ref ref); AI_basic (BI_br x)]
 .
 
 Inductive reduce : host_state -> store_record -> frame -> list administrative_instruction ->
@@ -754,6 +765,18 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
   | r_handler_all : forall hs s f n l cs a,
       reduce hs s f [::AI_handler n (Catch_all l :: cs) [::AI_raise a]]
         hs s f [::AI_basic (BI_br l)]
+  | r_call_ref : forall hs s f x a,
+      reduce hs s f [::AI_ref a; AI_basic (BI_call_ref x)]
+        hs s f [::AI_invoke a]
+  | r_call_ref_null : forall hs s f x h,
+      reduce hs s f [::$V (VAL_ref (VAL_ref_null h)); AI_basic (BI_call_ref x)]
+        hs s f [::AI_trap]
+  | r_return_call_ref : forall hs s f x a,
+      reduce hs s f [::AI_ref a; AI_basic (BI_return_call_ref x)]
+        hs s f [::AI_return_invoke a]
+  | r_return_call_ref_null : forall hs s f x h,
+      reduce hs s f [::$V (VAL_ref (VAL_ref_null h)); AI_basic (BI_return_call_ref x)]
+        hs s f [::AI_trap]
   .
 
 Definition reduce_tuple hs_s_f_es hs'_s'_f'_es' : Prop :=

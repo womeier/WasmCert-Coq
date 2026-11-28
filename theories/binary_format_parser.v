@@ -223,9 +223,15 @@ Definition parse_return_call_indirect {n} : byte_parser basic_instruction n :=
   exact_byte x13 &>
   (((fun typ tab => BI_return_call_indirect tab typ) <$> parse_typeidx) <*> parse_tableidx).
 
+Definition parse_call_ref {n} : byte_parser basic_instruction n :=
+  exact_byte x14 &> (BI_call_ref <$> parse_typeidx).
+
+Definition parse_return_call_ref {n} : byte_parser basic_instruction n :=
+  exact_byte x15 &> (BI_return_call_ref <$> parse_typeidx).
+
 (* Reference instructions *)
 Definition parse_ref_null {n}: byte_parser basic_instruction n :=
-  exact_byte xd0 &> (BI_ref_null <$> parse_reference_type).
+  exact_byte xd0 &> ((fun t => BI_ref_null (ref_heap t)) <$> parse_reference_type).
 
 Definition parse_ref_is_null {n} : byte_parser basic_instruction n :=
   exact_byte xd1 $> BI_ref_is_null.
@@ -233,10 +239,18 @@ Definition parse_ref_is_null {n} : byte_parser basic_instruction n :=
 Definition parse_ref_func {n} : byte_parser basic_instruction n :=
   exact_byte xd2 &> (BI_ref_func <$> parse_funcidx).
 
+Definition parse_ref_as_non_null {n} : byte_parser basic_instruction n :=
+  exact_byte xd4 $> BI_ref_as_non_null.
+
+Definition parse_br_on_non_null {n} : byte_parser basic_instruction n :=
+  exact_byte xd6 &> (BI_br_on_non_null <$> parse_labelidx).
+
 Definition parse_reference_instruction {n} : byte_parser basic_instruction n :=
   parse_ref_null <|>
   parse_ref_is_null <|>
-  parse_ref_func.
+  parse_ref_func <|>
+  parse_ref_as_non_null <|>
+  parse_br_on_non_null.
 
 
 (* Variable instructions *)
@@ -880,6 +894,8 @@ Definition language : [ Language ] := Fix Language (fun k rec =>
     parse_call_indirect <|>
     parse_return_call <|>
     parse_return_call_indirect <|>
+    parse_call_ref <|>
+    parse_return_call_ref <|>
     parse_reference_instruction <|>
     parse_parametric_instruction <|>
     parse_variable_instruction <|>

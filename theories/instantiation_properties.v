@@ -373,7 +373,7 @@ Lemma alloc_table_iota_N modtables ws ws' l:
   alloc_tabs ws modtables = (ws', l) ->
   l = iota_N (length (s_tables ws)) (length modtables) /\
   ws.(s_funcs) = ws'.(s_funcs) /\
-  ws'.(s_tables) = ws.(s_tables) ++ map (fun mf => gen_table_instance mf (VAL_ref_null (mf.(tt_elem_type)))) modtables /\
+  ws'.(s_tables) = ws.(s_tables) ++ map (fun mf => gen_table_instance mf (VAL_ref_null (ref_heap mf.(tt_elem_type)))) modtables /\
   ws.(s_mems) = ws'.(s_mems) /\
   ws.(s_globals) = ws'.(s_globals) /\
   ws.(s_elems) = ws'.(s_elems) /\
@@ -978,7 +978,7 @@ Proof.
     by simplify_subtyping.
   }
   (* ref_null *)
-  { replace (to_e_list [::BI_ref_null r]) with ([::$V (VAL_ref (VAL_ref_null r))]) in Hreduce; last done.
+  { replace (to_e_list [::BI_ref_null h]) with ([::$V (VAL_ref (VAL_ref_null h))]) in Hreduce; last done.
     apply reduce_trans_value in Hreduce; subst.
     unfold value_typing => /=.
     by simplify_subtyping.

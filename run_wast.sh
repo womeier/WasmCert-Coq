@@ -61,7 +61,8 @@ run_one() {
     local result_line
     if result_line=$(printf '%s' "$cleaned" | grep -m1 "Result: "); then
       if [[ "$result_line" =~ Result:\ ([0-9]+)/([0-9]+)([[:space:]]|$) ]] &&
-          (( 10#${BASH_REMATCH[1]} <= 10#${BASH_REMATCH[2]} )); then
+          (( 10#${BASH_REMATCH[2]} > 0 &&
+             10#${BASH_REMATCH[1]} <= 10#${BASH_REMATCH[2]} )); then
         echo "${BASH_REMATCH[1]} ${BASH_REMATCH[2]} 0" > "$results_dir/$base"
         summary="DONE: $base — $result_line"
       else
@@ -109,7 +110,6 @@ fi
 
 percentage=$(awk "BEGIN { printf \"%.2f\", ($total_passed / $total_tests) * 100 }")
 echo "Total Passed: $total_passed/$total_tests ($percentage%)"
-
 if (( total_passed < total_tests || infrastructure_errors > 0 )); then
   echo "FAILED: $((total_tests - total_passed)) test(s) did not pass; $infrastructure_errors file(s) crashed or had invalid/missing summaries."
   exit 1

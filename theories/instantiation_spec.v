@@ -92,7 +92,7 @@ Definition alloc_tab_ref (s : store_record) (tty : table_type) (ref: value_ref) 
   (add_table s tableinst, tableaddr).
 
 Definition alloc_tab s tty: store_record * tableaddr :=
-  alloc_tab_ref s tty (VAL_ref_null tty.(tt_elem_type)).
+  alloc_tab_ref s tty (VAL_ref_null (ref_heap tty.(tt_elem_type))).
 
 Definition alloc_tabs (s : store_record) (ts : list table_type) : store_record * list tableaddr :=
   alloc_Xs alloc_tab s ts.

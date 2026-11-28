@@ -519,7 +519,9 @@ Proof.
         rewrite List.repeat_length Nnat.N2Nat.id eq_refl.
         rewrite all_repeat; first by eexists.
         unfold value_typing => /=.
-        by rewrite value_subtyping_eq.
+        destruct tt_elem_type as [[|] ht]; simpl in *.
+        - by rewrite value_subtyping_eq.
+        - by unfold tabletype_valid in H; simpl in H.
       }
     }
     (* Memories *)

@@ -47,6 +47,72 @@ Lemma try_table_binary_roundtrip :
   run_parse_expr (binary_of_expr (try_table_test :: nil)) =
     Some (try_table_test :: nil).
 Proof. vm_compute; reflexivity. Qed.
+Lemma test_ref_as_non_null :
+  run_parse_bes (xd4 :: nil) = Some (BI_ref_as_non_null :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma print_ref_as_non_null :
+  binary_of_expr (BI_ref_as_non_null :: nil) = xd4 :: x0b :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma test_call_ref :
+  run_parse_bes (x14 :: x00 :: nil) = Some (BI_call_ref 0%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma test_return_call_ref :
+  run_parse_bes (x15 :: x01 :: nil) = Some (BI_return_call_ref 1%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma test_call_ref_noncanonical_index :
+  run_parse_bes (x14 :: x80 :: x00 :: nil) = Some (BI_call_ref 0%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma test_call_ref_truncated_index :
+  run_parse_bes (x14 :: x80 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma test_call_ref_overflow_index :
+  run_parse_bes (x14 :: x80 :: x80 :: x80 :: x80 :: x10 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma test_return_call_ref_max_index :
+  run_parse_bes (x15 :: xff :: xff :: xff :: xff :: x0f :: nil) =
+    Some (BI_return_call_ref 4294967295%N :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma print_call_refs :
+  binary_of_expr (BI_call_ref 0%N :: BI_return_call_ref 1%N :: nil) =
+    x14 :: x00 :: x15 :: x01 :: x0b :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma print_nullable_indexed_reference :
+  binary_of_reference_type (Ref_type true (HT_type 64%N)) =
+    x63 :: xc0 :: x00 :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma print_non_null_indexed_reference :
+  binary_of_reference_type (Ref_type false (HT_type 0%N)) =
+    x64 :: x00 :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+(* Exhaustive bounded-domain correctness for the actual parser entry point,
+   not a replacement decoder: a single-byte immediate has exactly 128 valid
+   encodings; all continuation bytes are rejected when the input ends here.
+   General multi-byte LEB128/parser correctness remains a separate obligation. *)
+Lemma parse_reference_call_single_byte (tail : bool) (b : Byte.byte) :
+  run_parse_bes ((if tail then x15 else x14) :: b :: nil) =
+    if N.ltb (Byte.to_N b) 128%N then
+      Some ((if tail then BI_return_call_ref (Byte.to_N b)
+             else BI_call_ref (Byte.to_N b)) :: nil)
+    else None.
+Proof. destruct tail, b; vm_compute; reflexivity. Qed.
+
+Lemma parse_br_on_non_null_single_byte (b : Byte.byte) :
+  run_parse_bes (xd6 :: b :: nil) =
+    if N.ltb (Byte.to_N b) 128%N then
+      Some (BI_br_on_non_null (Byte.to_N b) :: nil)
+    else None.
+Proof. destruct b; vm_compute; reflexivity. Qed.
 
 (** An example program. **)
 Definition test :=

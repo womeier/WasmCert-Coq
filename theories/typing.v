@@ -56,7 +56,7 @@ For the purpose of checking argument values against the parameter types of expor
 
 Definition typeof_ref (s: store_record) (v: value_ref) : option reference_type :=
   match v with
-  | VAL_ref_null t => Some t
+  | VAL_ref_null t => Some (Ref_type true t)
   | VAL_ref_func addr =>
       match ext_func_typing s addr with
       | Some ft => Some T_funcref
@@ -208,7 +208,7 @@ Definition catch_clause_typing (C: t_context) (c: catch_clause) : bool :=
 Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :=
 | bet_const_num : forall C v, be_typing C [::BI_const_num v] (Tf [::] [::T_num (typeof_num v)])
 | bet_const_vec : forall C v, be_typing C [::BI_const_vec v] (Tf [::] [::T_vec (typeof_vec v)])
-| bet_ref_null: forall C t, be_typing C [::BI_ref_null t] (Tf [::] [::T_ref t])
+| bet_ref_null: forall C t, be_typing C [::BI_ref_null t] (Tf [::] [::T_ref (Ref_type true t)])
 | bet_ref_is_null: forall C t, be_typing C [::BI_ref_is_null] (Tf [::T_ref t] [::T_num T_i32])
 | bet_ref_func: forall C t x,
     lookup_N (tc_funcs C) x = Some t ->
@@ -407,6 +407,15 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   be_typing C es (Tf t1s t2s) ->
   (Tf t1s t2s) <ti: (Tf t1s' t2s') ->
   be_typing C es (Tf t1s' t2s')
+(* Erased compatibility rule: nullability refinement will become explicit
+   when the shared reference type representation is extended. *)
+| bet_ref_as_non_null : forall C t,
+  is_ref_t t ->
+  be_typing C [::BI_ref_as_non_null] (Tf [::t] [::t])
+| bet_br_on_non_null : forall C x ts t,
+  lookup_N C.(tc_labels) x = Some (ts ++ [::t]) ->
+  is_ref_t t ->
+  be_typing C [::BI_br_on_non_null x] (Tf (ts ++ [::t]) ts)
 .
 
 Definition expr_typing (C: t_context) (bes: list basic_instruction) (ts: result_type) : Prop :=

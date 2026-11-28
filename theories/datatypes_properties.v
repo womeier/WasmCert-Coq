@@ -43,6 +43,7 @@ Definition eqnumber_typeP : Equality.axiom number_type_eqb :=
 
 HB.instance Definition number_type_eqMixin := hasDecEq.Build number_type eqnumber_typeP.
 
+Scheme Equality for heap_type.
 Scheme Equality for reference_type.
 Definition reference_type_eqb v1 v2 : bool := reference_type_eq_dec v1 v2.
 Definition eqreference_typeP : Equality.axiom reference_type_eqb :=
