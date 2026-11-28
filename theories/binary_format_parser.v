@@ -1250,10 +1250,10 @@ Definition parse_customsec {n} : byte_parser (name * list byte) n :=
     (fun '(sz_sec, (name, sz_name, obs)) =>
         if N.ltb sz_sec sz_name then None
         else
-          Some (match obs with
-          | Some bs => (name, bs)
-          | None => (name, nil)
-          end)
+          match obs with
+          | Some bs => Some (name, bs)
+          | None => if N.eqb sz_sec sz_name then Some (name, nil) else None
+          end
     )
     (parse_u32_as_N &>>=
     (fun sz_sec =>
@@ -1263,42 +1263,42 @@ Definition parse_customsec {n} : byte_parser (name * list byte) n :=
             parse_vec_aux anyTok sz_leftover
          ))).
          
-(* Low priority: check that the sections have the correct byte sizes? *)
+(* Section lengths frame the actual consumed payload, excluding id/header. *)
 Definition parse_typesec {n} : byte_parser (list recursive_type) n :=
-  exact_byte x01 &> parse_u32_as_N &> parse_vec parse_recursive_type.
+  exact_byte x01 &> parse_section_payload (parse_vec parse_recursive_type).
 
 Definition parse_importsec {n} : byte_parser (list module_import) n :=
-  exact_byte x02 &> parse_u32_as_N &> parse_vec parse_module_import.
+  exact_byte x02 &> parse_section_payload (parse_vec parse_module_import).
 
 Definition parse_funcsec {n} : byte_parser (list typeidx) n :=
-  exact_byte x03 &> parse_u32_as_N &> parse_vec parse_typeidx.
+  exact_byte x03 &> parse_section_payload (parse_vec parse_typeidx).
 
 Definition parse_tablesec {n} : byte_parser (list module_table) n :=
-  exact_byte x04 &> parse_u32_as_N &> parse_vec parse_module_table.
+  exact_byte x04 &> parse_section_payload (parse_vec parse_module_table).
 
 Definition parse_memsec {n} : byte_parser (list module_mem) n :=
-  exact_byte x05 &> parse_u32_as_N &> parse_vec parse_module_mem.
+  exact_byte x05 &> parse_section_payload (parse_vec parse_module_mem).
 
 Definition parse_globalsec {n} : byte_parser (list module_global) n :=
-  exact_byte x06 &> parse_u32_as_N &> parse_vec parse_module_global.
+  exact_byte x06 &> parse_section_payload (parse_vec parse_module_global).
 
 Definition parse_exportsec {n} : byte_parser (list module_export) n :=
-  exact_byte x07 &> parse_u32_as_N &> parse_vec parse_module_export.
+  exact_byte x07 &> parse_section_payload (parse_vec parse_module_export).
 
 Definition parse_startsec {n} : byte_parser module_start n :=
-  exact_byte x08 &> parse_u32_as_N &> parse_module_start.
+  exact_byte x08 &> parse_section_payload parse_module_start.
 
 Definition parse_elemsec {n} : byte_parser (list module_element) n :=
-  exact_byte x09 &> parse_u32_as_N &> parse_vec parse_module_element.
+  exact_byte x09 &> parse_section_payload (parse_vec parse_module_element).
 
 Definition parse_codesec {n} : byte_parser (list module_func_without_type) n :=
   exact_byte x0a &> parse_section_payload (parse_vec parse_code).
 
 Definition parse_datasec {n} : byte_parser (list module_data) n :=
-  exact_byte x0b &> parse_u32_as_N &> parse_vec parse_module_data.
+  exact_byte x0b &> parse_section_payload (parse_vec parse_module_data).
 
 Definition parse_datacountsec {n} : byte_parser N n :=
-  exact_byte x0c &> parse_u32_as_N &> parse_u32_as_N.
+  exact_byte x0c &> parse_section_payload parse_u32_as_N.
 
 Definition parse_magic {n} : byte_parser unit n :=
   (exact_byte x00 &> exact_byte x61 &> exact_byte x73 &> exact_byte x6d) $> tt.
@@ -1397,9 +1397,14 @@ Definition datacount_presence_agree (codes: list module_func_without_type) (ocou
       else true
   end.
 
-Definition parse_module_sections_after {n} {A} (f: byte_parser A n) : byte_parser module n :=
-  guardM
-  (fun results =>
+Definition module_section_results (A : Type) : Type :=
+  A * option (list recursive_type) * option (list module_import) *
+  option (list typeidx) * option (list module_table) * option (list module_mem) *
+  option (list module_global) * option (list module_export) * option module_start *
+  option (list module_element) * option N *
+  option (list module_func_without_type) * option (list module_data).
+
+Definition finish_module_sections {A} (results : module_section_results A) : option module :=
      match results with
      | (_, otypes, oimports, ofts, otables, omems, oglobals, oexports, ostart, oelems, odatacount, ocodes, odatas) =>
          let types := option_to_list otypes in
@@ -1435,8 +1440,10 @@ Definition parse_module_sections_after {n} {A} (f: byte_parser A n) : byte_parse
              else None
            else None
          else None
-     end
-  )
+      end.
+
+Definition parse_module_section_sequence_after {n} {A} (f: byte_parser A n) :
+    byte_parser (module_section_results A) n :=
   (parse_with_customsec_star_after
   (* "<&?>" is right associative, but we want the other way round here *)
   (((((((((((((f <&?>
@@ -1452,6 +1459,9 @@ Definition parse_module_sections_after {n} {A} (f: byte_parser A n) : byte_parse
   parse_datacountsec_wrapper) <&?>
   parse_codesec_wrapper) <&?>
   parse_datasec_wrapper))).
+
+Definition parse_module_sections_after {n} {A} (f: byte_parser A n) : byte_parser module n :=
+  guardM finish_module_sections (parse_module_section_sequence_after f).
 
 Definition parse_module {n} : byte_parser module n :=
   parse_module_sections_after

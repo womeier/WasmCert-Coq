@@ -50,7 +50,55 @@ Reference/value and final-memarg codec bridges, including the adapted SIMD
 memory round trips, are closed under the global context. Whole expression/code
 results inherit the existing classical-real and functional-extensionality
 assumptions of the numeric development; no new axiom or admission is added.
-Whole-module custom/optional/order/guard composition is not claimed here.
+The whole-module extension below completes custom/optional/order/guard
+composition for the actual combined source parser.
+
+## Whole-module syntax correctness
+
+The selectively integrated `ea96c78` / `bc7c190` handoff now exposes:
+
+- `binary_of_module_roundtrip` and `binary_of_module_string_roundtrip` under
+  the structural `module_binary_wf` printer domain.
+- `run_parse_module_general_correct` and
+  `run_parse_module_str_general_correct`: actual parsing succeeds **iff**
+  the independent `module_binary_encoding` grammar holds.
+  These general characterizations have no canonical-printer-image or
+  module-validity premise and include padded integer encodings, arbitrary
+  well-framed custom sections, exact section sizes, section order, and
+  function/code/data-count consistency.
+
+The owner’s flat function-type section was **not** substituted for this tree’s
+recursive declaration groups. `binary_format_declaration_properties.v` proves
+actual soundness/completeness and structural printer membership for `4e`
+groups, `4f`/`50` subtypes, function/struct/array composites, packed fields,
+all twelve source abstract heaps, both nullabilities and bounded module-local
+type indices. The independent module grammar uses these results. Actual table
+syntax retains both implicit-null and explicit initializer forms.
+
+`module_binary_wf` requires UTF-8 names, representable index/limit/vector
+counts, u32 section/body sizes, bounded source declaration fields and the
+structural expression/local domains above. Runtime-facing global/table/element
+reference types still use the supported abstract fragment. Source declaration
+indices remain source indices: none of these results validates recursive type
+scope/subtyping, closes expectations into canonical store identities, or
+enables positive indexed-call execution.
+
+Module assembly uses the actual verified function-size and data-count writers,
+not assumed equality with earlier printer bytes. Section framing checks and
+truncated-custom rejection are on the production path. Its existing
+cross-section consistency guards are retained in the named postprocessor
+`finish_module_sections`.
+
+`binary_format_wholemodule_tests.v` derives whole byte/string printer round
+trips for recursive struct/array/function source declarations and an explicit
+table initializer. It also covers padded custom headers/data, truncated custom
+payloads, wrong section sizes/order and function/code/data-count mismatches.
+These are byte-syntax tests, not semantic-validity assertions.
+
+Recursive-declaration codecs are closed under the global context. Whole-module
+results disclose exactly the same four inherited classical-real/functional
+extensionality assumptions as the expression/code development, with no new
+axioms or admissions. `coqchk` checks both adapted whole-module proof modules.
 
 ## Binary projection provenance
 
