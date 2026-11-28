@@ -14,6 +14,16 @@
  (modules multi_memory_host_extracted)
  (libraries wasmcert_runtime zarith))
 
+(test
+ (name parray_snapshot_regression)
+ (modules parray_snapshot_regression)
+ (libraries parray))
+
+(test
+ (name multi_memory_array_extracted)
+ (modules multi_memory_array_extracted)
+ (libraries wasmcert_runtime parray zarith))
+
 (rule
  (alias runtest)
  (deps run_wast_test.sh ../run_wast.sh)

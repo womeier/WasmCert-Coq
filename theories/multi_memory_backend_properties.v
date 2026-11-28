@@ -5,7 +5,7 @@
     These results do not assume correctness of Parray's mutable reroot code. *)
 From mathcomp Require Import ssreflect ssrbool ssrnat eqtype seq.
 From Wasm Require Import operations properties memory_vec.
-From Stdlib Require Import List NArith PeanoNat Lia.
+From Stdlib Require Import List NArith ZArith PeanoNat Lia.
 
 Set Implicit Arguments.
 Unset Strict Implicit.
@@ -259,4 +259,37 @@ Proof.
   { apply N.min_glb; lia. }
   unfold byte_limit, page_size, page_limit in *.
   repeat split; lia.
+Qed.
+
+(** Arithmetic correspondence of the exact subtraction guard imported from
+    44270f7. OCaml comparisons operate on signed native integers. Once start is
+    checked against the nonnegative actual array length, the sole subtraction
+    cannot overflow; unlike the old start+count test, no addition is evaluated
+    on an invalid candidate range. This is arithmetic, not an OCaml heap proof. *)
+Definition native63_signed (z: Z) :=
+  (-4611686018427387904 <= z <= 4611686018427387903)%Z.
+
+Theorem parray_subtraction_guard_spec : forall start count total,
+  (0 <= total <= 4611686018427387903)%Z ->
+  (0 < count)%Z ->
+  ((0 <= start /\ start <= total /\ count <= total - start)%Z <->
+   (0 <= start /\ start + count <= total)%Z) /\
+  ((0 <= start /\ start <= total)%Z ->
+    native63_signed (total - start)).
+Proof.
+  intros start count total Htotal Hcount.
+  unfold native63_signed. split; [split|]; intros; lia.
+Qed.
+
+Theorem parray_accepted_block_native_bounds : forall start count total,
+  (0 <= total <= 4611686018427387903)%Z ->
+  (0 < count)%Z ->
+  (0 <= start /\ start <= total /\ count <= total - start)%Z ->
+  native63_signed start /\ native63_signed count /\
+  native63_signed (total - start) /\ native63_signed (start + count) /\
+  forall offset, (0 <= offset < count)%Z ->
+    native63_signed (start + offset) /\ (0 <= start + offset < total)%Z.
+Proof.
+  intros start count total Htotal Hcount Hrange.
+  unfold native63_signed. repeat split; intros; lia.
 Qed.
