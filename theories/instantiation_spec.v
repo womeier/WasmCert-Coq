@@ -292,6 +292,31 @@ Definition alloc_module (s : store_record) (m : module) (imps : list extern_valu
 
 Definition dummy_table : tableinst := {| tableinst_elem := TableStorage.empty; tableinst_type := Build_table_type (Build_limits N0 None) T_funcref AT_i32 |}.
 
+(** Source descriptor scope, not a runtime identity or a kind restriction:
+    any declared composite may be the heap of a reference. Function-only
+    uses are checked separately through [lookup_function_type]. *)
+Definition source_heap_in_contextb (types : type_context) heap : bool :=
+  match heap with
+  | HT_type index =>
+      match lookup_N types index with Some _ => true | None => false end
+  | _ => true
+  end.
+
+Definition source_heap_in_context (types : type_context) heap : Prop :=
+  match heap with
+  | HT_type index => exists subtype, lookup_N types index = Some subtype
+  | _ => True
+  end.
+
+Lemma source_heap_in_contextb_correct types heap :
+  source_heap_in_contextb types heap = true <-> source_heap_in_context types heap.
+Proof.
+  destruct heap; simpl; try tauto.
+  destruct (lookup_N types t) as [subtype|] eqn:Lookup.
+  - split; [intro; eauto|intro; reflexivity].
+  - split; [discriminate|intros [subtype Impossible]; discriminate].
+Qed.
+
 Definition module_func_typing (c : t_context) (mf : module_func) (tf : function_type) : Prop :=
   let '{| modfunc_type := x; modfunc_locals := t_locs; modfunc_body := b_es |} := mf in
   let '(Tf tn tm) := tf in
@@ -326,6 +351,7 @@ Definition module_table_typing (c : t_context) (t : module_table)
   tabletype_valid t.(modtab_type) /\
   t.(modtab_type) = tabt /\
   const_exprs c (module_table_init t) /\
+  source_heap_in_context c.(tc_types) (ref_heap tabt.(tt_elem_type)) /\
   be_typing c (module_table_init t) (Tf nil [::T_ref tabt.(tt_elem_type)]).
 
 Definition module_global_typing (c : t_context) (g : module_global) (tg : global_type) : Prop :=
@@ -533,7 +559,7 @@ Definition module_components_typing (m : module) (impts : list extern_type) (exp
     tc_refs := xs;
   |} in
   let c' := {|
-    tc_types := nil;
+    tc_types := tfs;
     tc_funcs := c.(tc_funcs);
     tc_tables := c.(tc_tables);
     tc_mems := c.(tc_mems);
@@ -557,10 +583,166 @@ Definition module_components_typing (m : module) (impts : list extern_type) (exp
   List.Forall2 (module_export_typing c) exps expts /\
   export_name_unique exps.
 
-Definition module_typing (m : module) (impts expts : list extern_type) : Prop :=
-  (exists registry ids,
+(** Selectively adapted from EH deb6ac9: closing uses the actual module
+    names/registry; no context-free rejection of indexed imports is reused. *)
+Definition source_local_closesb registry names value :=
+  match gc_type_context.close_value_type names 0 value with
+  | Some closed => closed_value_validb registry closed
+  | None => false
+  end.
+
+Definition block_source_types bt :=
+  match bt with
+  | BT_id index => [:: T_ref (Ref_type true (HT_type index))]
+  | BT_valtype None => nil
+  | BT_valtype (Some value) => [:: value]
+  end.
+
+Fixpoint instruction_source_types (be : basic_instruction) : list value_type :=
+  let nested bes := List.concat (List.map instruction_source_types bes) in
+  match be with
+  | BI_ref_null heap => [:: T_ref (Ref_type true heap)]
+  | BI_select (Some values) => values
+  | BI_block bt bes | BI_loop bt bes => block_source_types bt ++ nested bes
+  | BI_if bt yes no => block_source_types bt ++ nested yes ++ nested no
+  | BI_call_indirect _ index | BI_return_call_indirect _ index
+  | BI_call_ref index | BI_return_call_ref index =>
+      [:: T_ref (Ref_type true (HT_type index))]
+  | _ => nil
+  end.
+
+Definition expression_source_types bes :=
+  List.concat (List.map instruction_source_types bes).
+
+Fixpoint instruction_function_types (be : basic_instruction) : list typeidx :=
+  let nested bes := List.concat (List.map instruction_function_types bes) in
+  let block bt := match bt with BT_id index => [::index] | _ => nil end in
+  match be with
+  | BI_block bt bes | BI_loop bt bes => block bt ++ nested bes
+  | BI_if bt yes no => block bt ++ nested yes ++ nested no
+  | BI_call_indirect _ index | BI_return_call_indirect _ index
+  | BI_call_ref index | BI_return_call_ref index => [::index]
+  | _ => nil
+  end.
+
+Definition expression_function_types bes :=
+  List.concat (List.map instruction_function_types bes).
+
+Definition import_source_types imp :=
+  match imp.(imp_desc) with
+  | MID_func index => [:: T_ref (Ref_type true (HT_type index))]
+  | MID_table table => [:: T_ref table.(tt_elem_type)]
+  | MID_global global => [:: global.(tg_t)]
+  | MID_mem _ => nil
+  end.
+
+Definition element_source_types element :=
+  T_ref element.(modelem_type) ::
+    (List.concat (List.map expression_source_types element.(modelem_init)) ++
+     match element.(modelem_mode) with
+     | ME_active _ offset => expression_source_types offset
+     | _ => nil
+     end).
+
+Definition module_source_types (m : module) :=
+  List.concat (List.map (fun f => T_ref (Ref_type true (HT_type f.(modfunc_type))) ::
+    f.(modfunc_locals) ++ expression_source_types f.(modfunc_body)) m.(mod_funcs)) ++
+  List.concat (List.map (fun t => T_ref t.(modtab_type).(tt_elem_type) ::
+    expression_source_types (module_table_init t)) m.(mod_tables)) ++
+  List.concat (List.map (fun g => g.(modglob_type).(tg_t) ::
+    expression_source_types g.(modglob_init)) m.(mod_globals)) ++
+  List.concat (List.map import_source_types m.(mod_imports)) ++
+  List.concat (List.map element_source_types m.(mod_elems)) ++
+  List.concat (List.map (fun d => match d.(moddata_mode) with
+    | MD_active _ offset => expression_source_types offset | _ => nil end) m.(mod_datas)).
+
+Definition module_function_types (m : module) :=
+  List.concat (List.map (fun f => f.(modfunc_type) ::
+    expression_function_types f.(modfunc_body)) m.(mod_funcs)) ++
+  List.concat (List.map (fun t => expression_function_types (module_table_init t)) m.(mod_tables)) ++
+  List.concat (List.map (fun g => expression_function_types g.(modglob_init)) m.(mod_globals)) ++
+  List.concat (List.map (fun imp => match imp.(imp_desc) with
+    | MID_func index => [::index] | _ => nil end) m.(mod_imports)) ++
+  List.concat (List.map (fun e =>
+    List.concat (List.map expression_function_types e.(modelem_init)) ++
+    match e.(modelem_mode) with ME_active _ offset => expression_function_types offset
+      | _ => nil end) m.(mod_elems)) ++
+  List.concat (List.map (fun d => match d.(moddata_mode) with
+    | MD_active _ offset => expression_function_types offset | _ => nil end) m.(mod_datas)).
+
+Definition module_source_types_closingb registry names m :=
+  List.forallb (source_local_closesb registry names) (module_source_types m) &&
+  List.forallb (fun index =>
+    match lookup_function_type (List.concat m.(mod_types)) index with
+    | Some _ => true | None => false end) (module_function_types m).
+
+Definition module_source_types_valid registry names m : Prop :=
+  List.Forall (fun value => exists closed,
+    gc_type_context.close_value_type names 0 value = Some closed /\
+    closed_value_validb registry closed = true) (module_source_types m) /\
+  List.Forall (fun index => exists ft,
+    lookup_function_type (List.concat m.(mod_types)) index = Some ft)
+    (module_function_types m).
+
+Lemma source_local_closesb_correct registry names value :
+  source_local_closesb registry names value = true <->
+  exists closed, gc_type_context.close_value_type names 0 value = Some closed /\
+    closed_value_validb registry closed = true.
+Proof.
+  unfold source_local_closesb.
+  destruct (gc_type_context.close_value_type names 0 value) as [closed|] eqn:Closed.
+  - split; [intro Valid; exists closed; auto|].
+    intros [other [Same Valid]]; inversion Same; subst; exact Valid.
+  - split; [discriminate|intros [closed [Impossible _]]; discriminate].
+Qed.
+
+Lemma module_source_types_closingb_correct registry names m :
+  module_source_types_closingb registry names m = true <->
+  module_source_types_valid registry names m.
+Proof.
+  unfold module_source_types_closingb, module_source_types_valid.
+  rewrite Bool.andb_true_iff !List.forallb_forall !List.Forall_forall.
+  split; intros [Values Functions]; split.
+  - intros value Member; apply source_local_closesb_correct; now apply Values.
+  - intros index Member; specialize (Functions index Member).
+    destruct (lookup_function_type (List.concat (mod_types m)) index) as [ft|] eqn:Lookup;
+      [exists ft; reflexivity|discriminate].
+  - intros value Member; apply source_local_closesb_correct; now apply Values.
+  - intros index Member; destruct (Functions index Member) as [ft Lookup].
+    now rewrite Lookup.
+Qed.
+
+Definition module_source_context_valid (m : module) : Prop :=
+  exists registry ids,
     close_and_validate_type_groups nil (module_type_groups m) = Some (registry, ids) /\
-    source_type_identitiesb registry ids (List.concat m.(mod_types)) ids = true) /\
+    source_type_identitiesb registry ids (List.concat m.(mod_types)) ids = true /\
+    module_source_types_valid registry ids m.
+
+Definition module_source_context_validb m :=
+  match close_and_validate_type_groups nil (module_type_groups m) with
+  | Some (registry, ids) =>
+      source_type_identitiesb registry ids (List.concat m.(mod_types)) ids &&
+      module_source_types_closingb registry ids m
+  | None => false
+  end.
+
+Lemma module_source_context_validb_correct m :
+  module_source_context_validb m = true <-> module_source_context_valid m.
+Proof.
+  unfold module_source_context_validb, module_source_context_valid.
+  destruct (close_and_validate_type_groups nil (module_type_groups m))
+    as [[registry names]|] eqn:Closed.
+  - rewrite Bool.andb_true_iff module_source_types_closingb_correct.
+    split.
+    + intros [Identity Source]; exists registry, names; auto.
+    + intros [other_registry [other_names [Same [Identity Source]]]].
+      inversion Same; subst; auto.
+  - split; [discriminate|].
+    intros [registry [names [Impossible _]]]; discriminate.
+Qed.
+
+Definition module_typing (m : module) (impts expts : list extern_type) : Prop :=
+  module_source_context_valid m /\
   module_components_typing m impts expts.
 
 (** std-doc:

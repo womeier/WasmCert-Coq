@@ -4,6 +4,9 @@
 From Wasm Require Import datatypes operations addressing addressing_binary addressing_parseque
   binary_format_parser binary_format_printer.
 From Wasm Require Import leb128_properties leb128_unsigned_printer_properties.
+From Wasm Require Import binary_format_table_type_properties
+  binary_format_declaration_properties binary_format_width_properties
+  binary_parser_combinator_properties.
 From parseque Require Import Parseque.
 From Stdlib Require Import Strings.Byte NArith ZArith List PeanoNat Lia.
 Import Addressing AddressingBinary AddressingParseque.
@@ -235,35 +238,51 @@ Definition run_table_type_prefix (input: list byte)
     (binary_format_parser.parse_table_type (Toks := SizedList byte) (M := option))
     (Nat.le_refl (List.length input)) (mkSizedList input)).
 
-Theorem binary_table_type_parser_correct input :
-  run_table_type_prefix input = decode_table_type input.
+Theorem binary_table_type_parser_correct input tt rest :
+  run_table_type_prefix input = Some (tt, rest) <->
+  exists prefix, input = prefix ++ rest /\
+    binary_format_table_type_properties.table_type_encoding prefix tt.
 Proof.
-  rewrite <- decode_table_type_tokens_correct.
-  unfold run_table_type_prefix, binary_format_parser.parse_table_type,
-    AddressingParseque.parse_table_type, flatten_table_type.
-  cbn [runParser].
-  destruct (decode_table_type_tokens (mkSizedList input)); reflexivity.
+  split.
+  - unfold run_table_type_prefix, flatten_table_type.
+    destruct (runParser
+      (binary_format_parser.parse_table_type (Toks := SizedList byte) (M := option))
+      (Nat.le_refl (List.length input)) (mkSizedList input)) as [s|] eqn:Parsed;
+      [|discriminate].
+    intro Run; injection Run as Value Rest.
+    destruct (parse_table_type_source_sound _ _ _ _ _ Parsed)
+      as [prefix [Bytes Encoding]].
+    exists prefix.
+    change (input = prefix ++ output_bytes s) in Bytes.
+    change (output_bytes s = rest) in Rest.
+    rewrite Rest in Bytes.
+    split; [exact Bytes|now rewrite Value in Encoding].
+  - intros [prefix [Bytes Encoding]].
+    destruct (parse_table_type_source_complete (List.length input) _
+      (Nat.le_refl _) (mkSizedList input) prefix rest tt Bytes Encoding)
+      as [s [Parsed [Value Rest]]].
+    unfold run_table_type_prefix, flatten_table_type.
+    rewrite Parsed.
+    change (Some (Success.value s, output_bytes s) = Some (tt, rest)).
+    now rewrite Value, Rest.
 Qed.
 
 Theorem binary_table_type_parser_grammar input tt rest :
   run_table_type_prefix input = Some (tt, rest) <->
-  exists tail,
-    reference_encoding input (datatypes.tt_elem_type tt) tail /\
-    limits_encoding tail (datatypes.tt_address_type tt) (datatypes.tt_limits tt) rest.
+  exists references limits,
+    input = (references ++ limits) ++ rest /\
+    declaration_reference_encoding references tt.(tt_elem_type) /\
+    width_limits_encoding limits (tt.(tt_address_type), tt.(tt_limits)).
 Proof.
   rewrite binary_table_type_parser_correct.
   split.
-  - unfold decode_table_type.
-    destruct (decode_reference_type input) as [[elem tail]|] eqn:Href; [|discriminate].
-    destruct (decode_limits tail) as [[[a lim] remaining]|] eqn:Hlimits; [|discriminate].
-    intros H; inversion H; subst; clear H.
-    exists tail; split.
-    + now apply decode_reference_type_spec.
-    + now apply decode_limits_sound.
-  - intros [tail [Href Hlimits]].
-    unfold decode_table_type. apply decode_reference_type_spec in Href. rewrite Href.
-    apply decode_limits_complete in Hlimits. rewrite Hlimits.
-    destruct tt; reflexivity.
+  - intros [prefix [Bytes [references [limits [r [[width lim] [Parts [R [L Value]]]]]]]]].
+    subst tt prefix; exists references, limits; auto.
+  - intros [references [limits [Bytes [R L]]]].
+    exists (references ++ limits); split; [exact Bytes|].
+    exists references, limits, tt.(tt_elem_type), (tt.(tt_address_type), tt.(tt_limits)).
+    split; [reflexivity|]; split; [exact R|].
+    split; [exact L|destruct tt; reflexivity].
 Qed.
 
 Lemma binary_abstract_reference_decoder_roundtrip reference rest :
@@ -275,14 +294,10 @@ Proof.
   intros [Func|Extern]; subst heap; destruct nullable; reflexivity.
 Qed.
 
-(* Handoff to the shared full reference decoder, including indexed forms:
-   this is an exact source-byte/remainder contract, not permission to identify
-   a source HT_type index with a runtime canonical name. Source closing and
-   stored-descriptor agreement remain separate shared runtime obligations. *)
+(* The earlier conditional decoder handoff is now discharged against the full
+   source grammar. Source indices remain unrelated to runtime store identities. *)
 Theorem binary_table_type_printer_parser_roundtrip_from_reference_codec tt rest :
-  (forall suffix,
-    decode_reference_type (binary_of_reference_type tt.(tt_elem_type) ++ suffix) =
-      Some (tt.(tt_elem_type), suffix)) ->
+  declaration_heap_binary_wf (ref_heap tt.(tt_elem_type)) ->
   (lim_min tt.(tt_limits) < address_bound tt.(tt_address_type))%N ->
   (match lim_max tt.(tt_limits) with
    | Some maximum => maximum < address_bound tt.(tt_address_type)
@@ -291,12 +306,10 @@ Theorem binary_table_type_printer_parser_roundtrip_from_reference_codec tt rest 
   run_table_type_prefix (binary_of_table_type tt ++ rest) = Some (tt, rest).
 Proof.
   intros Reference Minimum Maximum.
-  rewrite binary_table_type_parser_correct, binary_table_type_encoding.
-  unfold decode_table_type.
-  rewrite <- app_assoc.
-  rewrite Reference.
-  rewrite binary_address_limits_decoder_roundtrip by assumption.
-  destruct tt; reflexivity.
+  apply binary_table_type_parser_correct.
+  exists (binary_of_table_type tt); split; [reflexivity|].
+  apply binary_of_table_type_source_encoding; split; [exact Reference|].
+  split; assumption.
 Qed.
 
 Theorem binary_table_type_printer_parser_roundtrip tt rest :
@@ -310,7 +323,8 @@ Theorem binary_table_type_printer_parser_roundtrip tt rest :
 Proof.
   intros Reference Minimum Maximum.
   apply binary_table_type_printer_parser_roundtrip_from_reference_codec; auto.
-  intro suffix. now apply binary_abstract_reference_decoder_roundtrip.
+  destruct Reference as [Reference|Reference]; unfold declaration_heap_binary_wf;
+    now rewrite Reference.
 Qed.
 
 Definition run_memarg_prefix (input: list byte) : option (datatypes.memarg * list byte) :=

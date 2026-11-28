@@ -13,6 +13,34 @@ From Wasm Require Import addressing addressing_binary addressing_parseque.
 From Stdlib Require Import ZArith Lia.
 From parseque Require Import Parseque.
 
+Lemma parse_u32_as_N_prefix_correspondence {m n}
+    (bound : m <= n) (input : SizedList Byte.byte m) :
+  AddressingParseque.flatten
+    (runParser (parse_u32_as_N (Toks := SizedList Byte.byte) (M := option) (n := n))
+      bound input) =
+  AddressingBinary.decode_address Addressing.AT_i32
+    (@Sized.value _ (@List.length Byte.byte) _ input).
+Proof.
+  rewrite <- AddressingParseque.decode_address_tokens_correct_sized.
+  cbn [parse_u32_as_N AddressingParseque.parse_address runParser Category.fromOption].
+  destruct (AddressingParseque.decode_address_tokens Addressing.AT_i32 input);
+    reflexivity.
+Qed.
+
+Lemma parse_u64_as_N_prefix_correspondence {m n}
+    (bound : m <= n) (input : SizedList Byte.byte m) :
+  AddressingParseque.flatten
+    (runParser (parse_u64_as_N (Toks := SizedList Byte.byte) (M := option) (n := n))
+      bound input) =
+  AddressingBinary.decode_address Addressing.AT_i64
+    (@Sized.value _ (@List.length Byte.byte) _ input).
+Proof.
+  rewrite <- AddressingParseque.decode_address_tokens_correct_sized.
+  cbn [parse_u64_as_N AddressingParseque.parse_address runParser Category.fromOption].
+  destruct (AddressingParseque.decode_address_tokens Addressing.AT_i64 input);
+    reflexivity.
+Qed.
+
 Section OptionParsers.
   Context {Toks : nat -> Type}.
   Context {m n : nat}.

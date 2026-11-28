@@ -101,6 +101,7 @@ Definition module_func_type_checker (c : t_context) (m : module_func) : bool :=
 Definition module_table_type_checker (C: t_context) mt :=
   tabletype_valid mt.(modtab_type) &&
   const_exprs C (module_table_init mt) &&
+  source_heap_in_contextb C.(tc_types) (ref_heap mt.(modtab_type).(tt_elem_type)) &&
   type_checker.b_e_type_checker C (module_table_init mt)
     (Tf nil [::T_ref (tt_elem_type (modtab_type mt))]).
 
@@ -192,7 +193,7 @@ Definition module_components_type_checker (m : module) : option ((list extern_ty
       tc_refs := xs
             |} in
     let c' := {|
-      tc_types := nil;
+      tc_types := tfs;
       tc_funcs := c.(tc_funcs);
       tc_globals := igs;
       tc_tables := c.(tc_tables);
@@ -227,7 +228,8 @@ Definition module_components_type_checker (m : module) : option ((list extern_ty
 Definition module_type_checker (m : module) : option ((list extern_type) * (list extern_type)) * string :=
   match close_and_validate_type_groups nil (module_type_groups m) with
   | Some (registry, ids) =>
-      if source_type_identitiesb registry ids (List.concat m.(mod_types)) ids
+      if source_type_identitiesb registry ids (List.concat m.(mod_types)) ids &&
+         module_source_types_closingb registry ids m
       then module_components_type_checker m
       else (None, "inconsistent closed module type signatures")
   | None => (None, "invalid module type declarations")

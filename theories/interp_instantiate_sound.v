@@ -24,9 +24,13 @@ Proof.
   unfold module_type_checker in Hmodcheck.
   destruct (close_and_validate_type_groups nil (module_type_groups m))
     as [[registry ids]|] eqn:Hclosed => //.
-  destruct (source_type_identitiesb registry ids (List.concat (mod_types m)) ids)
-    eqn:Hidentity => //.
-  split; first by exists registry, ids; split.
+  destruct (source_type_identitiesb registry ids (List.concat (mod_types m)) ids &&
+    module_source_types_closingb registry ids m) eqn:Hscope => //.
+  move/andP in Hscope; destruct Hscope as [Hidentity Hscope].
+  split.
+  { exists registry, ids; split; first exact Hclosed.
+    split; first exact Hidentity.
+    apply (proj1 (module_source_types_closingb_correct registry ids m)); exact Hscope. }
   unfold module_components_type_checker in Hmodcheck.
   destruct m.
   destruct (gather_m_f_types (List.concat mod_types) mod_funcs) as [fts | ] eqn:Hmftypes => //;
@@ -77,12 +81,15 @@ Proof.
     simpl in *.
     unfold module_table_typing, module_table_type_checker in *.
     move/andP in Htablecheck; destruct Htablecheck as [Htablecheck Hbet].
+    move/andP in Htablecheck; destruct Htablecheck as [Htablecheck Htable_scope].
     move/andP in Htablecheck; destruct Htablecheck as [Hvalid Hconst].
     apply nth_error_map in Hftsnth as [mtab [??]].
     simplify_multieq.
     repeat split => //.
-    move/b_e_type_checker_reflects_typing in Hbet.
-    by rewrite H1 in Hbet.
+    - move/source_heap_in_contextb_correct in Htable_scope.
+      by rewrite H1 in Htable_scope.
+    - move/b_e_type_checker_reflects_typing in Hbet.
+      by rewrite H1 in Hbet.
   }
   (* memories *)
   { apply Forall2_spec => //; first by rewrite List.length_map.
@@ -426,6 +433,7 @@ Proof.
     unfold module_table_type_checker in Hmodcheck.
     eapply all_projection in Hmodcheck; eauto.
     move/andP in Hmodcheck; destruct Hmodcheck as [Hchecks Hbetype].
+    move/andP in Hchecks; destruct Hchecks as [Hchecks Hscope_table].
     move/andP in Hchecks; destruct Hchecks as [_ Hconstexpr].
     move/b_e_type_checker_reflects_typing in Hbetype.
     eapply const_exprs_impl in Hconstexpr; last by eauto.

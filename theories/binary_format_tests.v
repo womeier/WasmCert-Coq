@@ -2,7 +2,7 @@
 From Stdlib Require Import Strings.Byte ZArith.
 From parseque Require Import Parseque.
 From Wasm Require Import binary_format_parser binary_format_printer
-                         datatypes_properties check_toks.
+                         datatypes_properties check_toks addressing addressing_parseque.
 
 (** A vector's u32 length may have a non-minimal LEB128 representation.
     In particular, a padded zero length must not require an element parser
@@ -78,6 +78,115 @@ Proof. vm_compute. reflexivity. Qed.
 
 Lemma test_nop : check_toks (x01 :: nil) parse_be = Running.Singleton BI_nop.
 Proof. vm_compute. reflexivity. Qed.
+
+Lemma block_type_index_64_signed_round_trip :
+  run_parse_bes (binary_of_be (BI_block (BT_id 64%N) nil)) =
+    Some (BI_block (BT_id 64%N) nil :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma block_type_index_128_signed_round_trip :
+  run_parse_bes (binary_of_be (BI_loop (BT_id 128%N) nil)) =
+    Some (BI_loop (BT_id 128%N) nil :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma block_type_maximum_u32_signed_round_trip :
+  run_parse_bes (binary_of_be (BI_block (BT_id 4294967295%N) nil)) =
+    Some (BI_block (BT_id 4294967295%N) nil :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma explicit_nullable_reference_is_not_only_its_printer_image :
+  run_parse_prefix (fun _ => parse_reference_type) (x63 :: x70 :: nil) =
+    Some (T_funcref, nil) /\
+  binary_of_reference_type T_funcref <> (x63 :: x70 :: nil).
+Proof. vm_compute. split; congruence. Qed.
+
+Lemma source_declaration_index_zero_accepts_padded_s33 :
+  run_parse_prefix (fun _ => parse_declaration_reference_type)
+    (x63 :: x80 :: x00 :: xff :: nil) =
+    Some (Ref_type true (HT_type 0%N), xff :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_indexed_table64_descriptor_exact_suffix :
+  run_parse_prefix (fun _ => parse_table_type)
+    (x63 :: x80 :: x00 :: x04 :: x80 :: x00 :: xff :: nil) =
+    Some (Build_table_type (Build_limits 0%N None)
+      (Ref_type true (HT_type 0%N)) Addressing.AT_i64, xff :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma full_source_table_parser_is_not_legacy_decoder :
+  AddressingParseque.decode_table_type (x63 :: x00 :: x04 :: x00 :: nil) = None /\
+  run_parse_prefix (fun _ => parse_table_type) (x63 :: x00 :: x04 :: x00 :: nil) =
+    Some (Build_table_type (Build_limits 0%N None)
+      (Ref_type true (HT_type 0%N)) Addressing.AT_i64, nil).
+Proof. vm_compute. split; reflexivity. Qed.
+
+Lemma source_table64_initializer_format_not_limit_validity :
+  run_parse_prefix (fun _ => parse_module_table)
+    (x40 :: x00 :: x64 :: x00 :: x05 :: x02 :: x01 ::
+      xd2 :: x01 :: x0b :: xff :: nil) =
+    Some (Build_module_table
+      (Build_table_type (Build_limits 2%N (Some 1%N))
+        (Ref_type false (HT_type 0%N)) Addressing.AT_i64)
+      (Some (BI_ref_func 1%N :: nil)), xff :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_table_initializer_marker_requires_reserved_zero :
+  run_parse_prefix (fun _ => parse_module_table)
+    (x40 :: x01 :: x70 :: x00 :: x00 :: x0b :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_indexed_local_value_exact_suffix :
+  run_parse_prefix (fun _ => parse_locals)
+    (x01 :: x64 :: x00 :: xff :: nil) =
+    Some ((1%N, T_ref (Ref_type false (HT_type 0%N))), xff :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_indexed_global_value_exact_suffix :
+  run_parse_prefix (fun _ => parse_global_type)
+    (x63 :: x00 :: x01 :: xff :: nil) =
+    Some (Build_global_type MUT_var (T_ref (Ref_type true (HT_type 0%N))), xff :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_declaration_non_null_maximum_index :
+  run_parse_prefix (fun _ => parse_declaration_reference_type)
+    (x64 :: xff :: xff :: xff :: xff :: x0f :: x01 :: nil) =
+    Some (Ref_type false (HT_type 4294967295%N), x01 :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_recursive_struct_and_array_group :
+  run_parse_prefix (fun _ => parse_recursive_type)
+    (x4e :: x02 :: x5f :: x01 :: x63 :: x00 :: x00 ::
+      x5e :: x78 :: x01 :: xff :: nil) =
+    Some ((Sub_type true nil
+      (Comp_struct ({| field_mutability := MUT_const;
+        field_storage := ST_value (T_ref (Ref_type true (HT_type 0%N))) |} :: nil)) ::
+      Sub_type true nil
+        (Comp_array {| field_mutability := MUT_var; field_storage := ST_packed PT_i8 |})
+      :: nil), xff :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma source_recursive_explicit_subtype_with_super :
+  run_parse_prefix (fun _ => parse_recursive_type)
+    (x50 :: x01 :: x80 :: x00 :: x60 :: x00 :: x00 :: xff :: nil) =
+    Some ((Sub_type false (0%N :: nil) (Comp_func (Tf nil nil)) :: nil), xff :: nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma shuffle_printer_has_no_vector_length_prefix :
+  binary_of_be (BI_vbinop (13%N,
+    0%N :: 1%N :: 2%N :: 3%N :: 4%N :: 5%N :: 6%N :: 7%N ::
+    8%N :: 9%N :: 10%N :: 11%N :: 12%N :: 13%N :: 14%N :: 15%N :: nil)) =
+    xfd :: x0d :: x00 :: x01 :: x02 :: x03 :: x04 :: x05 :: x06 :: x07 ::
+    x08 :: x09 :: x0a :: x0b :: x0c :: x0d :: x0e :: x0f :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma splat_printer_standard_opcodes :
+  binary_of_be (BI_splat_vec (VS_i VSI_8_16)) = xfd :: x0f :: nil /\
+  binary_of_be (BI_splat_vec (VS_i VSI_16_8)) = xfd :: x10 :: nil /\
+  binary_of_be (BI_splat_vec (VS_i VSI_32_4)) = xfd :: x11 :: nil /\
+  binary_of_be (BI_splat_vec (VS_i VSI_64_2)) = xfd :: x12 :: nil /\
+  binary_of_be (BI_splat_vec (VS_f VSF_32_4)) = xfd :: x13 :: nil /\
+  binary_of_be (BI_splat_vec (VS_f VSF_64_2)) = xfd :: x14 :: nil.
+Proof. vm_compute. repeat split; reflexivity. Qed.
 
 (** Memory indices are u32 LEBs, not reserved zero bytes. *)
 Lemma memory_size_index_round_trip :
@@ -400,6 +509,56 @@ Definition empty_module := {|
 |}.
 
 Lemma empty_module_round_trip : run_parse_module (binary_of_module empty_module) = Some empty_module.
+Proof. vm_compute. reflexivity. Qed.
+
+(* Format-only regression: deliberately not a semantic validation witness.
+   In particular the table minimum exceeds its maximum. *)
+Definition indexed_source_format_module : module := {|
+  mod_types := (Sub_type true nil
+    (Comp_struct ({| field_mutability := MUT_const;
+      field_storage := ST_value (T_ref (Ref_type true (HT_type 0%N))) |} :: nil))
+    :: nil) :: nil;
+  mod_funcs := nil;
+  mod_tables := Build_module_table
+    (Build_table_type (Build_limits 2%N (Some 1%N))
+      (Ref_type false (HT_type 0%N)) Addressing.AT_i64)
+    (Some (BI_ref_func 0%N :: nil)) :: nil;
+  mod_mems := nil;
+  mod_globals := Build_module_global
+    (Build_global_type MUT_const (T_ref (Ref_type true (HT_type 0%N))))
+    (BI_ref_func 0%N :: nil) :: nil;
+  mod_elems := Build_module_element (Ref_type true (HT_type 0%N)) nil ME_passive :: nil;
+  mod_datas := nil;
+  mod_start := None;
+  mod_imports := nil;
+  mod_exports := nil;
+|}.
+
+Lemma indexed_source_format_module_roundtrip :
+  run_parse_module (binary_of_module indexed_source_format_module) =
+    Some indexed_source_format_module.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma empty_type_section_correct_framing :
+  run_parse_module (binary_of_module empty_module ++ x01 :: x01 :: x00 :: nil) =
+    Some empty_module.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma empty_type_section_short_framing_rejected :
+  run_parse_module (binary_of_module empty_module ++ x01 :: x00 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma empty_type_section_long_framing_rejected :
+  run_parse_module (binary_of_module empty_module ++ x01 :: x02 :: x00 :: nil) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma custom_section_exact_payload_accepted :
+  run_parse_module (binary_of_module empty_module ++ x00 :: x02 :: x00 :: xff :: nil) =
+    Some empty_module.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma custom_section_truncated_positive_payload_rejected :
+  run_parse_module (binary_of_module empty_module ++ x00 :: x03 :: x00 :: xff :: nil) = None.
 Proof. vm_compute. reflexivity. Qed.
 
 Definition two_memory_legacy_access := {|

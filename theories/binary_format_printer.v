@@ -121,7 +121,7 @@ Definition binary_of_f64 (x : f64) : list byte :=
 
 Definition binary_of_block_type (tb : block_type) : list byte :=
   match tb with
-  | BT_id x => binary_of_idx x
+  | BT_id x => leb128.encode_signed (Z.of_N x)
   | BT_valtype None => x40 :: nil
   | BT_valtype (Some t) => binary_of_value_type t
   end.
@@ -159,7 +159,7 @@ Definition binary_of_vunop (op: vunop) :=
 Definition binary_of_vbinop (op: vbinop) :=
   let '(opcode, args) := op in
   if N.eqb opcode 13%N then (* shuffle *)
-    xfd :: x0d :: binary_of_vec (binary_of_N) args
+    xfd :: x0d :: List.concat (List.map binary_of_laneidx args)
   else
     xfd :: binary_of_N opcode.
 
@@ -175,12 +175,12 @@ Definition binary_of_vshiftop (op: vshiftop) :=
 Definition binary_of_splat_vec (sh: vshape) :=
   xfd ::
   (match sh with
-   | VS_i VSI_8_16 => x0e
-   | VS_i VSI_16_8 => x0f
-   | VS_i VSI_32_4 => x10
-   | VS_i VSI_64_2 => x11
-   | VS_f VSF_32_4 => x12
-   | VS_f VSF_64_2 => x13
+   | VS_i VSI_8_16 => x0f
+   | VS_i VSI_16_8 => x10
+   | VS_i VSI_32_4 => x11
+   | VS_i VSI_64_2 => x12
+   | VS_f VSF_32_4 => x13
+   | VS_f VSF_64_2 => x14
    end
   ) :: nil.
 

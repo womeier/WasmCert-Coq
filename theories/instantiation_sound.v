@@ -550,7 +550,7 @@ Proof.
         subst ty.
         eapply Forall2_nth_impl in Hmtabletype as [tabt [Hnthtab Htabtype]]; eauto.
         unfold module_table_typing in Htabtype.
-        destruct Htabtype as [Hvalid [Htype [Hconst Hbet]]].
+        destruct Htabtype as [Hvalid [Htype [Hconst [Hscope Hbet]]]].
         subst tabt.
         unfold instantiate_tables in Hinsttable.
         eapply Forall2_lookup in Hinsttable as [tv' [Hnthtv' Hreduce]]; eauto.

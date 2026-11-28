@@ -324,6 +324,34 @@ Proof.
   now rewrite <- Ex.
 Qed.
 
+Lemma parser_complete_andbind {A B n}
+    (p : Parser (SizedList Byte.byte) Byte.byte option A n)
+    (q : A -> Box (Parser (SizedList Byte.byte) Byte.byte option B) n)
+    (P : list Byte.byte -> A -> Prop)
+    (Q : A -> list Byte.byte -> B -> Prop)
+    (R : list Byte.byte -> A * B -> Prop) :
+  parser_complete p P ->
+  (forall a k (lt : k < n), parser_complete (call (q a) lt) (Q a)) ->
+  (forall bytes a b, R bytes (a, b) ->
+    exists xs ys, bytes = xs ++ ys /\ P xs a /\ Q a ys b) ->
+  parser_complete (Combinators.andbind p q) R.
+Proof.
+  intros Hp Hq Split m bound input prefix suffix [a b] E Rab.
+  destruct (Split prefix a b Rab) as [xs [ys [Parts [Pa Qb]]]].
+  rewrite Parts, <- app_assoc in E.
+  destruct (Hp m bound input xs (ys ++ suffix) a E Pa)
+    as [sa [Ra [Va Outa]]].
+  rewrite <- Va in Qb.
+  destruct (Hq (Success.value sa) _
+    (Nat.le_trans _ _ _ (Success.small sa) bound)
+    _ (Nat.le_refl _) (Success.leftovers sa) ys suffix b Outa Qb)
+    as [sb [Rb [Vb Outb]]].
+  exists (Success.and sa sb). split.
+  - unfold Combinators.andbind; simpl.
+    rewrite Ra. simpl. rewrite Rb. reflexivity.
+  - split; [simpl; now rewrite Va, Vb | exact Outb].
+Qed.
+
 Lemma parser_complete_bind {A B n}
     (p : Parser (SizedList Byte.byte) Byte.byte option A n)
     (q : A -> Box (Parser (SizedList Byte.byte) Byte.byte option B) n)

@@ -147,16 +147,42 @@ Ltac complete_simd_memarg_choice :=
     | eapply production_simd_alt_right;
         [reject_simd_subopcode | complete_simd_memarg_choice] ].
 
+Lemma production_classified_simd_complete code n P :
+  (code < 4294967296)%N ->
+  parser_complete
+    (@parse_vector_memory_tail (SizedList Byte.byte) _ option _ _ _ _ _ _ n code) P ->
+  parser_complete
+    ((@parse_u32_as_N (SizedList Byte.byte) _ option _ _ _ n) >>=
+      (fun actual => parse_vector_memory_tail actual))
+    (simd_body_encoding code P).
+Proof.
+  intros Range Tail.
+  eapply parser_complete_bind with
+    (P := fun bytes actual => bytes = binary_of_u32 code /\ actual = code)
+    (Q := fun actual bytes be => actual = code /\ P bytes be).
+  - eapply parser_complete_weaken; [apply production_u32_printed_complete|].
+    intros bytes actual [Bytes Value]; subst actual; split; assumption.
+  - intros actual k lt m bound input prefix suffix be Bytes [Value Payload].
+    subst actual.
+    pose proof (parser_complete_le_lower
+      (parse_vector_memory_tail code) P (Nat.lt_le_incl _ _ lt) Tail) as Lower.
+    exact (Lower m bound input prefix suffix be Bytes Payload).
+  - intros bytes be [payload [Bytes Payload]].
+    exists (binary_of_u32 code), payload, code; auto.
+Qed.
+
 Ltac prove_simd_memarg_codec constructor :=
   let op := eval vm_compute in
     (Byte.to_N (List.hd Byte.x00 (List.tl
       (binary_of_be (constructor (Build_memarg 0%N 0%N 0%N)))))) in
   intro n;
-  unfold parse_vector_memory_instruction, parse_v128_load,
-    parse_v128_load_packed, parse_v128_load_splat, parse_v128_load_zero,
-    parse_v128_store, parse_v128_load_lane, parse_v128_store_lane;
+  unfold parse_vector_memory_instruction;
   eapply production_simd_memarg_framing with (code := op);
-    [intro marg; reflexivity | complete_simd_memarg_choice].
+    [intro marg; reflexivity |
+     apply production_classified_simd_complete;
+       [vm_compute; reflexivity |
+        cbn [parse_vector_memory_tail vector_memory_opcode];
+        apply production_simd_memarg_payload_complete]].
 
 (** All 13 encodable vector-load shapes and the full vector store, through
     the actual production parse_vector_memory_instruction alternative tree.
@@ -281,11 +307,13 @@ Ltac prove_simd_lane_codec constructor :=
     (Byte.to_N (List.hd Byte.x00 (List.tl
       (binary_of_be (constructor (Build_memarg 0%N 0%N 0%N) 0%N))))) in
   intro n;
-  unfold parse_vector_memory_instruction, parse_v128_load,
-    parse_v128_load_packed, parse_v128_load_splat, parse_v128_load_zero,
-    parse_v128_store, parse_v128_load_lane, parse_v128_store_lane;
+  unfold parse_vector_memory_instruction;
   eapply production_simd_lane_framing with (code := op);
-    [intros marg lane; reflexivity | complete_simd_lane_choice].
+    [intros marg lane; reflexivity |
+     apply production_classified_simd_complete;
+       [vm_compute; reflexivity |
+        cbn [parse_vector_memory_tail vector_memory_opcode];
+        apply production_simd_lane_payload_complete]].
 
 (** A laneidx is one binary byte. This theorem intentionally includes
     format-valid but semantically out-of-range lanes, which must parse and

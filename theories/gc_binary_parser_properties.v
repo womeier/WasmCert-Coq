@@ -5,6 +5,7 @@ From Stdlib Require Import List.
 From parseque Require Import Parseque.
 From Wasm Require Import gc_types gc_binary binary_format_parser
   binary_format_printer binary_parser_combinator_properties.
+From Wasm Require Import binary_parser_lookahead_properties.
 
 Definition abstract_heap_prefix bs h :=
   exists b, bs = b :: nil /\ abstract_heap_encoding b h.
@@ -34,6 +35,95 @@ Proof.
   - apply parser_complete_anyTok.
   - intros bs h [b [E D]].
     exists b. split; [exact E | now apply decode_abstract_heap_correct].
+Qed.
+
+Lemma parse_gc_abstract_heap_fixed_complete n b h :
+  abstract_heap_encoding b h ->
+  parser_complete
+    (@parse_gc_abstract_heap_type (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+    (fun bs value => bs = b :: nil /\ value = h).
+Proof.
+  intro Encoded.
+  eapply parser_complete_weaken; [apply parse_gc_abstract_heap_complete|].
+  intros bs value [Bytes Value]; subst bs value.
+  exists b; auto.
+Qed.
+
+Lemma parse_gc_explicit_reference_fixed_complete n nullable b h :
+  abstract_heap_encoding b h ->
+  parser_complete
+    ((fun heap => {| art_nullable := nullable; art_heap := heap |}) <$>
+      ((@exact_byte (SizedList Byte.byte) _ option _ _ _ _ _ _
+        (if nullable then Byte.x63 else Byte.x64) n) &>
+        parse_gc_abstract_heap_type))
+    (fun bs value =>
+      bs = (if nullable then Byte.x63 else Byte.x64) :: b :: nil /\
+      value = {| art_nullable := nullable; art_heap := h |}).
+Proof.
+  intro Encoded.
+  eapply parser_complete_map with
+    (P := fun bs heap =>
+      bs = (if nullable then Byte.x63 else Byte.x64) :: b :: nil /\ heap = h).
+  - apply parser_complete_prefix_byte with
+      (Q := fun bs heap => bs = b :: nil /\ heap = h).
+    + intros k lt; simpl. apply parser_complete_le_lower.
+      now apply parse_gc_abstract_heap_fixed_complete.
+    + intros bs heap [Bytes Value]. exists (b :: nil); auto.
+  - intros bs value [Bytes Value]. exists h; auto.
+Qed.
+
+Theorem parse_gc_abstract_reference_prefix_complete n :
+  parser_complete
+    (@parse_gc_abstract_reference_type
+      (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+    (fun bs reference => abstract_reference_encoding bs reference nil).
+Proof.
+  intros m bound input prefix suffix reference Bytes Encoded.
+  inversion Encoded as [b h rest Heap|b h rest Heap|b h rest Heap]; subst.
+  - assert (Complete : parser_complete
+      (@parse_gc_abstract_reference_type
+        (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+      (fun bs value => bs = b :: nil /\
+        value = {| art_nullable := true; art_heap := h |})).
+    { unfold parse_gc_abstract_reference_type.
+      eapply parser_complete_alt_right_initial with
+        (expected := Byte.x63) (actual := b).
+      - apply parser_initial_map; apply parser_initial_rand; apply exact_byte_initial.
+      - destruct Heap; discriminate.
+      - intros bs value [Head _]; exists nil; exact Head.
+      - eapply parser_complete_alt_right_initial with
+          (expected := Byte.x64) (actual := b).
+        + apply parser_initial_map; apply parser_initial_rand; apply exact_byte_initial.
+        + destruct Heap; discriminate.
+        + intros bs value [Head _]; exists nil; exact Head.
+        + eapply parser_complete_map with
+            (P := fun bs value => bs = b :: nil /\ value = h).
+          * exact (parse_gc_abstract_heap_fixed_complete n b h Heap).
+          * intros bs value [Head Value]; exists h; auto. }
+    apply (Complete m bound input _ suffix _ Bytes); auto.
+  - assert (Complete : parser_complete
+      (@parse_gc_abstract_reference_type
+        (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+      (fun bs value => bs = Byte.x63 :: b :: nil /\
+        value = {| art_nullable := true; art_heap := h |})).
+    { unfold parse_gc_abstract_reference_type.
+      apply parser_complete_alt_left.
+      exact (parse_gc_explicit_reference_fixed_complete n true b h Heap). }
+    apply (Complete m bound input _ suffix _ Bytes); auto.
+  - assert (Complete : parser_complete
+      (@parse_gc_abstract_reference_type
+        (SizedList Byte.byte) _ option _ _ _ _ _ _ n)
+      (fun bs value => bs = Byte.x64 :: b :: nil /\
+        value = {| art_nullable := false; art_heap := h |})).
+    { unfold parse_gc_abstract_reference_type.
+      eapply parser_complete_alt_right_initial with
+        (expected := Byte.x63) (actual := Byte.x64).
+      - apply parser_initial_map; apply parser_initial_rand; apply exact_byte_initial.
+      - discriminate.
+      - intros bs value [Head _]; exists (b :: nil); exact Head.
+      - apply parser_complete_alt_left.
+        exact (parse_gc_explicit_reference_fixed_complete n false b h Heap). }
+    apply (Complete m bound input _ suffix _ Bytes); auto.
 Qed.
 
 Lemma parse_gc_explicit_reference_sound n nullable :

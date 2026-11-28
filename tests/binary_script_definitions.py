@@ -65,6 +65,14 @@ elif mode == "nonnull":
 elif mode == "unsupported-reference":
     print(module(magic + sec(1, b"\x01\x60\x00\x00")
                  + sec(4, b"\x01\x63\x00\x00\x00")))
+elif mode == "unknown-reference":
+    # Format-valid source index, rejected by contextual declaration validation.
+    print(module(magic + sec(1, b"\x01\x60\x00\x00")
+                 + sec(4, b"\x01\x63\x01\x00\x00")))
+elif mode == "malformed-reference":
+    # Unassigned abstract heap code, not an indexed source heap.
+    print(module(magic + sec(1, b"\x01\x60\x00\x00")
+                 + sec(4, b"\x01\x63\x75\x00\x00")))
 else:
     assert mode == "positive"
     print(module(counter, "$initial "))
