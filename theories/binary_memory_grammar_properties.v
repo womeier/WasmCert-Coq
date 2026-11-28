@@ -84,6 +84,36 @@ Proof.
   - intros prefix a H suffix. apply decode_u32_spec. exists prefix. auto.
 Qed.
 
+Theorem parse_u64_binary_sound : forall n m (bound : (m <= n)%nat)
+  (input : SizedList byte m) s,
+  runParser (parse_u64_as_N :
+    Parser (SizedList byte) byte option N n) bound input = Some s ->
+  exists prefix, @Sized.value _ _ _ input =
+    prefix ++ @Sized.value _ _ _ (Success.leftovers s) /\
+    binary_u64 prefix (Success.value s).
+Proof.
+  apply (prefix_semantics_grammar_sound N (fun n => parse_u64_as_N)
+    (decode_uint 64 10) binary_u64).
+  - apply prefix_u64.
+  - intros input value suffix Parsed; now apply decode_u64_spec in Parsed.
+Qed.
+
+Theorem parse_u64_binary_complete : forall n m (bound : (m <= n)%nat)
+  (input : SizedList byte m) prefix suffix value,
+  @Sized.value _ _ _ input = prefix ++ suffix ->
+  binary_u64 prefix value ->
+  exists s, runParser (parse_u64_as_N :
+    Parser (SizedList byte) byte option N n) bound input = Some s /\
+    Success.value s = value /\
+    @Sized.value _ _ _ (Success.leftovers s) = suffix.
+Proof.
+  apply (prefix_semantics_grammar_complete N (fun n => parse_u64_as_N)
+    (decode_uint 64 10) binary_u64).
+  - apply prefix_u64.
+  - intros prefix value Encoding suffix.
+    apply decode_u64_spec; exists prefix; auto.
+Qed.
+
 Theorem parse_memarg_binary_sound : forall n m (bound: (m <= n)%nat)
   (input: SizedList byte m) s,
   runParser (parse_memarg:

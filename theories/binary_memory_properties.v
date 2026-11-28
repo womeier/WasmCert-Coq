@@ -55,7 +55,7 @@ Qed.
 Lemma decode_tagged_memarg_round_trip : forall tag build marg suffix,
   N.lt marg.(memarg_align) 64 ->
   N.lt marg.(memarg_memory) u32_bound ->
-  N.lt marg.(memarg_offset) u32_bound ->
+  N.lt marg.(memarg_offset) u64_bound ->
   decode_tagged_memarg tag build (tag :: binary_of_memarg marg ++ suffix) =
     Some (build marg, suffix).
 Proof.
@@ -135,7 +135,7 @@ Theorem scalar_memop_prefix_round_trip : forall op marg suffix bound
     (binary_of_be (scalar_memop_build op marg) ++ suffix) <= bound)%nat),
   N.lt marg.(memarg_align) 64 ->
   N.lt marg.(memarg_memory) u32_bound ->
-  N.lt marg.(memarg_offset) u32_bound ->
+  N.lt marg.(memarg_offset) u64_bound ->
   observe_prefix (runParser (scalar_memop_parser op bound) Hbound
     (mkSizedList (binary_of_be (scalar_memop_build op marg) ++ suffix))) =
     Some (scalar_memop_build op marg, suffix).
@@ -150,7 +150,7 @@ Qed.
 Theorem scalar_memop_run_round_trip : forall op marg,
   N.lt marg.(memarg_align) 64 ->
   N.lt marg.(memarg_memory) u32_bound ->
-  N.lt marg.(memarg_offset) u32_bound ->
+  N.lt marg.(memarg_offset) u64_bound ->
   binary_format_parser.run (binary_of_be (scalar_memop_build op marg))
     (scalar_memop_parser op) = Some (scalar_memop_build op marg).
 Proof.
@@ -410,7 +410,7 @@ Theorem vector_memarg_prefix_round_trip : forall code build marg suffix bound
   vector_memory_opcode code = Some (VMI_memarg build) ->
   N.lt marg.(memarg_align) 64 ->
   N.lt marg.(memarg_memory) u32_bound ->
-  N.lt marg.(memarg_offset) u32_bound ->
+  N.lt marg.(memarg_offset) u64_bound ->
   observe_prefix (runParser
     (parse_vector_memory_instruction:
       Parser (SizedList byte) byte option basic_instruction bound)
@@ -437,7 +437,7 @@ Theorem vector_lane_prefix_round_trip : forall code build marg lane suffix bound
   vector_memory_opcode code = Some (VMI_lane build) ->
   N.lt marg.(memarg_align) 64 ->
   N.lt marg.(memarg_memory) u32_bound ->
-  N.lt marg.(memarg_offset) u32_bound ->
+  N.lt marg.(memarg_offset) u64_bound ->
   N.lt lane 256 ->
   observe_prefix (runParser
     (parse_vector_memory_instruction:
@@ -465,7 +465,7 @@ Theorem vector_memarg_run_round_trip : forall code build marg,
   vector_memory_opcode code = Some (VMI_memarg build) ->
   N.lt marg.(memarg_align) 64 ->
   N.lt marg.(memarg_memory) u32_bound ->
-  N.lt marg.(memarg_offset) u32_bound ->
+  N.lt marg.(memarg_offset) u64_bound ->
   binary_format_parser.run (binary_of_be (build marg))
     (fun n => (parse_vector_memory_instruction:
       Parser (SizedList byte) byte option basic_instruction n)) = Some (build marg).
@@ -480,7 +480,7 @@ Theorem vector_lane_run_round_trip : forall code build marg lane,
   vector_memory_opcode code = Some (VMI_lane build) ->
   N.lt marg.(memarg_align) 64 ->
   N.lt marg.(memarg_memory) u32_bound ->
-  N.lt marg.(memarg_offset) u32_bound ->
+  N.lt marg.(memarg_offset) u64_bound ->
   N.lt lane 256 ->
   binary_format_parser.run (binary_of_be (build marg lane))
     (fun n => (parse_vector_memory_instruction:
@@ -540,7 +540,7 @@ Theorem scalar_memory_class_round_trip : forall op marg suffix bound
     (binary_of_be (scalar_memop_build op marg) ++ suffix) <= bound)%nat),
   N.lt marg.(memarg_align) 64 ->
   N.lt marg.(memarg_memory) u32_bound ->
-  N.lt marg.(memarg_offset) u32_bound ->
+  N.lt marg.(memarg_offset) u64_bound ->
   observe_prefix (runParser
     (parse_memory_instruction:
       Parser (SizedList byte) byte option basic_instruction bound)
@@ -591,7 +591,7 @@ Theorem vector_memarg_class_round_trip : forall code build marg suffix bound
   vector_memory_opcode code = Some (VMI_memarg build) ->
   N.lt marg.(memarg_align) 64 ->
   N.lt marg.(memarg_memory) u32_bound ->
-  N.lt marg.(memarg_offset) u32_bound ->
+  N.lt marg.(memarg_offset) u64_bound ->
   observe_prefix (runParser
     (parse_memory_instruction:
       Parser (SizedList byte) byte option basic_instruction bound)
@@ -616,7 +616,7 @@ Theorem vector_lane_class_round_trip : forall code build marg lane suffix bound
   vector_memory_opcode code = Some (VMI_lane build) ->
   N.lt marg.(memarg_align) 64 ->
   N.lt marg.(memarg_memory) u32_bound ->
-  N.lt marg.(memarg_offset) u32_bound ->
+  N.lt marg.(memarg_offset) u64_bound ->
   N.lt lane 256 ->
   observe_prefix (runParser
     (parse_memory_instruction:
@@ -644,7 +644,7 @@ Inductive encodable_memory_instruction : basic_instruction -> Prop :=
 | EMI_scalar : forall op marg,
     N.lt marg.(memarg_align) 64 ->
     N.lt marg.(memarg_memory) u32_bound ->
-    N.lt marg.(memarg_offset) u32_bound ->
+    N.lt marg.(memarg_offset) u64_bound ->
     encodable_memory_instruction (scalar_memop_build op marg)
 | EMI_indexed : forall op x y,
     N.lt x u32_bound -> N.lt y u32_bound ->
@@ -653,13 +653,13 @@ Inductive encodable_memory_instruction : basic_instruction -> Prop :=
     vector_memory_opcode code = Some (VMI_memarg build) ->
     N.lt marg.(memarg_align) 64 ->
     N.lt marg.(memarg_memory) u32_bound ->
-    N.lt marg.(memarg_offset) u32_bound ->
+    N.lt marg.(memarg_offset) u64_bound ->
     encodable_memory_instruction (build marg)
 | EMI_lane : forall code build marg lane,
     vector_memory_opcode code = Some (VMI_lane build) ->
     N.lt marg.(memarg_align) 64 ->
     N.lt marg.(memarg_memory) u32_bound ->
-    N.lt marg.(memarg_offset) u32_bound ->
+    N.lt marg.(memarg_offset) u64_bound ->
     N.lt lane 256 ->
     encodable_memory_instruction (build marg lane).
 

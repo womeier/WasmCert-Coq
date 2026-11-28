@@ -29,6 +29,50 @@
  (modules multi_memory_store_extracted)
  (libraries wasmcert_runtime parray zarith))
 
+(test
+ (name scalar_codec_extracted)
+ (modules scalar_codec_extracted)
+ (libraries wasmcert_runtime zarith))
+
+(test
+ (name block_type_codec_extracted)
+ (modules block_type_codec_extracted)
+ (libraries wasmcert_runtime zarith))
+
+(test
+ (name simd_codec_extracted)
+ (modules simd_codec_extracted)
+ (libraries wasmcert_runtime zarith))
+
+(rule
+ (target section_framing_binary.wast)
+ (deps section_framing_binary.py)
+ (action
+  (run python3 %{dep:section_framing_binary.py} %{target})))
+
+(rule
+ (alias runtest)
+ (deps section_framing_binary.wast ../run_wast.sh)
+ (action
+  (setenv EXE %{exe:../src/wasm_coq_interpreter.exe}
+   (setenv JOBS 1
+    (run bash %{dep:../run_wast.sh} . section_framing_binary)))))
+
+(rule
+ (target final_memarg_binary.wast)
+ (deps final_memarg_binary.py binary_fixtures.py)
+ (action
+  (with-stdout-to %{target}
+   (run python3 %{dep:final_memarg_binary.py}))))
+
+(rule
+ (alias runtest)
+ (deps final_memarg_binary.wast ../run_wast.sh)
+ (action
+  (setenv EXE %{exe:../src/wasm_coq_interpreter.exe}
+   (setenv JOBS 1
+    (run bash %{dep:../run_wast.sh} . final_memarg_binary)))))
+
 (rule
  (alias runtest)
  (deps run_wast_test.sh ../run_wast.sh)

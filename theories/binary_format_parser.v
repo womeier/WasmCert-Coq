@@ -3,7 +3,7 @@
    gallais.github.io/pdf/agdarsec18.pdf
 *)
 
-From Wasm Require Import datatypes_properties typing leb128 binary_codec utf8.
+From Wasm Require Import datatypes_properties typing leb128 binary_codec utf8 addressing addressing_parseque.
 From compcert Require Import Integers.
 From parseque Require Import Parseque.
 From Stdlib Require Import Strings.Byte ZArith.
@@ -46,10 +46,16 @@ Definition exact_byte (b : byte) {n} : byte_parser byte n :=
     anyTok.
 
 Definition parse_u8_as_N {n} : byte_parser N n :=
-  parse_uint 8 2 n.
+  guardM
+    (fun n => if (N.leb n 255%N) then Some n
+           else None)
+    (assert_sized (extract parse_unsigned n) (fun sz => N.leb sz 2)).
 
 Definition parse_u32_as_N {n} : byte_parser N n :=
   parse_uint 32 5 n.
+
+Definition parse_u64_as_N {n} : byte_parser N n :=
+  parse_uint 64 10 n.
 
 Definition assert_u32 {n} (k: N) : byte_parser N n :=
   guardM
@@ -95,7 +101,10 @@ Definition parse_vec_aux {B} {n} (f : byte_parser B n) (k : N)
 
 (* parsing a length-indexed list *)
 Definition parse_vec {B} {n} (f : byte_parser B n) : byte_parser (list B) n :=
-  assert_u32 0 $> nil <|>
+  (* Empty vectors can have a padded u32 length, not only the byte 0x00.
+     Return nil while consuming the length itself: Parseque parsers must
+     consume input, so [parse_vec_aux f 0] cannot be a pure nil parser. *)
+  guardM (fun k => if N.eqb k 0 then Some nil else None) parse_vec_length <|>
   (parse_vec_length >>= (fun k => parse_vec_aux f k)).
 
 Definition parse_16bytes {n} : byte_parser SIMD.v128 n :=
@@ -136,7 +145,9 @@ Definition parse_dataidx {n} : byte_parser dataidx n :=
   parse_u32_as_N.
 
 Definition parse_laneidx {n} : byte_parser laneidx n :=
-  Stdlib.Strings.Byte.to_N <$> anyTok.
+  (* A lane index is one raw byte, not an unsigned LEB128 integer.
+     The shape-specific bound is checked by validation, not decoding. *)
+  to_N <$> anyTok.
 
 Definition parse_number_type {n} : byte_parser number_type n :=
   (exact_byte x7f $> T_i32) <|>
@@ -156,10 +167,18 @@ Definition parse_value_type {n} : byte_parser value_type n :=
   T_vec <$> parse_vector_type <|>
   T_ref <$> parse_reference_type.
 
+(* Unlike ordinary indices, block type indices use the nonnegative half of
+   signed s33.  Unsigned LEB128 collides with 0x40 and the value-type bytes. *)
+Definition parse_block_typeidx {n} : byte_parser typeidx n :=
+  guardM
+    (fun z => if andb (Z.leb 0 z) (Z.leb z 4294967295)
+      then Some (Z.to_N z) else None)
+    (assert_sized (extract parse_signed n) (fun size => N.leb size 5)).
+
 Definition parse_block_type {n} : byte_parser block_type n :=
   (exact_byte x40 $> BT_valtype None) <|>
   (fun t => BT_valtype (Some t)) <$> parse_value_type <|>
-  BT_id <$> parse_typeidx.
+  BT_id <$> parse_block_typeidx.
 
 
 Definition parse_unreachable {n} : byte_parser basic_instruction n :=
@@ -213,6 +232,10 @@ Definition parse_return_call {n} : byte_parser basic_instruction n :=
 Definition parse_return_call_indirect {n} : byte_parser basic_instruction n :=
   exact_byte x13 &>
   (((fun typ tab => BI_return_call_indirect tab typ) <$> parse_typeidx) <*> parse_tableidx).
+
+(* Shared grouped alternative used by the tail-call proof handoff (8d465bf). *)
+Definition parse_tail_call {n} : byte_parser basic_instruction n :=
+  parse_return_call <|> parse_return_call_indirect.
 
 (* Reference instructions *)
 Definition parse_ref_null {n}: byte_parser basic_instruction n :=
@@ -308,9 +331,11 @@ Definition parse_alignment_exponent {n} : byte_parser N n :=
   parse_u32_as_N.
 
 Definition parse_static_offset {n} : byte_parser N n :=
-  parse_u32_as_N.
+  (* Final Bmemarg has an unsigned 64-bit static offset regardless of the
+     selected memory. Address-width restrictions belong to validation. *)
+  parse_u64_as_N.
 
-Definition parse_memarg_tail {n} (a: N) : byte_parser memarg n :=
+Definition parse_memarg_tail {n} (a : N) : byte_parser memarg n :=
     match decode_memarg_flags a with
     | Some (align, false) =>
       (fun o => Build_memarg o align 0%N) <$> parse_static_offset
@@ -864,10 +889,10 @@ Context
   {Tok : Type} {A B : Type} {n : nat}.
 
 Definition parse_be_layer {k}
-  (bes_end_with_x0b_aux: Box (byte_parser (list basic_instruction)) k)
-  (bes_end_with_x0b_or_x05_ctd_aux:
-    Box (byte_parser (list basic_instruction * list basic_instruction)) k)
-  : byte_parser basic_instruction k :=
+  (bes_end_with_x0b_aux : Box (byte_parser (list basic_instruction)) k)
+  (bes_end_with_x0b_or_x05_ctd_aux :
+    Box (byte_parser (list basic_instruction * list basic_instruction)) k) :
+    byte_parser basic_instruction k :=
   let parse_block :=
     exact_byte x02 &> ((BI_block <$> parse_block_type) <*> bes_end_with_x0b_aux) in
   let parse_loop :=
@@ -876,6 +901,7 @@ Definition parse_be_layer {k}
     (((fun x y => (x, y)) <$> parse_block_type) <*> bes_end_with_x0b_or_x05_ctd_aux) in
   let parse_if :=
     (fun '(x, (y, z)) => BI_if x y z) <$> (exact_byte x04 &> parse_if_body) in
+    parse_tail_call <|>
     parse_unreachable <|>
     parse_nop <|>
     parse_block <|>
@@ -887,8 +913,6 @@ Definition parse_be_layer {k}
     parse_return <|>
     parse_call <|>
     parse_call_indirect <|>
-    parse_return_call <|>
-    parse_return_call_indirect <|>
     parse_reference_instruction <|>
     parse_parametric_instruction <|>
     parse_variable_instruction <|>
@@ -896,7 +920,7 @@ Definition parse_be_layer {k}
     parse_memory_instruction <|>
     parse_numeric_instruction.
 
-Definition language : [ Language ] := Fix Language (fun k rec =>
+Definition language_step k (rec : Box Language k) : Language k :=
   let be_aux := Induction.map _be _ rec in
   let bes_end_with_x0b_aux := Induction.map _bes_end_with_x0b _ rec in
   let bes_end_with_x05_aux := Induction.map _bes_end_with_x05 _ rec in
@@ -912,7 +936,9 @@ Definition language : [ Language ] := Fix Language (fun k rec =>
     ((nil, nil) <$ exact_byte x0b) <|>
     (((fun x => (nil, x)) <$ exact_byte x05) <*> parse_bes_end_with_x0b) <|>
     (((fun x '(y, z) => (cons x y, z)) <$> parse_be) <*> bes_end_with_x0b_or_x05_ctd_aux) in
-  MkLanguage parse_be parse_bes_end_with_x0b parse_bes_end_with_x05 parse_bes_end_with_x0b_or_x05_ctd).
+  MkLanguage parse_be parse_bes_end_with_x0b parse_bes_end_with_x05 parse_bes_end_with_x0b_or_x05_ctd.
+
+Definition language : [ Language ] := Fix Language language_step.
 
 Definition parse_be : [ byte_parser basic_instruction ] := fun n => _be n (language n).
 Definition parse_bes_end_with_x0b : [ byte_parser (list basic_instruction) ] := fun n => _bes_end_with_x0b n (language n).
@@ -1100,10 +1126,13 @@ Definition parse_customsec {n} : byte_parser (name * list byte) n :=
     (fun '(sz_sec, (name, sz_name, obs)) =>
         if N.ltb sz_sec sz_name then None
         else
-          Some (match obs with
-          | Some bs => (name, bs)
-          | None => (name, nil)
-          end)
+           match obs with
+           | Some bs => Some (name, bs)
+           | None =>
+               (* Optional failure is only the zero-byte case.  A positive
+                  declared payload must not silently become empty on EOF. *)
+               if N.eqb sz_sec sz_name then Some (name, nil) else None
+           end
     )
     (parse_u32_as_N &>>=
     (fun sz_sec =>
@@ -1113,42 +1142,47 @@ Definition parse_customsec {n} : byte_parser (name * list byte) n :=
             parse_vec_aux anyTok sz_leftover
          ))).
          
-(* Low priority: check that the sections have the correct byte sizes? *)
+(* Section lengths frame the payload, excluding the id and size header.
+   Do not discard them: doing so accepts truncated/overlong sections and
+   invalidates whole-module grammar soundness. *)
+Definition parse_section_payload {A n} (p : byte_parser A n) : byte_parser A n :=
+  parse_u32_as_N >>= (fun sz => assert_sized p (fun actual => N.eqb sz actual)).
+
 Definition parse_typesec {n} : byte_parser (list function_type) n :=
-  exact_byte x01 &> parse_u32_as_N &> parse_vec parse_function_type.
+  exact_byte x01 &> parse_section_payload (parse_vec parse_function_type).
 
 Definition parse_importsec {n} : byte_parser (list module_import) n :=
-  exact_byte x02 &> parse_u32_as_N &> parse_vec parse_module_import.
+  exact_byte x02 &> parse_section_payload (parse_vec parse_module_import).
 
 Definition parse_funcsec {n} : byte_parser (list typeidx) n :=
-  exact_byte x03 &> parse_u32_as_N &> parse_vec parse_typeidx.
+  exact_byte x03 &> parse_section_payload (parse_vec parse_typeidx).
 
 Definition parse_tablesec {n} : byte_parser (list module_table) n :=
-  exact_byte x04 &> parse_u32_as_N &> parse_vec parse_module_table.
+  exact_byte x04 &> parse_section_payload (parse_vec parse_module_table).
 
 Definition parse_memsec {n} : byte_parser (list module_mem) n :=
-  exact_byte x05 &> parse_u32_as_N &> parse_vec parse_module_mem.
+  exact_byte x05 &> parse_section_payload (parse_vec parse_module_mem).
 
 Definition parse_globalsec {n} : byte_parser (list module_global) n :=
-  exact_byte x06 &> parse_u32_as_N &> parse_vec parse_module_global.
+  exact_byte x06 &> parse_section_payload (parse_vec parse_module_global).
 
 Definition parse_exportsec {n} : byte_parser (list module_export) n :=
-  exact_byte x07 &> parse_u32_as_N &> parse_vec parse_module_export.
+  exact_byte x07 &> parse_section_payload (parse_vec parse_module_export).
 
 Definition parse_startsec {n} : byte_parser module_start n :=
-  exact_byte x08 &> parse_u32_as_N &> parse_module_start.
+  exact_byte x08 &> parse_section_payload parse_module_start.
 
 Definition parse_elemsec {n} : byte_parser (list module_element) n :=
-  exact_byte x09 &> parse_u32_as_N &> parse_vec parse_module_element.
+  exact_byte x09 &> parse_section_payload (parse_vec parse_module_element).
 
 Definition parse_codesec {n} : byte_parser (list module_func_without_type) n :=
-  exact_byte x0a &> parse_u32_as_N &> parse_vec parse_code.
+  exact_byte x0a &> parse_section_payload (parse_vec parse_code).
 
 Definition parse_datasec {n} : byte_parser (list module_data) n :=
-  exact_byte x0b &> parse_u32_as_N &> parse_vec parse_module_data.
+  exact_byte x0b &> parse_section_payload (parse_vec parse_module_data).
 
 Definition parse_datacountsec {n} : byte_parser N n :=
-  exact_byte x0c &> parse_u32_as_N &> parse_u32_as_N.
+  exact_byte x0c &> parse_section_payload parse_u32_as_N.
 
 Definition parse_magic {n} : byte_parser unit n :=
   (exact_byte x00 &> exact_byte x61 &> exact_byte x73 &> exact_byte x6d) $> tt.
@@ -1247,10 +1281,16 @@ Definition datacount_presence_agree (codes: list module_func_without_type) (ocou
       else true
   end.
 
-Definition parse_module_sections_after {n} {A} (f: byte_parser A n) : byte_parser module n :=
-  guardM
-  (fun results =>
-     match results with
+Definition module_section_results (A : Type) : Type :=
+  A * option (list function_type) * option (list module_import) *
+  option (list typeidx) * option (list module_table) * option (list module_mem) *
+  option (list module_global) * option (list module_export) * option module_start *
+  option (list module_element) * option N *
+  option (list module_func_without_type) * option (list module_data).
+
+(* Named production postprocessor: all cross-section guards remain here. *)
+Definition finish_module_sections {A} (results : module_section_results A) : option module :=
+      match results with
      | (_, otypes, oimports, ofts, otables, omems, oglobals, oexports, ostart, oelems, odatacount, ocodes, odatas) =>
          let types := option_to_list otypes in
          let imports := option_to_list oimports in
@@ -1285,8 +1325,10 @@ Definition parse_module_sections_after {n} {A} (f: byte_parser A n) : byte_parse
              else None
            else None
          else None
-     end
-  )
+      end.
+
+Definition parse_module_section_sequence_after {n} {A} (f: byte_parser A n) :
+    byte_parser (module_section_results A) n :=
   (parse_with_customsec_star_after
   (* "<&?>" is right associative, but we want the other way round here *)
   (((((((((((((f <&?>
@@ -1301,7 +1343,10 @@ Definition parse_module_sections_after {n} {A} (f: byte_parser A n) : byte_parse
   parse_elemsec_wrapper) <&?>
   parse_datacountsec_wrapper) <&?>
   parse_codesec_wrapper) <&?>
-  parse_datasec_wrapper))).
+   parse_datasec_wrapper))).
+
+Definition parse_module_sections_after {n} {A} (f: byte_parser A n) : byte_parser module n :=
+  guardM finish_module_sections (parse_module_section_sequence_after f).
 
 Definition parse_module {n} : byte_parser module n :=
   parse_module_sections_after
@@ -1352,6 +1397,15 @@ End Run.
 
 Definition run_parse_be (bs : list byte) : option basic_instruction :=
   run bs parse_be.
+
+(* Shared non-GC prefix interface from 6fddcdf: the same production parser
+   instances as [run], retaining the complete unconsumed suffix. *)
+Definition run_parse_prefix {A}
+    (p : forall n, Parser (SizedList byte) byte option A n) (bs : list byte) :
+    option (A * list byte) :=
+  option_map
+    (fun s => (Success.value s, @Sized.value _ _ _ (Success.leftovers s)))
+    (runParser (p (List.length bs)) (Nat.le_refl _) (mkSizedList bs)).
 
 Definition run_parse_expr (bs : list byte) : option (list basic_instruction) :=
   run bs (fun n => parse_expr).

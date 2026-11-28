@@ -329,7 +329,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   be_typing C [::BI_elem_drop x] (Tf [::] [::])
 | bet_load : forall C m_arg tp_sx t mem,
   lookup_N (tc_mems C) m_arg.(memarg_memory) = Some mem ->
-  load_store_t_bounds m_arg.(memarg_align) (option_projl tp_sx) t ->
+  load_store_memarg_bounds m_arg (option_projl tp_sx) t ->
   be_typing C [::BI_load t tp_sx m_arg] (Tf [::T_num T_i32] [::T_num t])
 | bet_load_vec : forall C lv_arg m_arg mem,
   lookup_N (tc_mems C) m_arg.(memarg_memory) = Some mem ->
@@ -341,7 +341,7 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   be_typing C [::BI_load_vec_lane width m_arg x] (Tf [::T_num T_i32; T_vec T_v128] [::T_vec T_v128])
 | bet_store : forall C m_arg tp t mem,
   lookup_N (tc_mems C) m_arg.(memarg_memory) = Some mem ->
-  load_store_t_bounds m_arg.(memarg_align) tp t ->
+  load_store_memarg_bounds m_arg tp t ->
   be_typing C [::BI_store t tp m_arg] (Tf [::T_num T_i32; T_num t] [::])
 | bet_store_vec : forall C m_arg mem,
   lookup_N (tc_mems C) m_arg.(memarg_memory) = Some mem ->
