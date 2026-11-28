@@ -222,6 +222,10 @@ Qed.
              
 Ltac simplify_tc_goal := 
   repeat match goal with
+  | H: context [type_update_br_on_null _ _] |- _ =>
+      unfold type_update_br_on_null in H
+  | |- context [type_update_br_on_null _ _] =>
+      unfold type_update_br_on_null
   | H: context C [take 0 _] |- _ =>
       rewrite take0 in H
   | H: context C [drop 0 _] |- _ =>
@@ -579,6 +583,15 @@ Proof.
   - by apply ct_subtyping_drop.
 Qed.
 
+Lemma ct_subtyping_head ct1 ct2 :
+  ct1 <ct: ct2 ->
+  head T_bot ct1.(CT_type) <t: head T_bot ct2.(CT_type).
+Proof.
+  destruct ct1 as [[|t1 ts1] [|]], ct2 as [[|t2 ts2] [|]];
+    unfold ct_subtyping, c_types_agree; simpl; move => H;
+    simplify_tc_goal; try apply value_subtyping_bot.
+Qed.
+
 Lemma type_update_subtyping: forall ct1 ct1' ct2 cons prod,
     type_update ct1 cons prod = Some ct2 ->
     ct1' <ct: ct1 ->  
@@ -676,6 +689,8 @@ Proof.
       do 3 (try destruct ts => //; simpl in * ); simplify_tc_goal.
       by apply type_update_extend with (l2 := ts2) in Htc.
   - by unfold type_update_ref_as_non_null in *; destruct ts; simplify_tc_goal.
+  - destruct ts; simpl in *; simplify_tc_goal.
+    exact (type_update_extend ts2 Htc).
 Qed.
 
 Lemma check_single_extend_top: forall C e ts ts2 ts0,
@@ -833,6 +848,25 @@ Proof.
       by eexists; split; eauto => /=; resolve_subtyping.
     + replace (is_ref_t t1') with true; last by destruct t1, t1'.
       by eexists; split; eauto => /=; resolve_subtyping.
+  - have Hhead := ct_subtyping_head Hsub.
+    have Href := is_ref_t_subtyping Hhead Hif.
+    rewrite Href.
+    unfold type_update in Hcheck.
+    destruct (consume ct1 (head T_bot (CT_type ct1) :: r)) as [tail|] eqn:Hconsume;
+      try discriminate.
+    injection Hcheck as <-.
+    destruct (consume_subtyping Hconsume Hsub) as [tail' [Hconsume' Htail]].
+    have Hconsume_low :
+      consume ct1' (head T_bot (CT_type ct1') :: r) = Some tail'.
+    { destruct ct1' as [[|u us] [|]]; simpl in Hconsume' |- * => //.
+      all: rewrite value_subtyping_eq.
+      all: simpl in Hhead; by rewrite Hhead in Hconsume'. }
+    unfold type_update. rewrite Hconsume_low.
+    eexists; split; first reflexivity.
+    unfold produce.
+    apply ct_subtyping_prefix; first exact Htail.
+    simpl. rewrite (non_nullable_type_mono Hhead).
+    by rewrite values_subtyping_eq.
 Qed.
 
 Lemma check_subtyping: forall C es ct1 ct1' ct2,
@@ -1571,6 +1605,15 @@ Proof.
       exists tn; split => //.
       eapply bet_subtyping; first by eapply bet_br_on_non_null; eauto.
       exact Hsub.
+    + apply nth_error_map in Hoption as [source_labels [Hnth Hrev]].
+      apply (f_equal rev) in Hrev.
+      rewrite revK in Hrev. subst source_labels.
+      eapply type_update_agree_subtyping in Hupdate; eauto.
+      destruct Hupdate as [tn [Hagree' Hsub]].
+      do 2 rewrite rev_cons -cats1 in Hsub.
+      exists tn; split => //.
+      eapply bet_subtyping; first by eapply bet_br_on_null; eauto.
+      exact Hsub.
 Qed.
       
 Lemma tc_to_bet_list: forall C cts bes tm cts',
@@ -1670,6 +1713,7 @@ Proof.
     + unfold type_update_ref_as_non_null; simpl.
       rewrite H.
       by unfold c_types_agree; simplify_tc_goal.
+    + by unfold type_update, produce, c_types_agree; simplify_tc_goal.
 Qed.
       
 End Host.

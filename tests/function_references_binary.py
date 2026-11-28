@@ -66,6 +66,18 @@ cases = [
      123, "Module type checking failure:"),
     ("ref_null_requires_heap_not_reference_type", "d06370d1",
      123, "error in parsing module"),
+    ("null_branch_consumes_reference", "027f412ad070d5001a1a41070b",
+     0, "i32.const 42"),
+    ("nonnull_null_branch_retains_reference", "027f412ad200d5001a1a41070b",
+     0, "i32.const 7"),
+    ("external_null_branch", "027f412ad06fd5001a1a41070b",
+     0, "i32.const 42"),
+    ("null_branch_numeric_operand", "4100d500", 123, "Module type checking failure:"),
+    ("null_branch_missing_operand", "d500", 123, "Module type checking failure:"),
+    ("null_branch_invalid_label", "d070d501", 123, "Module type checking failure:"),
+    ("null_branch_missing_label_argument", "d070d500", 123, "Module type checking failure:"),
+    ("null_branch_truncated_index", "d580", 123, "error in parsing module"),
+    ("null_branch_overflow_index", "d58080808010", 123, "error in parsing module"),
 ]
 
 table_cases = [
@@ -119,6 +131,12 @@ table_cases = [
      "014000700001d2000b", 0, "i32.const 0"),
     ("table_null_nonnull_branch_falls_through", "02647041002500d600000bd1",
      "014000700001d0700b", 0, "Execution returned a trap"),
+    ("table_null_branch_refines_fallthrough_for_nonnull_store",
+     "410041002500d500260141002501d1",
+     "024000700001d2000b400064700001d2000b", 0, "i32.const 0"),
+    ("table_null_branch_skips_nonnull_store",
+     "410741002500d500260141002501d1",
+     "024000700001d0700b400064700001d2000b", 0, "i32.const 7"),
 ]
 
 exe = str(pathlib.Path(sys.argv[1]).resolve())

@@ -88,6 +88,10 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
         tf = Tf (ts ++ [::nullable_type t]) ts /\
         lookup_N C.(tc_labels) x = Some (ts ++ [::t]) /\
         is_ref_t t
+  | BI_br_on_null x =>
+      exists ts t,
+        tf = Tf (ts ++ [::t]) (ts ++ [::non_nullable_type t]) /\
+        lookup_N C.(tc_labels) x = Some ts /\ is_ref_t t
   | BI_ref_func x =>
       exists t, tf = (Tf [::] [::T_ref (Ref_type false HT_func)]) /\
              lookup_N (tc_funcs C) x = Some t /\

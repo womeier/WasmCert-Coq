@@ -609,6 +609,7 @@ Fixpoint pp_basic_instruction (i : indentation) (be : basic_instruction) : strin
   | BI_call_ref x => indent i (with_fg be_style "call_ref " ++ pp_id x ++ newline)
   | BI_return_call_ref x => indent i (with_fg be_style "return_call_ref " ++ pp_id x ++ newline)
   | BI_br_on_non_null x => indent i (with_fg be_style "br_on_non_null " ++ pp_id x ++ newline)
+  | BI_br_on_null x => indent i (with_fg be_style "br_on_null " ++ pp_id x ++ newline)
   | BI_block tf bes =>
     indent i (with_fg be_style "block" ++ with_fg type_style (pp_block_type tf) ++ newline)
     ++ pp_basic_instructions bes (S i)

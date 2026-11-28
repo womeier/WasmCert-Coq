@@ -398,6 +398,11 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   lookup_N C.(tc_labels) x = Some (ts ++ [::t]) ->
   is_ref_t t ->
   be_typing C [::BI_br_on_non_null x] (Tf (ts ++ [::nullable_type t]) ts)
+| bet_br_on_null : forall C x ts t,
+  lookup_N C.(tc_labels) x = Some ts ->
+  is_ref_t t ->
+  be_typing C [::BI_br_on_null x]
+    (Tf (ts ++ [::t]) (ts ++ [::non_nullable_type t]))
 .
 
 Definition expr_typing (C: t_context) (bes: list basic_instruction) (ts: result_type) : Prop :=

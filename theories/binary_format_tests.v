@@ -81,6 +81,17 @@ Lemma parse_br_on_non_null_single_byte (b : Byte.byte) :
     else None.
 Proof. destruct b; vm_compute; reflexivity. Qed.
 
+Lemma parse_br_on_null_single_byte (b : Byte.byte) :
+  run_parse_bes (xd5 :: b :: nil) =
+    if (Byte.to_N b <? 128)%N then
+      Some (BI_br_on_null (Byte.to_N b) :: nil)
+    else None.
+Proof. destruct b; vm_compute; reflexivity. Qed.
+
+Lemma print_br_on_null :
+  binary_of_expr (BI_br_on_null 0%N :: nil) = xd5 :: x00 :: x0b :: nil.
+Proof. reflexivity. Qed.
+
 Definition initialized_funcref_table :=
   Build_module_table
     (Build_table_type (Build_limits 2%N None) T_funcref)

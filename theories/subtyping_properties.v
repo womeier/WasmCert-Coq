@@ -132,6 +132,12 @@ Proof.
   move => H. eapply value_subtyping_trans; [exact H | apply non_nullable_type_sub].
 Qed.
 
+Lemma is_ref_t_subtyping t1 t2 :
+  t1 <t: t2 -> is_ref_t t2 -> is_ref_t t1.
+Proof.
+  move/value_subtyping_cases => [->|[->|[h [-> ->]]]]; done.
+Qed.
+
 Lemma values_subtyping_eq: forall ts,
     ts <ts: ts.
 Proof.

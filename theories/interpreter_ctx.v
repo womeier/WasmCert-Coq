@@ -611,7 +611,8 @@ Proof.
       (* BI_ref_as_non_null *) |
       (* BI_call_ref x *) x |
       (* BI_return_call_ref x *) x |
-      (* BI_br_on_non_null x *) x ] |
+      (* BI_br_on_non_null x *) x |
+      (* BI_br_on_null x *) x ] |
       (* AI_trap *) |
       (* AI_ref a *) a |
       (* AI_ref_extern a *) a |
@@ -1865,6 +1866,25 @@ the condition that all values should live in the operand stack. *)
         resolve_reduce_ctx vs0 es0.
         replace (AI_ref_extern a) with ($V (VAL_ref (VAL_ref_extern a))) => //.
         by apply r_simple, rs_br_on_non_null.
+
+    (* AI_basic (BI_br_on_null x) *)
+    - destruct vs0 as [|v vs0]; first by no_args.
+      assert_value_ref v.
+      destruct v as [h|a|a].
+      + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0),
+                    Some (AI_basic (BI_br x))), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        by apply r_simple, rs_br_on_null_null.
+      + apply <<hs, (s, (fc, lcs) :: ccs',
+                    (VAL_ref (VAL_ref_func a) :: vs0, es0), None), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        replace (AI_ref a) with ($V (VAL_ref (VAL_ref_func a))) => //.
+        by apply r_simple, rs_br_on_null.
+      + apply <<hs, (s, (fc, lcs) :: ccs',
+                    (VAL_ref (VAL_ref_extern a) :: vs0, es0), None), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        replace (AI_ref_extern a) with ($V (VAL_ref (VAL_ref_extern a))) => //.
+        by apply r_simple, rs_br_on_null.
 
     (* AI_trap *)
     - destruct ((vs0 == nil) && (es0 == nil)) eqn:Hscnil; move/andP in Hscnil.

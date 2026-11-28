@@ -157,6 +157,15 @@ Proof.
     simpl. move/andP: Hsub => [Hsub _].
     rewrite andbT.
     exact (non_nullable_nullable_sub Hsub).
+  - by lias.
+  - by lias.
+  - instantiate (1 := extr ++ [::non_nullable_type extr0]).
+    instantiate (1 := nil) => /=.
+    exists nil, nil, extr, (extr ++ [::non_nullable_type extr0]).
+    repeat split => //; apply values_subtyping_eq.
+  - rewrite size_cat /= addn1 subn1 drop_size_cat in Hsub.
+    move/andP: Hsub => [Hsub _].
+    exact (non_nullable_type_mono Hsub).
   Unshelve.
   all: try by resolve_subtyping.
 Qed.

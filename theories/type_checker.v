@@ -121,6 +121,13 @@ Definition type_update_ref_as_non_null (ct : checker_type) : option checker_type
                then Some <<non_nullable_type t :: ts, ct.(CT_unr)>> else None
   end.
 
+Definition type_update_br_on_null (ct : checker_type)
+    (labels : list value_type) : option checker_type :=
+  let t := head T_bot ct.(CT_type) in
+  if is_ref_t t then
+    type_update ct (t :: labels) (non_nullable_type t :: labels)
+  else None.
+
 (** With subtyping in Wasm 2.0, br_table now needs to find the common subtype to be consumed. **)
 
 Fixpoint common_lab_h (iss : seq tableidx) (lab_c : seq (seq value_type)) (ts : seq value_type) : option (seq value_type) :=
@@ -183,8 +190,13 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
                  (nullable_type (head T_bot label_types) :: behead label_types)
                  (behead label_types)
               else None
-          | None => None
-          end
+           | None => None
+           end
+       | BI_br_on_null x =>
+           match lookup_N C.(tc_labels) x with
+           | Some labels => type_update_br_on_null ts labels
+           | None => None
+           end
       | BI_ref_func x =>
           match lookup_N C.(tc_funcs) x with
           | Some _ =>
