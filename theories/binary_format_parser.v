@@ -224,9 +224,15 @@ Definition parse_return_call_indirect {n} : byte_parser basic_instruction n :=
 Definition parse_tail_call {n} : byte_parser basic_instruction n :=
   parse_return_call <|> parse_return_call_indirect.
 
+Definition parse_call_ref {n} : byte_parser basic_instruction n :=
+  exact_byte x14 &> (BI_call_ref <$> parse_typeidx).
+
+Definition parse_return_call_ref {n} : byte_parser basic_instruction n :=
+  exact_byte x15 &> (BI_return_call_ref <$> parse_typeidx).
+
 (* Reference instructions *)
 Definition parse_ref_null {n}: byte_parser basic_instruction n :=
-  exact_byte xd0 &> (BI_ref_null <$> parse_reference_type).
+  exact_byte xd0 &> ((fun t => BI_ref_null (ref_heap t)) <$> parse_reference_type).
 
 Definition parse_ref_is_null {n} : byte_parser basic_instruction n :=
   exact_byte xd1 $> BI_ref_is_null.
@@ -234,10 +240,18 @@ Definition parse_ref_is_null {n} : byte_parser basic_instruction n :=
 Definition parse_ref_func {n} : byte_parser basic_instruction n :=
   exact_byte xd2 &> (BI_ref_func <$> parse_funcidx).
 
+Definition parse_ref_as_non_null {n} : byte_parser basic_instruction n :=
+  exact_byte xd4 $> BI_ref_as_non_null.
+
+Definition parse_br_on_non_null {n} : byte_parser basic_instruction n :=
+  exact_byte xd6 &> (BI_br_on_non_null <$> parse_labelidx).
+
 Definition parse_reference_instruction {n} : byte_parser basic_instruction n :=
   parse_ref_null <|>
   parse_ref_is_null <|>
-  parse_ref_func.
+  parse_ref_func <|>
+  parse_ref_as_non_null <|>
+  parse_br_on_non_null.
 
 
 (* Variable instructions *)
@@ -862,6 +876,8 @@ Definition language : [ Language ] := Fix Language (fun k rec =>
     parse_return <|>
     parse_call <|>
     parse_call_indirect <|>
+    parse_call_ref <|>
+    parse_return_call_ref <|>
     parse_reference_instruction <|>
     parse_parametric_instruction <|>
     parse_variable_instruction <|>
@@ -1035,7 +1051,10 @@ Definition parse_code {n} : byte_parser module_func_without_type n :=
   parse_u32_as_N >>= (fun sz => assert_sized parse_code_func (fun szn => N.eqb sz szn)).
 
 Definition parse_module_table {n} : byte_parser module_table n :=
-  (fun tty => {| modtab_type := tty |}) <$> parse_table_type.
+  (exact_byte x40 &> exact_byte x00 &>
+     (((fun ty es => Build_module_table ty (Some es)) <$>
+        parse_table_type) <*> parse_expr)) <|>
+  ((fun ty => Build_module_table ty None) <$> parse_table_type).
 
 Definition parse_module_mem {n} : byte_parser module_mem n :=
   (fun tty => {| modmem_type := tty |}) <$> parse_memory_type.

@@ -3,6 +3,7 @@
 From Wasm Require Export datatypes.
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From HB Require Import structures.
+From Stdlib Require Import Logic.Eqdep_dec.
 
 (* see common.v *)
 Set SsrOldRewriteGoalsOrder.
@@ -43,6 +44,7 @@ Definition eqnumber_typeP : Equality.axiom number_type_eqb :=
 
 HB.instance Definition number_type_eqMixin := hasDecEq.Build number_type eqnumber_typeP.
 
+Scheme Equality for heap_type.
 Scheme Equality for reference_type.
 Definition reference_type_eqb v1 v2 : bool := reference_type_eq_dec v1 v2.
 Definition eqreference_typeP : Equality.axiom reference_type_eqb :=
@@ -87,6 +89,61 @@ Definition eqfunction_typeP : Equality.axiom function_type_eqb :=
   eq_dec_Equality_axiom function_type_eq_dec.
 
 HB.instance Definition function_type_eqMixin := hasDecEq.Build function_type eqfunction_typeP.
+
+Lemma closed_function_body_injective (a b : closed_function_type) :
+  closed_function_body a = closed_function_body b -> a = b.
+Proof.
+  destruct a as [fa Ha], b as [fb Hb]; simpl.
+  move => E; subst fb.
+  assert (Ha = Hb) as E by (apply Eqdep_dec.UIP_dec; decide equality).
+  by subst Hb.
+Qed.
+
+Definition defined_type_match (a b : defined_type) : bool :=
+  match a, b with
+  | Def_func fa, Def_func fb => closed_function_body fa == closed_function_body fb
+  end.
+
+Lemma defined_type_match_spec a b :
+  defined_type_match a b = true <-> a = b.
+Proof.
+  destruct a as [a], b as [b]; simpl.
+  split.
+  - move/eqP => E. f_equal. by apply closed_function_body_injective.
+  - move => E. inversion E; subst. by rewrite eq_refl.
+Qed.
+
+Lemma defined_type_match_bidir a b :
+  (defined_type_match a b && defined_type_match b a) = true <-> a = b.
+Proof.
+  rewrite Bool.andb_true_iff !defined_type_match_spec.
+  split; [by move => [E _] | by move => ->].
+Qed.
+
+Lemma close_defined_type_expands ft dt :
+  close_defined_type ft = Some dt -> expand_function_type dt = Some ft.
+Proof.
+  unfold close_defined_type, close_function_type.
+  destruct (Bool.bool_dec (function_type_closed ft) true);
+    simpl; move => H; inversion H; reflexivity.
+Qed.
+
+Lemma close_defined_type_complete ft :
+  function_type_closed ft = true ->
+  exists dt, close_defined_type ft = Some dt.
+Proof.
+  unfold close_defined_type, close_function_type.
+  destruct (Bool.bool_dec (function_type_closed ft) true).
+  - move => _. by eexists.
+  - contradiction.
+Qed.
+
+Lemma expanded_function_type_closed dt ft :
+  expand_function_type dt = Some ft -> function_type_closed ft = true.
+Proof.
+  destruct dt as [[body Hclosed]]; simpl.
+  by move => [<-].
+Qed.
 
 Definition t_context_eq_dec : forall x y : t_context, {x = y} + {x <> y}.
 Proof. decidable_equality. Defined.

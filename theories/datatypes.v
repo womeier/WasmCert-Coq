@@ -132,10 +132,21 @@ Reference types are opaque, meaning that neither their size nor their bit patter
 
 [https://www.w3.org/TR/wasm-core-2/syntax/types.html#reference-types]
 *)
-Inductive reference_type : Set := 
-| T_funcref
-| T_externref
-.
+(* Shared source heap syntax. HT_type denotes a module-local type index, NOT a
+   runtime type identity. Closing recursive declared types is a separate step
+   at the module/store boundary. *)
+Inductive heap_type : Set :=
+| HT_func | HT_extern
+| HT_any | HT_eq | HT_i31 | HT_struct | HT_array
+| HT_none | HT_nofunc | HT_noextern
+| HT_exn | HT_noexn
+| HT_type : typeidx -> heap_type.
+
+Record reference_type : Set := Ref_type {
+  ref_nullable : bool;
+  ref_heap : heap_type
+}.
+
 
 (** std-doc:
 
@@ -170,6 +181,45 @@ and outputs of instructions.
 Inductive function_type := (* tf *)
 | Tf : result_type -> result_type -> function_type
 .
+
+(* The supported closed-definition profile is flat function declarations.
+   In particular, no module-local HT_type may escape as a runtime identity.
+   Recursive groups must extend this layer, rather than certify a free index
+   by comparing it with the same numeric index in another module. *)
+Definition heap_type_closed (h : heap_type) : bool :=
+  match h with HT_type _ => false | _ => true end.
+
+Definition value_type_closed (t : value_type) : bool :=
+  match t with T_ref r => heap_type_closed (ref_heap r) | _ => true end.
+
+Definition function_type_closed (ft : function_type) : bool :=
+  let '(Tf args results) := ft in
+  List.forallb value_type_closed args && List.forallb value_type_closed results.
+
+Record closed_function_type := Closed_function_type {
+  closed_function_body : function_type;
+  closed_function_certificate : function_type_closed closed_function_body = true
+}.
+
+Inductive defined_type :=
+| Def_func : closed_function_type -> defined_type.
+
+Definition expand_function_type (dt : defined_type) : option function_type :=
+  match dt with Def_func ft => Some (closed_function_body ft) end.
+
+Definition close_function_type (ft : function_type) : option closed_function_type :=
+  match Bool.bool_dec (function_type_closed ft) true with
+  | left H => Some (@Closed_function_type ft H)
+  | right _ => None
+  end.
+
+Definition close_defined_type (ft : function_type) : option defined_type :=
+  option_map Def_func (close_function_type ft).
+
+(* Source type declarations currently contain function signatures only.
+   GC must extend this declaration layer with recursive subtype groups.
+   An inst_types entry is not a globally allocated runtime identity. *)
+Definition type_context := list function_type.
 
 (* This is a definition for future extensions, where instruction types are no longer
 the same as function types. *)
@@ -268,7 +318,7 @@ Most types are universally valid. However, restrictions apply to limits, which m
 **)
 
 Definition functype_valid (ft: function_type) : bool :=
-  true.
+  function_type_closed ft.
 
 Definition table_limit_bound : N := (N.sub u32_bound 1%N).
 
@@ -284,6 +334,9 @@ Definition globaltype_valid (gt: global_type) : bool :=
   true.
 
 End Types.
+
+Notation T_funcref := (Ref_type true HT_func).
+Notation T_externref := (Ref_type true HT_extern).
 
 
 Definition static_offset := (* off *) u32. 
@@ -516,7 +569,7 @@ Replace lanes: consume a v128 operand and a numeric value for a given lane, and 
 (** std-doc:
 Instructions in this group are concerned with accessing references.
 **)
-  | BI_ref_null : reference_type -> basic_instruction  
+  | BI_ref_null : heap_type -> basic_instruction
   | BI_ref_is_null
   | BI_ref_func : funcidx -> basic_instruction
 (** std-doc:
@@ -576,6 +629,10 @@ Instructions in this group affect the flow of control.
   | BI_call_indirect : tableidx -> typeidx -> basic_instruction
   | BI_return_call : funcidx -> basic_instruction                                          
   | BI_return_call_indirect : tableidx -> typeidx -> basic_instruction                                          
+  | BI_ref_as_non_null
+  | BI_call_ref : typeidx -> basic_instruction
+  | BI_return_call_ref : typeidx -> basic_instruction
+  | BI_br_on_non_null : labelidx -> basic_instruction
   .
 
 
@@ -598,7 +655,7 @@ const instructions and ref.null producing them.
 References other than null are represented with additional administrative instructions. They either are function references, pointing to a specific function address, or external references pointing to an uninterpreted form of extern address that can be defined by the embedder to represent its own objects.
 *)
 Inductive value_ref : Set :=
-| VAL_ref_null: reference_type -> value_ref
+| VAL_ref_null: heap_type -> value_ref
 | VAL_ref_func: funcaddr -> value_ref
 | VAL_ref_extern: externaddr -> value_ref
 .
@@ -642,9 +699,16 @@ Record module_func : Type := {
   modfunc_body : expr;
 }.
 
-Record module_table : Set := {
+Record module_table : Type := {
   modtab_type : table_type;
+  modtab_init : option expr;
 }.
+
+Definition module_table_init (mt : module_table) : expr :=
+  match modtab_init mt with
+  | Some es => es
+  | None => cons (BI_ref_null (ref_heap (tt_elem_type (modtab_type mt)))) nil
+  end.
 
 Record module_mem : Set := {
   modmem_type : memory_type;
@@ -793,7 +857,7 @@ as validation of an instruction sequence proceeds.
 Definition ok: Set := unit.
 
 Record t_context : Set := {
-  tc_types : list function_type;
+  tc_types : type_context;
   tc_funcs : list function_type;
   tc_tables : list table_type;
   tc_mems : list memory_type;
@@ -943,7 +1007,7 @@ instance have different names.
 [https://www.w3.org/TR/wasm-core-2/exec/runtime.html#module-instances]
 *)
 Record moduleinst : Type := (* inst *) {
-  inst_types : list function_type;
+  inst_types : type_context;
   inst_funcs : list funcaddr;
   inst_tables : list tableaddr;
   inst_mems : list memaddr;

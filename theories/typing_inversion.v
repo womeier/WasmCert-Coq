@@ -77,9 +77,17 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
   | BI_const_vec c =>
       tf = (Tf nil [::T_vec (typeof_vec c)])
   | BI_ref_null t =>
-      tf = (Tf nil [::T_ref t])
+      tf = (Tf nil [::T_ref (Ref_type true t)])
   | BI_ref_is_null =>
       exists t, tf = (Tf [::T_ref t] [::T_num T_i32])
+  | BI_ref_as_non_null =>
+      exists t, tf = (Tf [::t] [::t]) /\ is_ref_t t
+  | BI_call_ref _ | BI_return_call_ref _ => False
+  | BI_br_on_non_null x =>
+      exists ts t,
+        tf = Tf (ts ++ [::t]) ts /\
+        lookup_N C.(tc_labels) x = Some (ts ++ [::t]) /\
+        is_ref_t t
   | BI_ref_func x =>
       exists t, tf = (Tf [::] [::T_ref T_funcref]) /\
              lookup_N (tc_funcs C) x = Some t /\
@@ -693,12 +701,12 @@ Proof.
   - exists (T_vec (typeof_vec v)); split => //.
     by destruct v.
   (* ref -- slightly annoying, since one is basic and the other ones are not *)
-  - destruct v; simpl in *.
+  - destruct v as [h|a|a]; simpl in *.
     (* ref_null *)
     + apply et_to_bet in HType; last done; simpl in *.
       invert_be_typing.
-      exists (T_ref r); split => //.
-      by destruct r.
+      exists (T_ref (Ref_type true h)); split => //.
+      by unfold value_typing; simpl; apply value_subtyping_eq.
     (* ref *)
     + apply e_typing_inversion in HType; simpl in *.
       extract_premise.
@@ -752,10 +760,10 @@ Proof.
   - apply ety_a' => //=.
     econstructor; first by econstructor.
     apply instr_subtyping_weaken2 with (ty2 := [::T_vec (typeof_vec v)]); by resolve_subtyping.
-  - destruct v as [| f | e] => /=; simpl in *; try injection Hoption as <-; remove_bools_options.
+  - destruct v as [h| f | e] => /=; simpl in *; try injection Hoption as <-; remove_bools_options.
     + apply ety_a' => //=.
       econstructor; first by econstructor.
-      apply instr_subtyping_weaken2 with (ty2 := [::T_ref r]); by resolve_subtyping.
+      apply instr_subtyping_weaken2 with (ty2 := [::T_ref (Ref_type true h)]); by resolve_subtyping.
     + eapply ety_subtyping; first by eapply ety_ref; eauto.
       apply instr_subtyping_weaken2 with (ty2 := [::T_ref T_funcref]); by resolve_subtyping.
     + eapply ety_subtyping; first by eapply ety_ref_extern; eauto.

@@ -7,7 +7,8 @@ From Wasm Require Import datatypes_properties binary_format_parser
   binary_format_printer binary_uleb128 binary_uleb128_printer
   binary_format_parser_properties binary_vector_properties
   binary_locals_properties tail_call_parser_properties
-  tail_call_sequence_properties tail_call_codec_properties.
+  tail_call_sequence_properties tail_call_codec_properties
+  binary_locals_printer_properties.
 
 Lemma parse_code_func_tail_prefix : forall n opcode b input instruction suffix
     (Hle : (List.length (x00 :: opcode :: b :: input) <= n)%nat),
@@ -461,4 +462,122 @@ Proof.
   cbn -[verify_locals].
   rewrite (verify_locals_reject decls Htotal).
   reflexivity.
+Qed.
+
+Theorem parse_code_locals_tail_prefix :
+    forall n m (input : SizedList Byte.byte m)
+      declared body locals instruction suffix (Hle : (m <= n)%nat),
+    u32_prefix (@Sized.value _ _ _ input) declared body ->
+    declared = N.of_nat (List.length body - List.length suffix) ->
+    locals_tail_body_prefix body locals instruction suffix ->
+    option_map observe_reader
+      (runParser (parse_code :
+        Parser (SizedList Byte.byte) Byte.byte option module_func_without_type n)
+        Hle input) = Some ((locals, instruction :: nil), suffix).
+Proof.
+  intros n m input declared body locals instruction suffix
+    Hle Hheader Hdeclared Hgrammar.
+  pose proof (proj2 (parse_u32_as_N_correct n m Hle input declared body)
+    Hheader) as Hhead.
+  unfold parse_code, Combinators.bind, Combinators.andbind, Combinators.map.
+  cbn [runParser].
+  destruct (runParser (parse_u32_as_N :
+    Parser (SizedList Byte.byte) Byte.byte option N n) Hle input)
+    as [result|]; [|discriminate].
+  destruct result as [value remaining Hsmall [tail Hlength]].
+  cbn [observe_reader Success.value Success.leftovers Sized.value] in Hhead.
+  inversion Hhead; subst value tail.
+  subst remaining.
+  cbn [Combinators.box le_close Combinators.le_lower call runParser].
+  cbn -[assert_sized parse_code_func].
+  assert (Hconstraint :
+    N.eqb declared (N.of_nat (List.length body - List.length suffix)) = true).
+  { rewrite <- Hdeclared. apply N.eqb_refl. }
+  match goal with
+  | |- context [runParser (assert_sized ?parser ?constraint) ?bound ?tokens] =>
+      pose proof (parse_code_func_locals_tail_prefix n _ tokens
+        locals instruction suffix bound Hgrammar) as Hbody;
+      pose proof (assert_sized_correct _ n _ bound parser tokens
+        (locals, instruction :: nil) suffix constraint Hbody Hconstraint) as Hassert;
+      destruct (runParser (assert_sized parser constraint) bound tokens)
+        as [result|]
+  end; [|discriminate].
+  destruct result as [value remaining Hbody_small [tail Hbody_length]].
+  cbn [observe_reader Success.value Success.leftovers Sized.value] in Hassert.
+  inversion Hassert; subst value tail.
+  reflexivity.
+Qed.
+
+Lemma locals_tail_body_print_prefix : forall locals instruction suffix,
+    (N.of_nat (List.length locals) < 4294967296)%N ->
+    List.Forall printable_local_type locals ->
+    printable_tail_instruction instruction ->
+    locals_tail_body_prefix
+      (List.app (binary_of_code_func locals (instruction :: nil)) suffix)
+      locals instruction suffix.
+Proof.
+  intros locals instruction suffix Hlength Hlocals Htail.
+  unfold binary_of_code_func, binary_of_expr.
+  cbn [List.map List.concat]. rewrite List.app_nil_r.
+  rewrite <- !List.app_assoc.
+  exists (binary_local_decls (bunch_locals locals)),
+    (List.app (binary_of_be instruction) (x0b :: suffix)).
+  split.
+  - apply bunched_local_bytes_prefix; [lia | exact Hlocals].
+  - split.
+    + now rewrite bunch_locals_total.
+    + split; [symmetry; apply bunch_locals_expansion |].
+      now apply tail_instruction_print_prefix.
+Qed.
+
+Theorem tail_code_locals_print_prefix : forall n type locals instruction suffix
+    (Hle : (List.length (List.app
+      (binary_of_code (Build_module_func type locals (instruction :: nil))) suffix)
+        <= n)%nat),
+    (N.of_nat (List.length locals) < 4294967296)%N ->
+    List.Forall printable_local_type locals ->
+    printable_tail_instruction instruction ->
+    (N.of_nat (List.length (binary_of_code_func locals (instruction :: nil)))
+      <= 4294967295)%N ->
+    option_map observe_reader
+      (runParser (parse_code :
+        Parser (SizedList Byte.byte) Byte.byte option module_func_without_type n)
+        Hle (mkSizedList (List.app
+          (binary_of_code (Build_module_func type locals (instruction :: nil)))
+          suffix))) =
+      Some ((locals, instruction :: nil), suffix).
+Proof.
+  intros n type locals instruction suffix Hle Hlength Hlocals Htail Hsize.
+  eapply parse_code_locals_tail_prefix with
+    (declared := N.of_nat
+      (List.length (binary_of_code_func locals (instruction :: nil))))
+    (body := List.app (binary_of_code_func locals (instruction :: nil)) suffix).
+  - cbn [Sized.value mkSizedList].
+    unfold binary_of_code. cbn [modfunc_locals modfunc_body].
+    rewrite <- List.app_assoc.
+    now apply binary_of_tailidx_correct.
+  - rewrite List.length_app, Nat.add_sub. reflexivity.
+  - now apply locals_tail_body_print_prefix.
+Qed.
+
+(** Complete-input correctness of actual printed code, with arbitrary nonempty
+    local lists as well as empty lists. The body-size and local-count bounds
+    are the binary format's own u32 bounds, not assumed parser correspondence. *)
+Theorem tail_code_locals_roundtrip : forall type locals instruction,
+    (N.of_nat (List.length locals) < 4294967296)%N ->
+    List.Forall printable_local_type locals ->
+    printable_tail_instruction instruction ->
+    (N.of_nat (List.length (binary_of_code_func locals (instruction :: nil)))
+      <= 4294967295)%N ->
+    binary_format_parser.run
+      (binary_of_code (Build_module_func type locals (instruction :: nil)))
+      (fun n => (parse_code :
+        Parser (SizedList Byte.byte) Byte.byte option module_func_without_type n))
+      = Some (locals, instruction :: nil).
+Proof.
+  intros type locals instruction Hlength Hlocals Htail Hsize.
+  rewrite run_option_parser_characterization.
+  pose proof (tail_code_locals_print_prefix _ type locals instruction nil
+    (Nat.le_refl _) Hlength Hlocals Htail Hsize) as Hprefix.
+  now rewrite List.app_nil_r in Hprefix.
 Qed.
