@@ -74,6 +74,7 @@ Lemma app_extract_vec_typing: forall sh os n v1,
 Proof.
   intros; unfold app_extract_vec.
   destruct (lookup_N _ _) eqn:Hlookup; last by destruct sh as [[] | []].
+  rewrite lookup_N_spec in Hlookup.
   by eapply Forall_lookup in Hlookup; last by eapply v128_extract_lanes_typing; eauto.
 Qed.
 
@@ -109,7 +110,7 @@ Proof.
   - (* Br_br_table *)
     rewrite catA size_cat addnK take_size_cat => //.
     rewrite cats0.
-    unfold lookup_N in *.
+    lookup_N_to_nth_error.
     eapply Forall_lookup with (x := j) (n := N.to_nat (Wasm_int.N_of_uint i32m c)) in Hconjr; eauto; last first.
     { rewrite List.nth_error_app1 => //.
       by lias.
@@ -123,7 +124,7 @@ Proof.
   - (* Br_br_table_oob *)
     rewrite catA size_cat addnK take_size_cat => //.
     rewrite cats0.
-    unfold lookup_N in *.
+    lookup_N_to_nth_error.
     eapply Forall_lookup with (x := i) (n := length iss) in Hconjr; eauto; last first.
     { rewrite List.nth_error_app2 => //.
       by rewrite Nat.sub_diag.
@@ -424,7 +425,7 @@ Lemma context_agree_func_type C C' n ft:
 Proof.
   move => Hext Hnth.
   unfold context_agree in Hext; remove_bools_options.
-  unfold lookup_N in *.
+  lookup_N_to_nth_error.
   eapply all2_nth_impl in H9 as [ft' [Hnth' Hfext]]; eauto.
   by unfold func_agree in Hfext; remove_bools_options; subst.
 Qed.
@@ -437,7 +438,7 @@ Lemma context_agree_table_type C C' n tabt:
 Proof.
   move => Hext Hnth.
   unfold context_agree in Hext; remove_bools_options.
-  unfold lookup_N in *.
+  lookup_N_to_nth_error.
   by eapply all2_nth_impl in H8 as [tabt' [Hnth' Htabext]]; eauto.
 Qed.
 
@@ -450,7 +451,7 @@ Lemma context_agree_mem_type C C' n memt:
 Proof.
   move => Hext Hnth.
   unfold context_agree in Hext; remove_bools_options.
-  unfold lookup_N in *.
+  lookup_N_to_nth_error.
   by eapply all2_nth_impl in H7 as [memt' [Hnth' Hmemext]]; eauto.
 Qed.
 
@@ -461,7 +462,7 @@ Lemma context_agree_global_type C C' n gt:
 Proof.
   move => Hext Hnth.
   unfold context_agree in Hext; remove_bools_options.
-  unfold lookup_N in *.
+  lookup_N_to_nth_error.
   eapply all2_nth_impl in H6 as [gt' [Hnth' Hfext]]; eauto.
   by unfold global_agree in Hfext; remove_bools_options; subst.
 Qed.
@@ -977,6 +978,7 @@ Proof.
   destruct g0.
   remove_bools_options.
   move/eqP in Hif0.
+  lookup_N_to_nth_error.
   eapply component_extension_update; eauto; first by apply global_extension_refl.
   unfold global_extension => /=.
   rewrite eq_refl => /=.
@@ -1007,6 +1009,7 @@ Proof.
   unfold_store_operations; remove_bools_options.
   destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
   resolve_store_typing; simpl in *; clear Hft Htt Hmt Het Hdt.
+  lookup_N_to_nth_error.
   eapply Forall_set; eauto; last by apply nth_error_Some_length in Hoption1; lias.
   eapply Forall_lookup in Hoption1; eauto; simpl in *.
   destruct Hoption1 as [t' Ht]; remove_bools_options.
@@ -1052,6 +1055,7 @@ Proof.
   unfold_store_operations; remove_bools_options.
   destruct Hst as [Hft [Htt [Hmt [Hgt [Het Hdt]]]]].
   resolve_store_typing; simpl in *; clear Hft Hmt Hgt Het Hdt.
+  lookup_N_to_nth_error.
   eapply Forall_set; eauto; last by apply nth_error_Some_length in Hoption1; lias.
   eapply Forall_lookup in Hoption1; eauto; simpl in *.
   destruct Hoption1 as [vt Ht]; remove_bools_options.
@@ -1128,7 +1132,7 @@ Proof.
     }
   - eapply List.Forall_forall in Htt; eauto.
     + by apply List.nth_error_In in Hnth.
-    + by apply nth_error_Some_length in Hoption2; lias.
+    + by apply lookup_N_nth_error in Hoption2; apply nth_error_Some_length in Hoption2; lias.
 Qed.
 
 Lemma selem_drop_extension: forall s f x s' C tref,
@@ -1171,7 +1175,7 @@ Proof.
   destruct Hin as [-> | [m [Hneq Hnth']]] => //=; first by exists tref.
   - eapply List.Forall_forall in Het; eauto.
     + by apply List.nth_error_In in Hnth'.
-    + by apply nth_error_Some_length in Hnthselem; lias.
+    + by apply lookup_N_nth_error in Hnthselem; apply nth_error_Some_length in Hnthselem; lias.
 Qed.
 
 Lemma mem_extension_store: forall m k off v tlen mem,
@@ -1323,7 +1327,7 @@ Proof.
     by lias.
   - eapply List.Forall_forall in Hmt; eauto.
     + by apply List.nth_error_In in Hnth'.
-    + by apply nth_error_Some_length in Hoption2; lias.
+    + by apply lookup_N_nth_error in Hoption2; apply nth_error_Some_length in Hoption2; lias.
 Qed.
 
 (* Currently same as store *)
@@ -1374,7 +1378,7 @@ Proof.
     by lias.
   - eapply List.Forall_forall in Hmt; eauto.
     by apply List.nth_error_In in Hnth'.
-  - by apply nth_error_Some_length in Hoption2; lias.
+  - by apply lookup_N_nth_error in Hoption2; apply nth_error_Some_length in Hoption2; lias.
 Qed.
 
 Lemma smem_store_vec_extension: forall s f n v marg s' C mt,
@@ -1424,7 +1428,7 @@ Proof.
     by lias.
   - eapply List.Forall_forall in Hmt; eauto.
     by apply List.nth_error_In in Hnth'.
-  - by apply nth_error_Some_length in Hoption2; lias.
+  - by apply lookup_N_nth_error in Hoption2; apply nth_error_Some_length in Hoption2; lias.
 Qed.
 
 Lemma smem_store_vec_lane_extension: forall s f n v width marg x s' C mt,
@@ -1474,7 +1478,7 @@ Proof.
     by lias.
   - eapply List.Forall_forall in Hmt; eauto.
     by apply List.nth_error_In in Hnth'.
-  - by apply nth_error_Some_length in Hoption2; lias.
+  - by apply lookup_N_nth_error in Hoption2; apply nth_error_Some_length in Hoption2; lias.
 Qed.
 
 Lemma smem_grow_extension: forall s f x n s' sz C mt,
@@ -1514,7 +1518,7 @@ Proof.
   resolve_store_typing; simpl in *; clear Hft Htt Hgt Het Hdt.
   apply List.Forall_forall.
   move => x0 Hin.
-  apply set_nth_In in Hin; last by apply nth_error_Some_length in Hoption2; lias.
+  apply set_nth_In in Hin; last by apply lookup_N_nth_error in Hoption2; apply nth_error_Some_length in Hoption2; lias.
   clear Hstext.
   destruct Hin as [-> | [m0 [Hneq Hnth']]] => //=.
   - eapply mem_extension_grow in Hoption1 as [??]; eauto.
@@ -1558,12 +1562,12 @@ Proof.
   resolve_store_typing; simpl in *; clear Hft Htt Hmt Hgt Het.
   apply List.Forall_forall.
   move => x0 Hin.
-  apply set_nth_In in Hin; last by apply nth_error_Some_length in Hnthsdata; lias.
+  apply set_nth_In in Hin; last by apply lookup_N_nth_error in Hnthsdata; apply nth_error_Some_length in Hnthsdata; lias.
   destruct Hin as [-> | [m [Hneq Hnth']]] => //=.
   - exists tt.
     by unfold datainst_typing.
   - eapply List.Forall_forall in Hdt; eauto.
-    by apply List.nth_error_In in Hnthsdata; eauto.
+    by apply lookup_N_nth_error in Hnthsdata; apply List.nth_error_In in Hnthsdata; eauto.
 Qed.
     
 (* Note that although config_typing gives a much stronger constraint on C', we allow much more flexibility here due to the need in inductive cases. *)
@@ -1953,7 +1957,7 @@ derived from the two transitive pairs on the suffixes. Stated as an individual l
     apply values_typing_size in H2_values.
     by lias.
   - (* Local_get *)
-    unfold lookup_N in *.
+    lookup_N_to_nth_error.
     eapply all2_nth_impl in Hloctype; eauto.
     destruct Hloctype as [vt [Hvaltype Hnth]].
     simplify_multieq.

@@ -346,7 +346,7 @@ Proof.
       constructor; apply r_global_get => /=.
       unfold sglob_val, sglob, sglob_ind in *; simpl in *.
       remove_bools_options.
-      unfold lookup_N in *.
+      lookup_N_to_nth_error.
       by erewrite nth_error_app_Some; eauto.
     }
   - subst.
@@ -395,7 +395,7 @@ Proof.
         eapply r_global_get => /=.
         unfold sglob_val, sglob, sglob_ind in *; simpl in *.
         remove_bools_options.
-        unfold lookup_N in *.
+        lookup_N_to_nth_error.
         by erewrite nth_error_app_Some; eauto.
       }
 Qed.

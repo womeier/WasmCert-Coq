@@ -65,7 +65,7 @@ Proof.
   induction Hbet; move => C' HC'; subst C' => /=; (try by econstructor; eauto).
   (* ref_func *)
   - apply bet_ref_func with (t := t) => //=.
-    + apply nth_error_Some_length in H.
+    + apply lookup_N_nth_error in H; apply nth_error_Some_length in H.
       apply List.nth_error_In with (n := (N.to_nat x)).
       rewrite iota_N_lookup.
       by rewrite add0n Nnat.N2Nat.id.
@@ -188,7 +188,7 @@ Proof.
         rewrite iota_N_lookup => /=; last by apply nth_error_Some_length in Hnthm; lias.
         unfold ext_func_typing.
         destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
-        unfold lookup_N; rewrite Nnat.Nat2N.id.
+        rewrite lookup_N_spec Nnat.Nat2N.id.
         rewrite List.nth_error_app2; last by lias.
         rewrite nth_error_map' => /=.
         replace (_ + n - _)%coq_nat with n; last by lias.
@@ -220,7 +220,7 @@ Proof.
         rewrite Hnthextv.
         destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
         unfold ext_table_typing in *; remove_bools_options; simpl in *.
-        unfold lookup_N in *.
+        lookup_N_to_nth_error.
         by erewrite nth_error_app_Some; eauto.
       }
       (* New *)
@@ -235,7 +235,7 @@ Proof.
         rewrite iota_N_lookup => /=; last by apply nth_error_Some_length in Hnthm; lias.
         unfold ext_table_typing.
         destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
-        unfold lookup_N; rewrite Nnat.Nat2N.id.
+        rewrite lookup_N_spec Nnat.Nat2N.id.
         rewrite List.nth_error_app2; last by lias.
         do 2 rewrite nth_error_map' => /=.
         replace (_ + n - _)%coq_nat with n; last by lias.
@@ -267,7 +267,7 @@ Proof.
         rewrite Hnthextv.
         destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
         unfold ext_mem_typing in *; remove_bools_options; simpl in *.
-        unfold lookup_N in *.
+        lookup_N_to_nth_error.
         by erewrite nth_error_app_Some; eauto.
       }
       (* New *)
@@ -282,7 +282,7 @@ Proof.
         rewrite iota_N_lookup => /=; last by apply nth_error_Some_length in Hnthm; lias.
         unfold ext_mem_typing.
         destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
-        unfold lookup_N; rewrite Nnat.Nat2N.id.
+        rewrite lookup_N_spec Nnat.Nat2N.id.
         rewrite List.nth_error_app2; last by lias.
         do 2 rewrite nth_error_map' => /=.
         replace (_ + n - _)%coq_nat with n; last by lias.
@@ -314,7 +314,7 @@ Proof.
         rewrite Hnthextv.
         destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
         unfold ext_global_typing in *; remove_bools_options; simpl in *.
-        unfold lookup_N in *.
+        lookup_N_to_nth_error.
         by erewrite nth_error_app_Some; eauto.
       }
       (* New *)
@@ -329,7 +329,7 @@ Proof.
         rewrite iota_N_lookup => /=; last by apply nth_error_Some_length in Hnthm; lias.
         unfold ext_global_typing.
         destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
-        unfold lookup_N; rewrite Nnat.Nat2N.id.
+        rewrite lookup_N_spec Nnat.Nat2N.id.
         rewrite List.nth_error_app2; last by lias.
         rewrite nth_error_map' => /=.
         replace (_ + n - _)%coq_nat with n; last by lias.
@@ -360,7 +360,7 @@ Proof.
         eapply Forall2_nth_impl' in Hmelemtype as [x [Hnthm Hmap]]; eauto.
         rewrite iota_N_lookup => /=; last by apply nth_error_Some_length in Hnthm; lias.
         replace (s_elems s6) with (s_elems s4 ++ map (fun '(elem, refs) => Build_eleminst (modelem_type elem) refs) (List.combine mod_elems r_inits)); last by destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst.
-        unfold lookup_N; rewrite Nnat.Nat2N.id.
+        rewrite lookup_N_spec Nnat.Nat2N.id.
         rewrite List.nth_error_app2; last by lias.
         rewrite nth_error_map' => /=.
         replace (_ + n - _)%coq_nat with n; last by lias.
@@ -385,7 +385,7 @@ Proof.
             eapply Forall2_nth_impl in Himptype as [et [Hnthext Hext]]; last by apply Hnthaddr.
             unfold external_typing, ext_typing, ext_func_typing in Hext; simpl in Hext.
             remove_bools_options.
-            unfold lookup_N in *.
+             lookup_N_to_nth_error.
             apply nth_error_Some_length in Hoption0.
             by lias.
           - apply iota_N_lookup_Some in Hnth' as [-> Hlength].
@@ -400,7 +400,7 @@ Proof.
           eapply vt_imps_globals_typing in Hnthsub as [addr [Hnthaddr Htext]]; eauto.
           unfold external_typing, ext_typing, ext_global_typing in Htext.
           simpl in Htext; remove_bools_options.
-          unfold lookup_N in *; simplify_multieq.
+          lookup_N_to_nth_error; simplify_multieq.
           rewrite List.nth_error_app1 in Hoption; last by apply nth_error_Some_length in Hoption2.
           simplify_multieq.
           destruct HST as [_ [_ [_ [Hglobtype _]]]].
@@ -432,7 +432,7 @@ Proof.
         eapply Forall2_nth_impl' in Hmdatatype as [x [Hnthm Hmap]]; eauto.
         rewrite iota_N_lookup => /=; last by apply nth_error_Some_length in Hnthm; lias.
         replace (s_datas s6) with (s_datas s5 ++ map (fun md => Build_datainst (moddata_init md)) mod_datas); last (destruct s, s1, s2, s3, s4, s5, s6; simpl in *; subst).
-        unfold lookup_N; rewrite Nnat.Nat2N.id.
+        rewrite lookup_N_spec Nnat.Nat2N.id.
         rewrite List.nth_error_app2; last by lias.
         rewrite nth_error_map' => /=.
         replace (_ + n - _)%coq_nat with n; last by lias.
@@ -590,7 +590,7 @@ Proof.
             eapply Forall2_nth_impl in Himptype as [et [Hnthext Hext]]; last by apply Hnthaddr.
             unfold external_typing, ext_typing, ext_func_typing in Hext; simpl in Hext.
             remove_bools_options.
-            unfold lookup_N in *.
+             lookup_N_to_nth_error.
             apply nth_error_Some_length in Hoption0.
             by lias.
           - apply iota_N_lookup_Some in Hnth' as [-> Hlength].
@@ -604,7 +604,7 @@ Proof.
           eapply vt_imps_globals_typing in Hnthsub as [addr [Hnthaddr Htext]]; eauto.
           unfold external_typing, ext_typing, ext_global_typing in Htext.
           simpl in Htext; remove_bools_options.
-          unfold lookup_N in *; simplify_multieq.
+          lookup_N_to_nth_error; simplify_multieq.
           rewrite List.nth_error_app1 in Hoption; last by apply nth_error_Some_length in Hoption2.
           simplify_multieq; simpl in *.
           eapply Forall_lookup in Hsglobaltype as [gt Hginsttype]; eauto.
@@ -653,7 +653,7 @@ Proof.
             eapply Forall2_nth_impl in Himptype as [et [Hnthext Hext]]; last by apply Hnthaddr.
             unfold external_typing, ext_typing, ext_func_typing in Hext; simpl in Hext.
             remove_bools_options.
-            unfold lookup_N in *.
+             lookup_N_to_nth_error.
             apply nth_error_Some_length in Hoption0.
             by lias.
           - apply iota_N_lookup_Some in Hnth' as [-> Hlength].
@@ -667,7 +667,7 @@ Proof.
           eapply vt_imps_globals_typing in Hnthsub as [addr [Hnthaddr Htext]]; eauto.
           unfold external_typing, ext_typing, ext_global_typing in Htext.
           simpl in Htext; remove_bools_options.
-          unfold lookup_N in *; simplify_multieq.
+          lookup_N_to_nth_error; simplify_multieq.
           rewrite List.nth_error_app1 in Hoption; last by apply nth_error_Some_length in Hoption2.
           simplify_multieq; simpl in *.
           eapply Forall_lookup in Hsglobaltype as [gt' Hginsttype]; eauto.

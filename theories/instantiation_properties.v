@@ -805,9 +805,11 @@ Proof.
     invert_be_typing.
     apply instr_subtyping_empty1_impl' in Htisub; simpl in *; remove_bools_options.
     assert (exists x, lookup_N (s_funcs s) addr = Some x) as [? Hnth].
-    { apply Hsfunc in Hnthaddr.
+    { rewrite lookup_N_spec in Hnthaddr.
+      apply Hsfunc in Hnthaddr.
       destruct (lookup_N (s_funcs s) addr) eqn:Hnth; first by eexists.
       exfalso.
+      rewrite lookup_N_spec in Hnth.
       apply List.nth_error_None in Hnth.
       by lias.
     }

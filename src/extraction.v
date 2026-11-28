@@ -55,8 +55,8 @@ Extract Constant PosDef.Pos.eqb => "Big_int_Z.eq_big_int".
 (* Zbits.P_mod_two_p is a renormalisation function used a lot by CompCert. Unfortunately, its extraction behaviour is pretty slow due to WordSize being represented in nat. This provides a slightly better version of getting the lowest p bits without going too far -- further optimisations are possible by creating a hashtable lookup of 2^p. *)
 Extract Constant Zbits.P_mod_two_p => "(fun x n -> Big_int_Z.and_big_int x (Big_int_Z.sub_big_int (Big_int_Z.shift_left_big_int Big_int_Z.unit_big_int (Big_int_Z.int_of_big_int n)) Big_int_Z.unit_big_int))".
 
-(* The list lookup function is extracted to using OCaml's native list lookup function instead of converting the index to natural (as that explodes when the lookup index is too big). *)
-Extract Constant lookup_N => "(fun l n -> List.nth_opt l (Big_int_Z.int_of_big_int n))".
+(* lookup_N now traverses the list with an arbitrary-precision binary index.
+   Its proved nth_error correspondence needs no native-int override. *)
 
 (* Persistent array *)
 Extract Constant wasm_parrayof "'a" => "'a Parray_shim.t".

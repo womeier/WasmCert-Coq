@@ -69,6 +69,12 @@ let execute_storage_module module_ =
   step 100 host_state cfg (n "100")
 
 let () =
+  check "core lookup retains in-range values" (lookup_N [7; 8] one = Some 8);
+  check "core lookup rejects length boundary" (lookup_N [7; 8] (n "2") = None);
+  check "core lookup handles maximum u64 without host conversion"
+    (lookup_N [7; 8] (n "18446744073709551615") = None);
+  check "core lookup handles indices beyond u64 without host conversion"
+    (lookup_N [7; 8] (n "340282366920938463463374607431768211455") = None);
   let max64 = n "18446744073709551615" in
   let bytes = List.init 9 (fun _ -> Char.chr 255) @ [Char.chr 1] in
   check "decode u64 maximum"

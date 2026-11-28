@@ -154,7 +154,7 @@ Ltac discriminate_size :=
     apply nth_error_Some_length in H
   | H: List.nth_error _ _ = None |- _ =>
     apply List.nth_error_None in H
-  | _ => unfold lookup_N in *; simplify_lists; simpl in *; subst; try by lias
+  | _ => lookup_N_to_nth_error; simplify_lists; simpl in *; subst; try by lias
     end.
 
 Definition empty_label_ctx := Build_label_ctx nil 0 nil nil.
@@ -169,6 +169,7 @@ Proof.
   get_cc ccs.
   destruct (lookup_N lcs j) as [lab | ] eqn:Htar.
   - destruct lab as [lvs lk lces les].
+    rewrite lookup_N_spec in Htar.
     specialize (nth_error_Some_length Htar) as Hlablen; move/ltP in Hlablen.
     destruct (lk <= length vs) eqn:Hvslen.
     + apply <<hs, (s, ((fc, drop (S (N.to_nat j)) lcs) :: ccs'), (take lk vs ++ lvs, lces ++ les), None), d>> => //.
@@ -200,6 +201,7 @@ Proof.
       destruct fc as [fvs fk [flocs fi] fes]; simpl in *.
       unfold frame_typing in Hftype; remove_bools_options; simpl in *.
       destruct Hftype as [ts0 [-> Hvt]].
+      lookup_N_to_nth_error.
       eapply all2_projection in Hagree; eauto.
       move/eqP in Hagree; simpl in Hagree; subst.
       by discriminate_size.
@@ -1215,7 +1217,7 @@ the condition that all values should live in the operand stack. *)
               (* lookup oob *)
               { resolve_invalid_typing.
                 destruct elem; unfold elem_size in Hboundy; simpl in *.
-                unfold lookup_N in *; apply List.nth_error_None in Hnthelem.
+                lookup_N_to_nth_error; apply List.nth_error_None in Hnthelem.
                 apply Hboundy.
                 apply Z2Nat.inj_lt; try by lias.
                 { specialize (Wasm_int.Int32.unsigned_range_2 src) as Ha1.
@@ -1577,7 +1579,7 @@ the condition that all values should live in the operand stack. *)
               (* lookup oob *)
               { resolve_invalid_typing.
                 destruct data; unfold data_size in Hboundy; simpl in *.
-                unfold lookup_N in *; apply List.nth_error_None in Hnthdata.
+                lookup_N_to_nth_error; apply List.nth_error_None in Hnthdata.
                 apply Hboundy.
                 apply Z2Nat.inj_lt; try by lias.
                 { specialize (Wasm_int.Int32.unsigned_range_2 src) as Ha1.
@@ -1739,7 +1741,7 @@ the condition that all values should live in the operand stack. *)
           resolve_reduce_ctx vs0 es0.
           by apply r_simple; subst; apply rs_br_table.
         (* None *)
-        * unfold lookup_N in Hnth.
+        * rewrite lookup_N_spec in Hnth.
           apply List.nth_error_None in Hnth.
           by lias.
       (* false *)
@@ -1790,9 +1792,11 @@ the condition that all values should live in the operand stack. *)
              unfold_store_operations.
              resolve_store_inst_lookup.
              destruct t1; remove_bools_options; simpl in *.
+             lookup_N_to_nth_error.
              eapply all_projection in Hif1; eauto.
              unfold value_typing in Hif1; simpl in Hif1.
              unfold ext_func_typing in Hif1.
+             lookup_N_to_nth_error.
              by remove_bools_options.
         (* externref *)
         * resolve_invalid_typing.
@@ -1800,6 +1804,7 @@ the condition that all values should live in the operand stack. *)
           unfold_store_operations.
           resolve_store_inst_lookup.
           destruct t1; remove_bools_options; simpl in *.
+          lookup_N_to_nth_error.
           eapply all_projection in Hif1; eauto.
           unfold value_typing in Hif1; simpl in *.
           simplify_multieq.
@@ -1854,9 +1859,11 @@ the condition that all values should live in the operand stack. *)
              unfold_store_operations.
              resolve_store_inst_lookup.
              destruct t1; remove_bools_options; simpl in *.
+             lookup_N_to_nth_error.
              eapply all_projection in Hif1; eauto.
              unfold value_typing in Hif1; simpl in Hif1.
              unfold ext_func_typing in Hif1.
+             lookup_N_to_nth_error.
              by remove_bools_options.
         (* externref *)
         * resolve_invalid_typing.
@@ -1864,6 +1871,7 @@ the condition that all values should live in the operand stack. *)
           unfold_store_operations.
           resolve_store_inst_lookup.
           destruct t1; remove_bools_options; simpl in *.
+          lookup_N_to_nth_error.
           eapply all_projection in Hif1; eauto.
           unfold value_typing in Hif1; simpl in *.
           simplify_multieq.

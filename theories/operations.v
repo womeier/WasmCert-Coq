@@ -48,9 +48,32 @@ Fixpoint bes_datacount_required (bes: expr) :=
 Section Operations.
   Context `{memory: BlockUpdateMemory} `{hfc: host_function_class}.
 
-(* Placeholder for better array lookup in the future. *)
+(* Traverse only the list, even when the binary index is much larger than a
+   host integer. No extraction override or unary index conversion is needed. *)
+Fixpoint lookup_N_bounded {T: Type} (l: list T) (n: N) : option T :=
+  match l with
+  | nil => None
+  | cons x xs =>
+      if N.eqb n 0 then Some x else lookup_N_bounded xs (N.pred n)
+  end.
+
 Definition lookup_N {T: Type} (l: list T) (n: N) : option T :=
-  List.nth_error l (N.to_nat n).
+  lookup_N_bounded l n.
+
+Lemma lookup_N_spec {T: Type} (l: list T) (n: N) :
+  lookup_N l n = List.nth_error l (N.to_nat n).
+Proof.
+  unfold lookup_N.
+  revert n; induction l as [|x xs IH]; intros n.
+  - destruct (N.to_nat n); reflexivity.
+  - simpl lookup_N_bounded.
+    destruct (N.eqb_spec n 0) as [->|Hnonzero]; first reflexivity.
+    rewrite IH Nnat.N2Nat.inj_pred.
+    destruct (N.to_nat n) eqn:Hnat.
+    + change (N.to_nat n = N.to_nat 0) in Hnat.
+      apply Nnat.N2Nat.inj in Hnat. contradiction.
+    + reflexivity.
+Qed.
 
 Definition empty_t_context := Build_t_context nil nil nil nil nil nil nil nil nil None nil.
 
@@ -1648,6 +1671,18 @@ Definition cvtop_valid (t2: number_type) (op: cvtop) (t1: number_type) (s: optio
   ((op == CVO_reinterpret) && ((is_int_t t2 && is_float_t t1) || (is_float_t t2 && is_int_t t1)) && (s == None)).
 
 End Operations.
+
+Lemma lookup_N_nth_error {T: Type} (l: list T) n x :
+  lookup_N l n = Some x -> List.nth_error l (N.to_nat n) = Some x.
+Proof. rewrite lookup_N_spec. trivial. Qed.
+
+#[global] Hint Resolve lookup_N_nth_error : core.
+
+Ltac lookup_N_to_nth_error :=
+  repeat match goal with
+  | H: context [lookup_N _ _] |- _ => rewrite lookup_N_spec in H
+  | |- context [lookup_N _ _] => rewrite lookup_N_spec
+  end.
 
 #[export]
 Hint Unfold v_to_e: core.

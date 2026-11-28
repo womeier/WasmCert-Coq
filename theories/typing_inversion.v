@@ -936,6 +936,7 @@ Proof.
   unfold store_typing in Hst.
   destruct s; remove_bools_options.
   destruct Hst as [? [? [? [Hglobtype ?]]]].
+  lookup_N_to_nth_error.
   eapply those_lookup_inv in Hoption5; eauto.
   eapply Forall_lookup with (n := (N.to_nat g1)) in Hglobtype as [gt Hglobtype]; eauto.
   {
@@ -944,11 +945,10 @@ Proof.
     rewrite List.nth_error_map in Hoption5.
     unfold ext_global_typing in Hoption5.
     remove_bools_options; simpl in *.
-    unfold lookup_N in *.
-    rewrite Hoption1 in Hoption8.
-    injection Hoption8 as <-.
-    rewrite Hoption0 in Hoption5.
-    by injection Hoption5 as <-.
+    lookup_N_to_nth_error.
+    rewrite Hoption0 in Hoption1.
+    injection Hoption1 as <-.
+    assumption.
   }
 Qed.
 
@@ -963,8 +963,9 @@ Proof.
   unfold inst_typing, typing.inst_typing in HIT.
   destruct i => //=.
   remove_bools_options; simpl in *.
+  lookup_N_to_nth_error.
   eapply those_lookup_inv in Hoption; eauto.
-  unfold lookup_N in *.
+  lookup_N_to_nth_error.
   rewrite List.nth_error_map in Hoption.
   remove_bools_options.
   by eexists.
@@ -981,13 +982,12 @@ Proof.
   unfold inst_typing, typing.inst_typing in HIT.
   destruct i => //=.
   remove_bools_options; simpl in *.
+  lookup_N_to_nth_error.
   eapply those_lookup_inv in Hoption2; eauto.
-  unfold lookup_N in *.
+  lookup_N_to_nth_error.
   rewrite List.nth_error_map in Hoption2.
   unfold ext_global_typing in Hoption2.
   remove_bools_options.
-  unfold lookup_N in *.
-  by rewrite Hoption2.
 Qed.
 
 Lemma mem_context_store: forall s i C x mt,
@@ -1024,7 +1024,7 @@ Proof.
     rewrite add0n in HType.
     repeat rewrite catA in HType.
     invert_e_typing.
-    unfold lookup_N in *.
+    lookup_N_to_nth_error.
     rewrite Nat2N.id list_nth_prefix in Hconjr; injection Hconjr as <-.
     eapply ety_subtyping; first by apply et_values_typing; eauto.
     simplify_subtyping.

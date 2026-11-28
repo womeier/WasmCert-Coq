@@ -104,7 +104,7 @@ Lemma common_lab_h_spec: forall iss lab_c tx ts i labid,
     ts <ts: tcs.
 Proof.
   induction iss; move => lab_c tx ts [ | i] labid /= Hcommon Hnthi => //=; remove_bools_options.
-  - unfold lookup_N in Hoption.
+  - rewrite lookup_N_spec in Hoption.
     exists l.
     rewrite Hoption; split => //.
     apply common_lab_h_spec_acc in Hcommon.
@@ -125,7 +125,7 @@ Proof.
   destruct i; simpl in *.
   - injection Hnthi as ->.
     apply common_lab_h_spec_acc in Hcommon.
-    unfold lookup_N in Hoption.
+    rewrite lookup_N_spec in Hoption.
     by exists l.
   - by eapply common_lab_h_spec in Hcommon; eauto.
 Qed.
@@ -1284,6 +1284,7 @@ Proof.
     (* Ref_func *)
     + move/inP in Hif.
       apply bet_weakening_empty_1, bet_ref_func with (t := (rev_tf f0)) => //.
+      lookup_N_to_nth_error.
       apply nth_error_map in Hoption as [ft [? <-]].
       by destruct ft; unfold rev_tf; repeat rewrite revK.
     (* Drop *)
@@ -1444,7 +1445,9 @@ Proof.
       eapply bet_subtyping in Hbet1; last by apply Hsub.
       by exists tx.
     (* Br *)
-    + apply nth_error_map in Hoption as [ts [Hnth <-]].
+    + rewrite lookup_N_spec in Hoption.
+      apply nth_error_map in Hoption as [ts [Hnth <-]].
+      rewrite -lookup_N_spec in Hnth.
       eapply type_update_top_agree_subtyping in Hupdate; eauto.
       destruct Hupdate as [tn [ts1 [ts2 [Hagree' Hsub]]]].
       rewrite revK in Hsub.
@@ -1452,7 +1455,9 @@ Proof.
       eapply bet_subtyping; first by apply bet_br with (ts := ts) => //.
       by apply Hsub.
     (* Br_if *)
-    + apply nth_error_map in Hoption as [ts [Hnth <-]].
+    + rewrite lookup_N_spec in Hoption.
+      apply nth_error_map in Hoption as [ts [Hnth <-]].
+      rewrite -lookup_N_spec in Hnth.
       eapply type_update_agree_subtyping in Hupdate; eauto.
       destruct Hupdate as [tn [Hagree' Hsub]].
       rewrite rev_cons -cats1 revK in Hsub.
@@ -1470,6 +1475,7 @@ Proof.
       { eapply bet_br_table with (ts := rev l1).
         apply Forall_spec.
         move => n x Hnth.
+        rewrite lookup_N_spec.
         by eapply common_lab_spec; eauto.
       }
       by apply Hsub.
@@ -1481,7 +1487,9 @@ Proof.
       eapply bet_subtyping; first by apply bet_return with (ts := r) => //.
       by apply Hsub.
     (* Call *)
-    + apply nth_error_map in Hoption as [ts [Hnth <-]].
+    + rewrite lookup_N_spec in Hoption.
+      apply nth_error_map in Hoption as [ts [Hnth <-]].
+      rewrite -lookup_N_spec in Hnth.
       destruct ts; simpl in Hupdate.
       eapply type_update_agree_subtyping in Hupdate; eauto.
       destruct Hupdate as [tn [Hagree' Hsub]].
@@ -1491,7 +1499,9 @@ Proof.
     (* Call_indirect *)
     + destruct f.
       move/eqP in Hif.
+      rewrite lookup_N_spec in Hoption0.
       apply nth_error_map in Hoption0 as [ts [Hnth Hmap]].
+      rewrite -lookup_N_spec in Hnth.
       destruct ts; simpl in Hmap; inversion Hmap; subst; clear Hmap.
       eapply type_update_agree_subtyping in Hupdate; eauto.
       destruct Hupdate as [tn [Hagree' Hsub]].
@@ -1504,7 +1514,9 @@ Proof.
       move/eqP in Hif; subst.
       eapply type_update_top_agree_subtyping in Hupdate; eauto.
       destruct Hupdate as [tn [ts1 [ts2 [Hagree' Hsub]]]].
+      rewrite lookup_N_spec in Hoption0.
       apply nth_error_map in Hoption0 as [ts [Hnth Heq]].
+      rewrite -lookup_N_spec in Hnth.
       destruct ts; simpl in Heq.
       injection Heq as <- Hrevr.
       apply (f_equal rev) in Hrevr; repeat rewrite revK in Hrevr; subst.
@@ -1519,7 +1531,9 @@ Proof.
       move/eqP in Hif0; subst.
       eapply type_update_top_agree_subtyping in Hupdate; eauto.
       destruct Hupdate as [tn [ts1 [ts2 [Hagree' Hsub]]]].
+      rewrite lookup_N_spec in Hoption.
       apply nth_error_map in Hoption as [ts [Hnth Heq]].
+      rewrite -lookup_N_spec in Hnth.
       destruct ts; simpl in Heq.
       injection Heq as <- Hrevr.
       apply (f_equal rev) in Hrevr; repeat rewrite revK in Hrevr; subst.

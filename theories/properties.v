@@ -2005,6 +2005,7 @@ Lemma lookup_N_map {T1 T2: Type}: forall (f: T1 -> T2) (l: list T1) n,
     lookup_N (map f l) n = option_map f (lookup_N l n).
 Proof.
   move => f l n.
+  rewrite !lookup_N_spec.
   by apply nth_error_map'.
 Qed.
 
@@ -2097,7 +2098,7 @@ Proof.
   move => Hext Hnth.
   unfold component_extension in Hext.
   remove_bools_options.
-  unfold lookup_N in *.
+  lookup_N_to_nth_error.
   assert (lt (N.to_nat n) (length l1)) as Hlen; first by apply List.nth_error_Some; rewrite Hnth.
   destruct (List.nth_error l2 (N.to_nat n)) as [y |] eqn:Hnth'; last by apply List.nth_error_None in Hnth'; lias.
   apply (nth_error_take (k := length l1)) in Hnth'; last by lias.
@@ -2205,6 +2206,7 @@ Proof.
   move => s inst C n x Hit Hnth.
   unfold inst_typing in Hit.
   destruct inst; remove_bools_options; simpl in *.
+  lookup_N_to_nth_error.
   by eapply those_map_lookup in Hoption; eauto.
 Qed.
 
@@ -2217,6 +2219,7 @@ Proof.
   move => s inst C n x Hit Hnth.
   unfold inst_typing in Hit.
   destruct inst; remove_bools_options; simpl in *.
+  lookup_N_to_nth_error.
   by eapply those_map_lookup in Hoption0; eauto.
 Qed.
   
@@ -2229,6 +2232,7 @@ Proof.
   move => s inst C n x Hit Hnth.
   unfold inst_typing in Hit.
   destruct inst; remove_bools_options; simpl in *.
+  lookup_N_to_nth_error.
   by eapply those_map_lookup in Hoption1; eauto.
 Qed.
   
@@ -2241,6 +2245,7 @@ Proof.
   move => s inst C n x Hit Hnth.
   unfold inst_typing in Hit.
   destruct inst; remove_bools_options; simpl in *.
+  lookup_N_to_nth_error.
   by eapply those_map_lookup in Hoption2; eauto.
 Qed.
 
@@ -2254,9 +2259,11 @@ Proof.
   move => s inst C n x Hit Hnth.
   unfold inst_typing in Hit.
   destruct inst; remove_bools_options; simpl in *.
+  lookup_N_to_nth_error.
   eapply those_map_lookup in Hoption3; eauto.
   destruct Hoption3 as [t [Hnthelem Hnthl]].
   remove_bools_options.
+  lookup_N_to_nth_error.
   by exists t, e.
 Qed.
 
@@ -2270,9 +2277,11 @@ Proof.
   move => s inst C n x Hit Hnth.
   unfold inst_typing in Hit.
   destruct inst; remove_bools_options; simpl in *.
+  lookup_N_to_nth_error.
   eapply those_map_lookup in Hoption4; eauto.
   destruct Hoption4 as [t [Hnthdata Hnthl]].
   remove_bools_options.
+  lookup_N_to_nth_error.
   by exists t, d.
 Qed.
 
@@ -2296,7 +2305,7 @@ Proof.
   move => s inst C n t Hit Hnth.
   unfold inst_typing in Hit.
   destruct inst; remove_bools_options; simpl in *.
-  unfold lookup_N in *.
+  lookup_N_to_nth_error.
   eapply those_lookup_inv in Hoption; eauto.
   apply nth_error_map in Hoption as [a [??]].
   by exists a.
@@ -2311,7 +2320,7 @@ Proof.
   move => s inst C n t Hit Hnth.
   unfold inst_typing in Hit.
   destruct inst; remove_bools_options; simpl in *.
-  unfold lookup_N in *.
+  lookup_N_to_nth_error.
   eapply those_lookup_inv in Hoption0; eauto.
   apply nth_error_map in Hoption0 as [a [??]].
   by exists a.
@@ -2340,7 +2349,7 @@ Proof.
   move => s inst C n t Hit Hnth.
   unfold inst_typing in Hit.
   destruct inst; remove_bools_options; simpl in *.
-  unfold lookup_N in *.
+  lookup_N_to_nth_error.
   eapply those_lookup_inv in Hoption1; eauto.
   apply nth_error_map in Hoption1 as [a [??]].
   by exists a.
@@ -2369,7 +2378,7 @@ Proof.
   move => s inst C n t Hit Hnth.
   unfold inst_typing in Hit.
   destruct inst; remove_bools_options; simpl in *.
-  unfold lookup_N in *.
+  lookup_N_to_nth_error.
   eapply those_lookup_inv in Hoption2; eauto.
   apply nth_error_map in Hoption2 as [a [??]].
   by exists a.
@@ -2385,7 +2394,7 @@ Proof.
   move => s inst C n t Hit Hnth.
   unfold inst_typing in Hit.
   destruct inst; remove_bools_options; simpl in *.
-  unfold lookup_N in *.
+  lookup_N_to_nth_error.
   eapply those_lookup_inv in Hoption3; eauto.
   apply nth_error_map in Hoption3 as [a [??]].
   remove_bools_options.
@@ -2402,7 +2411,7 @@ Proof.
   move => s inst C n t Hit Hnth.
   unfold inst_typing in Hit.
   destruct inst; remove_bools_options; simpl in *.
-  unfold lookup_N in *.
+  lookup_N_to_nth_error.
   eapply those_lookup_inv in Hoption4; eauto.
   apply nth_error_map in Hoption4 as [a [??]].
   remove_bools_options.
@@ -2417,7 +2426,7 @@ Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
   destruct Hst as [Hf _]; simpl in *.
-  by eapply Forall_lookup in Hf; eauto.
+  rewrite lookup_N_spec in Hnth. by eapply Forall_lookup in Hf; eauto.
 Qed.
 
 Lemma store_typing_table_lookup: forall s n x,
@@ -2428,7 +2437,7 @@ Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
   destruct Hst as [Hf [Ht _]]; simpl in *.
-  by eapply Forall_lookup in Ht; eauto.
+  rewrite lookup_N_spec in Hnth. by eapply Forall_lookup in Ht; eauto.
 Qed.
 
 Lemma store_typing_mem_lookup: forall s n x,
@@ -2439,7 +2448,7 @@ Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
   destruct Hst as [Hf [Ht [Hm _]]]; simpl in *.
-  by eapply Forall_lookup in Hm; eauto.
+  rewrite lookup_N_spec in Hnth. by eapply Forall_lookup in Hm; eauto.
 Qed.
 
 Lemma store_typing_global_lookup: forall s n x,
@@ -2450,7 +2459,7 @@ Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
   destruct Hst as [_ [_ [_ [Hg _]]]]; simpl in *.
-  by eapply Forall_lookup in Hg; eauto.
+  rewrite lookup_N_spec in Hnth. by eapply Forall_lookup in Hg; eauto.
 Qed.
 
 Lemma store_typing_elem_lookup: forall s n x,
@@ -2461,7 +2470,7 @@ Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
   destruct Hst as [_ [_ [_ [_ [He _]]]]]; simpl in *.
-  by eapply Forall_lookup in He; eauto.
+  rewrite lookup_N_spec in Hnth. by eapply Forall_lookup in He; eauto.
 Qed.
 
 Lemma store_typing_data_lookup: forall s n x,
@@ -2472,7 +2481,7 @@ Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
   destruct Hst as [_ [_ [_ [_ [_ Hd]]]]]; simpl in *.
-  by eapply Forall_lookup in Hd; eauto.
+  rewrite lookup_N_spec in Hnth. by eapply Forall_lookup in Hd; eauto.
 Qed.
 
 End Host.
