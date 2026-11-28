@@ -4,7 +4,8 @@ let clock_ms () =
   let time = Unix.gettimeofday() in
       int_of_float (time *. 1000.0)
 
-module Ocaml_host: Extract.Parametric_host = struct
+module Ocaml_host: Extract.Parametric_host
+  with type host_function = int and type host_state_type = unit = struct
 
   type host_function = int
   let host_function_eq_dec a b = (a = b)
@@ -13,13 +14,14 @@ module Ocaml_host: Extract.Parametric_host = struct
 
   type host_state_type = unit
 
-  let host_apply_pure hs s ft hf vs = 
-    match Obj.magic hf with
+  let host_apply_pure _hs s ft hf vs =
+    match hf with
     | 0 -> 
       let ms = clock_ms () in
-        ((), Some (s, Extract.Result_values [Extract.Utility.vali64_of_Z (z_of_int ms)]))
+        ((), Extract.ClockHostBackend.clock_result
+          Extract.memory_instance hfc (z_of_int ms) s ft vs)
     | _ -> 
-      assert false
+      ((), None)
 
 end
 

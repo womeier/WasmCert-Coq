@@ -13,6 +13,7 @@ From Wasm Require Import
   simd_execute
   wasm_parray
   extraction_instance
+  host_backend_properties
 .
 
 From Stdlib Require Import ZArith.
@@ -81,5 +82,6 @@ Extract Constant SIMD_ops.app_vshiftop_str => "SIMD_ops.app_vshiftop_str".
 
 Extraction "extract"
   Utility
+  ClockHostBackend
   Extraction_instance
   .

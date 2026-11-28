@@ -7,12 +7,12 @@
 (library
   (name wasmcert_runtime)
   (wrapped false)
-  (modules extract SIMD_ops utils)
-  (libraries wasm parray zarith))
+  (modules extract SIMD_ops utils ocaml_host)
+  (libraries wasm parray zarith unix))
 
 (executable
   (name wasm_coq_interpreter)
-  (modules (:standard \ extract SIMD_ops utils))
+  (modules (:standard \ extract SIMD_ops utils ocaml_host))
   (libraries cmdliner wasm unix parray zarith wasmcert_runtime)
   (modes (best exe))
   (public_name wasm_coq_interpreter)
