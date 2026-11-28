@@ -45,13 +45,23 @@ forall n, parser_complete (parse_block_type (n := n)) block_type_encoding
 forall n, parser_complete (parse_catch_clause (n := n)) catch_clause_encoding
 forall n, parser_complete (parse_numeric_instruction (n := n)) numeric_atomic_encoding
 forall n, parser_complete (parse_memarg (n := n)) memarg_encoding
+forall n, parser_complete (parse_memory_instruction (n := n)) memory_instruction_encoding
 ```
 
 The numeric result includes the actual ordered ordinary SIMD dispatch,
 noncanonical u32 subopcodes and raw-byte lanes. `run_parse_memarg_correct`
 is an actual arbitrary-suffix iff, not just canonical examples.
-`scalar_memory_instruction_complete` discharges concrete scalar payload
-composition; it is not called full memory-family completeness.
+`parse_memory_instruction_complete` now discharges the **full actual memory
+family**, including every scalar/vector/bulk alternative and its ordered-choice
+disjointness. `run_parse_memory_instruction_correct` exports its arbitrary-suffix
+iff against the independent concrete grammar. Padded vector/bulk dispatch
+regressions retain an exact trailing byte; vector lanes remain raw bytes.
+
+`parse_be_layer_control_complete` and `parse_be_layer_bulk_complete` also now
+discharge actual control/EH/reference/i31 and table/bulk atom completeness
+for arbitrary recursive body parsers. This includes the full source heap/value
+codecs, both indirect-call forms and branch-table vectors; no abstract-only
+reference codec is substituted.
 
 Source heap/reference/value/global prefixes, catch/tag/custom composition and
 their earlier wire-bounded printer contracts remain available unchanged.
@@ -61,18 +71,17 @@ their earlier wire-bounded printer contracts remain available unchanged.
 The following are **not yet exported proofs**:
 
 ```coq
-forall n,
-  parser_complete (parse_memory_instruction (n := n)) memory_instruction_encoding
-
 forall n
   (body : Box (byte_parser (list basic_instruction)) n)
   (if_body : Box (byte_parser (list basic_instruction * list basic_instruction)) n),
   parser_complete (parse_be_layer body if_body) wasm_atomic_encoding
 ```
 
-The second contract must select every concrete control/table/EH/GC atom and
-prove ordered-choice disjointness, including shared `fc` and `fd` prefixes.
-The complete numeric-family theorem alone does not imply it.
+This combined contract must still connect the proved concrete control/table/
+EH/GC/memory/numeric families, including **cross-family** disjointness for shared
+`fc` and `fd` prefixes. The separate numeric and memory family theorems alone
+do not imply it. Control and bulk atoms already have actual layer completeness;
+memory/numeric layer connection and cross-family dispatch remain open.
 
 Then the actual four-component recursive language completeness invariant must
 be proved, with the additional `try_table` induction case and concrete catch
@@ -100,6 +109,24 @@ conceal these gaps. GC's closed administrative-stack migration remains a
 separate runtime dependency and is not an explanation for these open proofs.
 
 ## Validation of this increment
+
+Follow-up memory/control completeness: full exact-tree build, forced tests and
+kernel checks of the new lookahead, memory/control completeness and regression
+modules pass. The full memory completeness theorem and its exported prefix
+iff are **globally closed**. Control/bulk layer completeness retains the same
+inherited classical real-decision/extensionality assumptions; no axioms were
+added. Official binary execution remains **489/489**, with **18 mapped text-only
+deferrals**; indexed payload probes remain **7 PASS / 3 FAIL** with zero
+infrastructure errors. No runtime/parser/printer or test expectation changed.
+
+Follow-up logs: `/tmp/opencode/eh-memory-control-final-build.log`,
+`/tmp/opencode/eh-memory-control-final-tests.log`,
+`/tmp/opencode/eh-memory-control-final-coqchk.log`,
+`/tmp/opencode/eh-memory-control-assumptions.log`,
+`/tmp/opencode/eh-memory-control-official.log`,
+`/tmp/opencode/eh-memory-control-indexed.log`.
+
+Earlier expression-soundness increment:
 
 Full exact-tree build, forced tests and relevant `coqchk` pass. The actual
 unconditional theorem types are printed in the assumption audit, not merely
