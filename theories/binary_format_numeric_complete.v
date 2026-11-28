@@ -139,7 +139,8 @@ Qed.
 Ltac numeric_initial :=
   first [apply exact_byte_initial
         |apply parser_initial_cmap; numeric_initial
-        |apply parser_initial_rand; numeric_initial].
+        |apply parser_initial_rand; numeric_initial
+        |apply parser_initial_map; numeric_initial].
 
 Ltac fixed_numeric_dispatch opcode be :=
   lazymatch goal with

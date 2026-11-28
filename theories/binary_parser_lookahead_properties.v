@@ -113,3 +113,83 @@ Proof.
   destruct (Complete m bound input prefix suffix a Bytes Qa) as [s [Run Facts]].
   exists s. split; [rewrite run_alt_option, Absent; exact Run |exact Facts].
 Qed.
+
+Definition parser_initial_set {A n}
+    (p : Parser (SizedList Byte.byte) Byte.byte option A n)
+    (Allowed : Byte.byte -> Prop) :=
+  forall m (bound : m <= n) input s,
+    runParser p bound input = Some s ->
+    exists first rest, input_bytes input = first :: rest /\ Allowed first.
+
+Lemma parser_initial_set_single {A n}
+    (p : Parser (SizedList Byte.byte) Byte.byte option A n) b Allowed :
+  parser_initial_byte p b -> Allowed b -> parser_initial_set p Allowed.
+Proof.
+  intros Head AllowedByte m bound input s Run.
+  destruct (Head _ _ _ _ Run) as [rest Bytes].
+  exists b, rest; auto.
+Qed.
+
+Lemma parser_initial_exact_set {A n}
+    (p : Parser (SizedList Byte.byte) Byte.byte option A n) b :
+  parser_initial_byte p b -> parser_initial_set p (fun actual => actual = b).
+Proof.
+  intro H; apply (parser_initial_set_single p b); [exact H |reflexivity].
+Qed.
+
+Lemma parser_complete_alt_right_failure {A n}
+    (p q : Parser (SizedList Byte.byte) Byte.byte option A n) Q :
+  (forall m (bound : m <= n) input prefix suffix a,
+    input_bytes input = prefix ++ suffix -> Q prefix a ->
+    runParser p bound input = None) ->
+  parser_complete q Q -> parser_complete (Combinators.alt p q) Q.
+Proof.
+  intros Absent Complete m bound input prefix suffix a Bytes Qa.
+  destruct (Complete m bound input prefix suffix a Bytes Qa) as [s [Run Facts]].
+  exists s; split; [|exact Facts].
+  rewrite run_alt_option, (Absent _ _ _ _ _ _ Bytes Qa); exact Run.
+Qed.
+
+Lemma parser_initial_set_alt {A n}
+    (p q : Parser (SizedList Byte.byte) Byte.byte option A n) Allowed :
+  parser_initial_set p Allowed -> parser_initial_set q Allowed ->
+  parser_initial_set (Combinators.alt p q) Allowed.
+Proof.
+  intros P Q m bound input s Run.
+  rewrite run_alt_option in Run.
+  destruct (runParser p bound input) as [raw|] eqn:Raw.
+  - inversion Run; subst. now apply (P _ _ _ _ Raw).
+  - now apply (Q _ _ _ _ Run).
+Qed.
+
+Lemma parser_initial_set_from_sound {A n}
+    (p : Parser (SizedList Byte.byte) Byte.byte option A n) Grammar Allowed :
+  parser_sound p Grammar ->
+  (forall bytes a, Grammar bytes a ->
+    exists first rest, bytes = first :: rest /\ Allowed first) ->
+  parser_initial_set p Allowed.
+Proof.
+  intros Sound Head m bound input s Run.
+  destruct (Sound _ _ _ _ Run) as [prefix [Bytes Enc]].
+  destruct (Head _ _ Enc) as [first [rest [Prefix AllowedByte]]].
+  exists first, (rest ++ output_bytes s). rewrite Bytes, Prefix; auto.
+Qed.
+
+Lemma parser_complete_alt_right_initial_set {A n}
+    (p q : Parser (SizedList Byte.byte) Byte.byte option A n)
+    Allowed opcode Q :
+  parser_initial_set p Allowed -> ~ Allowed opcode ->
+  (forall bytes a, Q bytes a -> exists tail, bytes = opcode :: tail) ->
+  parser_complete q Q ->
+  parser_complete (Combinators.alt p q) Q.
+Proof.
+  intros Initial Rejected Head Complete m bound input prefix suffix a Bytes Qa.
+  destruct (Head _ _ Qa) as [tail Prefix].
+  assert (runParser p bound input = None) as Absent.
+  { destruct (runParser p bound input) as [s|] eqn:Run; [|reflexivity].
+    destruct (Initial _ _ _ _ Run) as [first [rest [Other AllowedByte]]].
+    rewrite Bytes, Prefix in Other. inversion Other; subst first.
+    contradiction. }
+  destruct (Complete m bound input prefix suffix a Bytes Qa) as [s [Run Facts]].
+  exists s; split; [rewrite run_alt_option, Absent; exact Run |exact Facts].
+Qed.
