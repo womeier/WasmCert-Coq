@@ -77,3 +77,92 @@ Proof.
     binary_of_limits, encode_limits, encode_limits_flag; cbn; try reflexivity.
   all: now rewrite app_nil_r.
 Qed.
+
+Definition run_address_limits_prefix (input: list byte)
+    : option (address_type * datatypes.limits * list byte) :=
+  flatten_limits (runParser
+    (binary_format_parser.parse_address_limits (Toks := SizedList byte) (M := option))
+    (Nat.le_refl (List.length input)) (mkSizedList input)).
+
+Theorem binary_address_limits_parser_correct input width lim rest :
+  run_address_limits_prefix input = Some (width, lim, rest) <->
+  limits_encoding input width lim rest.
+Proof.
+  change (AddressingParseque.run_limits_prefix input = Some (width, lim, rest) <->
+    limits_encoding input width lim rest).
+  rewrite run_limits_prefix_correct.
+  split; [apply decode_limits_sound | apply decode_limits_complete].
+Qed.
+
+Definition run_memory_type_prefix (input: list byte)
+    : option (datatypes.memory_type * list byte) :=
+  option_map (fun s =>
+    (Success.value s, @Sized.value _ (@List.length byte) _ (Success.leftovers s)))
+    (runParser
+      (parse_memory_type (Toks := SizedList byte) (M := option))
+      (Nat.le_refl (List.length input)) (mkSizedList input)).
+
+Theorem binary_memory_type_parser_correct input :
+  run_memory_type_prefix input =
+    option_map (fun '(width, lim, rest) =>
+      ({| datatypes.mt_limits := lim; datatypes.mt_address_type := width |}, rest))
+      (decode_limits input).
+Proof.
+  rewrite <- decode_limits_tokens_correct.
+  unfold run_memory_type_prefix, parse_memory_type,
+    binary_format_parser.parse_address_limits,
+    AddressingParseque.parse_address_limits, flatten_limits.
+  cbn [Combinators.map runParser].
+  destruct (decode_limits_tokens (mkSizedList input)) as [result|]; last reflexivity.
+  destruct result as [[width lim] size small rest]. reflexivity.
+Qed.
+
+Theorem binary_memory_type_parser_grammar input mt rest :
+  run_memory_type_prefix input = Some (mt, rest) <->
+  limits_encoding input (datatypes.mt_address_type mt) (datatypes.mt_limits mt) rest.
+Proof.
+  rewrite binary_memory_type_parser_correct.
+  split.
+  - destruct (decode_limits input) as [[[a lim] remaining]|] eqn:Hlimits; [|discriminate].
+    intros H; inversion H; subst; clear H. now apply decode_limits_sound.
+  - intros Hlimits. apply decode_limits_complete in Hlimits.
+    rewrite Hlimits. destruct mt; reflexivity.
+Qed.
+
+Definition run_table_type_prefix (input: list byte)
+    : option (datatypes.table_type * list byte) :=
+  flatten_table_type (runParser
+    (binary_format_parser.parse_table_type (Toks := SizedList byte) (M := option))
+    (Nat.le_refl (List.length input)) (mkSizedList input)).
+
+Theorem binary_table_type_parser_correct input :
+  run_table_type_prefix input = decode_table_type input.
+Proof.
+  rewrite <- decode_table_type_tokens_correct.
+  unfold run_table_type_prefix, binary_format_parser.parse_table_type,
+    AddressingParseque.parse_table_type, flatten_table_type.
+  cbn [runParser].
+  destruct (decode_table_type_tokens (mkSizedList input)); reflexivity.
+Qed.
+
+Theorem binary_table_type_parser_grammar input tt rest :
+  run_table_type_prefix input = Some (tt, rest) <->
+  exists reference tail,
+    input = reference :: tail /\
+    decode_reference_byte reference = Some (datatypes.tt_elem_type tt) /\
+    limits_encoding tail (datatypes.tt_address_type tt) (datatypes.tt_limits tt) rest.
+Proof.
+  rewrite binary_table_type_parser_correct.
+  split.
+  - destruct input as [|reference tail]; [discriminate |].
+    cbn [decode_table_type].
+    destruct (decode_reference_byte reference) as [elem|] eqn:Href; [|discriminate].
+    destruct (decode_limits tail) as [[[a lim] remaining]|] eqn:Hlimits; [|discriminate].
+    intros H; inversion H; subst; clear H.
+    exists reference, tail; repeat split; try assumption.
+    now apply decode_limits_sound.
+  - intros [reference [tail [-> [Href Hlimits]]]].
+    cbn [decode_table_type]. rewrite Href.
+    apply decode_limits_complete in Hlimits. rewrite Hlimits.
+    destruct tt; reflexivity.
+Qed.
