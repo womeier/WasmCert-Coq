@@ -156,7 +156,7 @@ Proof.
     apply values_subtyping_cat'; first apply values_subtyping_eq.
     simpl. move/andP: Hsub => [Hsub _].
     rewrite andbT.
-    eapply value_subtyping_trans; [apply non_nullable_type_sub | exact Hsub].
+    exact (non_nullable_nullable_sub Hsub).
   Unshelve.
   all: try by resolve_subtyping.
 Qed.

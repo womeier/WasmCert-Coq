@@ -179,7 +179,9 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           match lookup_N C.(tc_labels) x with
           | Some label_types =>
               if (label_types != nil) && is_ref_t (head T_bot label_types)
-              then type_update ts label_types (behead label_types)
+               then type_update ts
+                 (nullable_type (head T_bot label_types) :: behead label_types)
+                 (behead label_types)
               else None
           | None => None
           end

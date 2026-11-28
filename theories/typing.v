@@ -390,15 +390,14 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
   be_typing C es (Tf t1s t2s) ->
   (Tf t1s t2s) <ti: (Tf t1s' t2s') ->
   be_typing C es (Tf t1s' t2s')
-(* Erased compatibility rule: nullability refinement will become explicit
-   when the shared reference type representation is extended. *)
+(* Reference refinement changes only nullability, retaining heap identity. *)
 | bet_ref_as_non_null : forall C t,
   is_ref_t t ->
   be_typing C [::BI_ref_as_non_null] (Tf [::t] [::non_nullable_type t])
 | bet_br_on_non_null : forall C x ts t,
   lookup_N C.(tc_labels) x = Some (ts ++ [::t]) ->
   is_ref_t t ->
-  be_typing C [::BI_br_on_non_null x] (Tf (ts ++ [::t]) ts)
+  be_typing C [::BI_br_on_non_null x] (Tf (ts ++ [::nullable_type t]) ts)
 .
 
 Definition expr_typing (C: t_context) (bes: list basic_instruction) (ts: result_type) : Prop :=

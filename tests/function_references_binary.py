@@ -115,6 +115,10 @@ table_cases = [
      "014000700001d2000b", 0, "i32.const 0"),
     ("table_nullable_without_refinement_rejected", "026470410025000bd1",
      "014000700001d2000b", 123, "Module type checking failure:"),
+    ("table_nullable_branches_to_nonnull_label", "02647041002500d600000bd1",
+     "014000700001d2000b", 0, "i32.const 0"),
+    ("table_null_nonnull_branch_falls_through", "02647041002500d600000bd1",
+     "014000700001d0700b", 0, "Execution returned a trap"),
 ]
 
 exe = str(pathlib.Path(sys.argv[1]).resolve())

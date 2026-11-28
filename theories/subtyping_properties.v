@@ -107,6 +107,31 @@ Proof.
     try apply value_subtyping_eq; try apply value_subtyping_bot.
 Qed.
 
+Lemma nullable_type_sub t : t <t: nullable_type t.
+Proof.
+  destruct t as [n|v|[b h]|]; simpl; try apply value_subtyping_eq.
+  destruct b; [apply value_subtyping_eq | apply value_subtyping_nonnull].
+Qed.
+
+Lemma nullable_type_mono t1 t2 :
+  t1 <t: t2 -> nullable_type t1 <t: nullable_type t2.
+Proof.
+  move/value_subtyping_cases => [->|[->|[h [-> ->]]]];
+    try apply value_subtyping_eq; try apply value_subtyping_bot.
+Qed.
+
+Lemma non_nullable_nullable_type t :
+  non_nullable_type (nullable_type t) = non_nullable_type t.
+Proof. by destruct t. Qed.
+
+Lemma non_nullable_nullable_sub t1 t2 :
+  t1 <t: nullable_type t2 -> non_nullable_type t1 <t: t2.
+Proof.
+  move/non_nullable_type_mono.
+  rewrite non_nullable_nullable_type.
+  move => H. eapply value_subtyping_trans; [exact H | apply non_nullable_type_sub].
+Qed.
+
 Lemma values_subtyping_eq: forall ts,
     ts <ts: ts.
 Proof.
@@ -533,6 +558,14 @@ Ltac resolve_subtyping :=
       rewrite - value_values_subtyping in H
       
   (* Reflexivity *)
+   | |- context [ ?t <t: nullable_type ?t ] =>
+       rewrite nullable_type_sub => //
+   | H: is_true (?t1 <t: ?t2) |-
+       context [nullable_type ?t1 <t: nullable_type ?t2] =>
+       rewrite (nullable_type_mono H) => //
+   | H: is_true (?t1 <t: nullable_type ?t2) |-
+       context [non_nullable_type ?t1 <t: ?t2] =>
+       rewrite (non_nullable_nullable_sub H) => //
    | |- context [ non_nullable_type ?t <t: ?t ] =>
        rewrite non_nullable_type_sub => //
    | H: is_true (?t1 <t: ?t2) |-
