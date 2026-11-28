@@ -52,6 +52,19 @@ Proof.
   now apply (H _ _ _ _ Raw).
 Qed.
 
+Lemma parser_initial_app {A B n}
+    (p : Parser (SizedList Byte.byte) Byte.byte option (A -> B) n)
+    (q : Box (Parser (SizedList Byte.byte) Byte.byte option A) n) b :
+  parser_initial_byte p b ->
+  parser_initial_byte (Combinators.app p q) b.
+Proof.
+  intros H m bound input s Run.
+  unfold Combinators.app, Combinators.and,
+    Combinators.map, Combinators.andbind in Run; simpl in Run.
+  destruct (runParser p bound input) as [raw|] eqn:Raw; [|discriminate].
+  now apply (H _ _ _ _ Raw).
+Qed.
+
 Lemma parser_initial_mismatch {A n}
     (p : Parser (SizedList Byte.byte) Byte.byte option A n) expected actual :
   parser_initial_byte p expected -> expected <> actual ->
