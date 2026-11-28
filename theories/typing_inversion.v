@@ -796,13 +796,18 @@ Proof.
   - destruct v as [h| f | e | a] => /=; simpl in *; try injection Hoption as <-; remove_bools_options.
     + apply ety_a' => //=.
       econstructor; first by econstructor.
-      apply instr_subtyping_weaken2 with (ty2 := [::T_ref (Ref_type true h)]); by resolve_subtyping.
+      apply instr_subtyping_weaken2 with (ty2 := [::T_ref (Ref_type true h)]).
+      * apply instr_subtyping_eq.
+      * by rewrite -value_values_subtyping.
     + eapply ety_subtyping; first by eapply ety_ref; eauto.
-      apply instr_subtyping_weaken2 with (ty2 := [::T_ref T_funcref]); by resolve_subtyping.
+      apply instr_subtyping_weaken2 with (ty2 := [::T_ref T_funcref]); first apply instr_subtyping_eq.
+      by rewrite -value_values_subtyping.
     + eapply ety_subtyping; first by eapply ety_ref_extern; eauto.
-      apply instr_subtyping_weaken2 with (ty2 := [::T_ref T_externref]); by resolve_subtyping.
+      apply instr_subtyping_weaken2 with (ty2 := [::T_ref T_externref]); first apply instr_subtyping_eq.
+      by rewrite -value_values_subtyping.
     + eapply ety_subtyping; first by eapply ety_ref_exn; eauto.
-      apply instr_subtyping_weaken2 with (ty2 := [::T_ref (Ref_type false HT_exn)]); by resolve_subtyping.
+      apply instr_subtyping_weaken2 with (ty2 := [::T_ref (Ref_type false HT_exn)]); first apply instr_subtyping_eq.
+      by rewrite -value_values_subtyping.
 Qed.
 
 Lemma et_values_typing: forall s C vs ts,

@@ -121,7 +121,7 @@ Context `{hfc : host_function_class} `{memory : BlockUpdateMemory}.
 Lemma core_null_is_never_non_null s h1 h2 :
   value_typing s (VAL_ref (VAL_ref_null h1))
     (T_ref (Ref_type false h2)) = false.
-Proof. reflexivity. Qed.
+Proof. destruct h1, h2; reflexivity. Qed.
 
 Lemma core_null_principal_heap s h :
   typeof_ref s (VAL_ref_null h) = Some (Ref_type true h).

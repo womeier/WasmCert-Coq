@@ -35,15 +35,27 @@ def signature(args=b"", results=b""):
     return b"\x60" + vec(types(args)) + vec(types(results))
 
 
-def module(body, *, tags=(1, 1), helpers=(), extra_types=(), result=b"\x7f"):
+def module(body, *, tags=(1, 1), helpers=(), extra_types=(), result=b"\x7f",
+           tag_parameters=b"\x7f", tables=()):
     bodies = list(helpers) + [body]
-    types = [signature(results=result), signature(b"\x7f")] + list(extra_types)
+    types = [signature(results=result), signature(tag_parameters)] + list(extra_types)
     code = [b"\0" + body + b"\x0b" for body in bodies]
     return (
         b"\0asm\x01\0\0\0"
         + section(1, vec(types))
         + section(3, vec([b"\0" for _ in bodies]))
+        + (section(4, vec(list(tables))) if tables else b"")
         + section(13, vec([b"\0" + u32(t) for t in tags]))
+        + section(7, vec([b"\x04main\0" + u32(len(bodies) - 1)]))
+        + section(10, vec([u32(len(c)) + c for c in code]))
+    )
+
+def typed_functions(types, function_types, bodies):
+    code = [b"\0" + body + b"\x0b" for body in bodies]
+    return (
+        b"\0asm\x01\0\0\0"
+        + section(1, vec(types))
+        + section(3, vec([u32(t) for t in function_types]))
         + section(7, vec([b"\x04main\0" + u32(len(bodies) - 1)]))
         + section(10, vec([u32(len(c)) + c for c in code]))
     )
@@ -223,6 +235,81 @@ invalid("catch-ref-unknown-tag", block(try_table(throw0, [catch_ref(3, 0)])))
 invalid("catch-all-ref-unknown-label", block(try_table(throw0, [catch_all_ref(9)])))
 invalid("catch-ref-requires-reference-label", block(try_table(throw0, [catch_ref(0, 0)])))
 invalid("catch-all-ref-requires-reference-label", block(try_table(throw0, [catch_all_ref(0)])))
+
+nullable_exn = b"\x69"
+nullable_noexn = b"\x74"
+exception_types = [
+    (False, False, b"\x64\x74"),
+    (False, True, nullable_noexn),
+    (True, False, nonnull_exn),
+    (True, True, nullable_exn),
+]
+for source_exn, source_nullable, source in exception_types:
+    for target_exn, target_nullable, target in exception_types:
+        matches = (not source_exn or target_exn) and (not source_nullable or target_nullable)
+        cases.append((
+            f"exception-subtype-{source.hex()}-{target.hex()}",
+            typed_functions([signature(source, target)], [0], [b"\x20\0"]),
+            0 if matches else 123,
+            "" if matches else "Module type checking failure",
+            False,
+        ))
+    for other in (b"\x70", b"\x6f"):
+        for left, right in ((source, other), (other, source)):
+            cases.append((
+                f"separate-hierarchies-{left.hex()}-{right.hex()}",
+                typed_functions([signature(left, right)], [0], [b"\x20\0"]),
+                123, "Module type checking failure", False,
+            ))
+
+cases.append((
+    "nonnull-return-widens-to-nullable",
+    module(block(try_table(throw0, [catch_all_ref(0)], nonnull_exn), nonnull_exn),
+           result=nullable_exn),
+    0, "exnref 0", True,
+))
+value(
+    "catch-all-ref-widens-label",
+    block(try_table(throw0, [catch_all_ref(0)], nullable_exn), nullable_exn) + b"\xd1",
+    0,
+)
+value(
+    "catch-ref-widens-reference-above-payload",
+    block(try_table(throw0, [catch_ref(0, 0)], b"\x02"), b"\x02") + b"\x1a",
+    42,
+    extra_types=[signature(results=b"\x7f" + nullable_exn)],
+)
+value("noexn-null-widens-block",
+      block(b"\xd0\x74", nullable_exn) + b"\xd1", 1)
+value(
+    "noexn-null-in-exception-payload",
+    block(try_table(b"\xd0\x74\x08\0", [catch(0, 0)], nullable_exn),
+          nullable_exn) + b"\xd1",
+    1, tag_parameters=nullable_exn,
+)
+for selector in (0, 1):
+    value(
+        f"br-table-exception-meet-{selector}",
+        block(block(b"\xd0\x74" + i32(selector) + b"\x0e\x01\0\x01",
+                    nullable_noexn), nullable_exn) + b"\xd1",
+        1,
+    )
+value(
+    "table-set-noexn-in-exn-table",
+    i32(0) + b"\xd0\x74\x26\0" + i32(0) + b"\x25\0\xd1",
+    1, tables=[b"\x69\0\x01"],
+)
+value(
+    "table-grow-noexn-in-exn-table",
+    b"\xd0\x74" + i32(1) + b"\xfc\x0f\0\x1a\xfc\x10\0",
+    2, tables=[b"\x69\0\x01"],
+)
+cases.append((
+    "native-call-noexn-argument-widens",
+    typed_functions([signature(nullable_exn, b"\x7f"), signature(results=b"\x7f")],
+                    [0, 1], [b"\x20\0\xd1", b"\xd0\x74\x10\0"]),
+    0, "i32.const 1", True,
+))
 
 with tempfile.TemporaryDirectory(prefix="wasmcert-handlers-") as directory:
     for name, binary, code, expected, execute in cases:

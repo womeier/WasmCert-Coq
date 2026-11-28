@@ -10,6 +10,161 @@ Set Implicit Arguments.
 Unset Strict Implicit.
 Unset Printing Implicit Defensive.
 
+(** Final Abstract_heap_sub and Ref_sub, restricted only by the exception
+    hierarchy, on the SHARED heap/reference descriptors. *)
+Inductive exception_heap_matches : heap_type -> heap_type -> Prop :=
+| ehm_exn : exception_heap_matches HT_exn HT_exn
+| ehm_noexn : exception_heap_matches HT_noexn HT_noexn
+| ehm_noexn_exn : exception_heap_matches HT_noexn HT_exn.
+
+Definition exception_reference_matches (r1 r2: reference_type) : Prop :=
+  exception_heap_matches (ref_heap r1) (ref_heap r2) /\
+  (ref_nullable r1 = false \/ ref_nullable r2 = true).
+
+Lemma exception_heap_subtyping_spec h1 h2 :
+  reflect (exception_heap_matches h1 h2) (exception_heap_subtyping h1 h2).
+Proof.
+  destruct h1, h2 => /=; constructor; try constructor;
+    by move => H; inversion H.
+Qed.
+
+Lemma exception_reference_subtyping_spec r1 r2 :
+  reflect (exception_reference_matches r1 r2)
+    (exception_reference_subtyping r1 r2).
+Proof.
+  apply: (iffP andP).
+  - move => [Hheap Hnullable]; split.
+    + by apply/exception_heap_subtyping_spec.
+    + move/orP: Hnullable => [Hnonnullable|Hnullable].
+      * left; by move/negP: Hnonnullable; case: (ref_nullable r1).
+      * by right.
+  - move => [Hheap [Hnonnullable|Hnullable]]; split;
+      try by apply/exception_heap_subtyping_spec.
+    + by rewrite Hnonnullable.
+    + by rewrite Hnullable orbT.
+Qed.
+
+Lemma exception_reference_subtyping_refl r :
+  exception_heap (ref_heap r) -> exception_reference_subtyping r r.
+Proof.
+  destruct r as [n h]; destruct h => //; by destruct n.
+Qed.
+
+Lemma reference_type_match_exception_spec C r1 r2 :
+  exception_heap (ref_heap r1) ->
+  reflect (exception_reference_matches r1 r2)
+    (reference_type_match C r1 r2).
+Proof.
+  move => Hkind.
+  rewrite /reference_type_match /reference_subtyping.
+  case Heq: (r1 == r2).
+  - move/eqP: Heq => <-.
+    rewrite (exception_reference_subtyping_refl Hkind).
+    constructor; apply/exception_reference_subtyping_spec.
+    by apply exception_reference_subtyping_refl.
+  - exact (exception_reference_subtyping_spec r1 r2).
+Qed.
+
+Lemma exception_reference_subtyping_domain r1 r2 :
+  exception_reference_subtyping r1 r2 ->
+  exception_heap (ref_heap r1) && exception_heap (ref_heap r2).
+Proof.
+  destruct r1 as [n1 h1], r2 as [n2 h2].
+  by destruct h1, h2 => /=; unfold exception_reference_subtyping => /=.
+Qed.
+
+Lemma exception_reference_subtyping_trans r1 r2 r3 :
+  exception_reference_subtyping r1 r2 ->
+  exception_reference_subtyping r2 r3 ->
+  exception_reference_subtyping r1 r3.
+Proof.
+  destruct r1 as [n1 h1], r2 as [n2 h2], r3 as [n3 h3].
+  unfold exception_reference_subtyping => /=.
+  move => H12 H23.
+  destruct h1, h2; simpl in H12 => //;
+    destruct h3; simpl in H23 => //; by destruct n1, n2, n3.
+Qed.
+
+Lemma reference_subtyping_trans r1 r2 r3 :
+  reference_subtyping r1 r2 ->
+  reference_subtyping r2 r3 ->
+  reference_subtyping r1 r3.
+Proof.
+  unfold reference_subtyping.
+  move/orP => [/eqP ->|H12]; first done.
+  move/orP => [/eqP <-|H23]; first by rewrite H12 orbT.
+  by rewrite (exception_reference_subtyping_trans H12 H23) orbT.
+Qed.
+
+Lemma value_subtyping_ref r1 r2 :
+  value_subtyping (T_ref r1) (T_ref r2) = reference_subtyping r1 r2.
+Proof.
+  have Heq: (T_ref r1 == T_ref r2) = (r1 == r2).
+  { apply/idP/idP => /eqP H; apply/eqP; by congruence. }
+  have Hbot: (T_ref r1 == T_bot) = false.
+  { apply Bool.not_true_is_false; move/eqP => H; discriminate H. }
+  by rewrite /value_subtyping /reference_subtyping Heq Hbot orbF.
+Qed.
+
+Lemma value_subtyping_ref_inv r t :
+  T_ref r <t: t ->
+  exists r', t = T_ref r' /\ reference_subtyping r r'.
+Proof.
+  destruct t => /=; try (by unfold value_subtyping; simpl).
+  rewrite value_subtyping_ref.
+  by move => H; eexists; split; eauto.
+Qed.
+
+Lemma reference_subtyping_from_exception r1 r2 :
+  exception_heap (ref_heap r1) ->
+  reference_subtyping r1 r2 ->
+  exception_heap (ref_heap r2).
+Proof.
+  move => Hkind /orP [/eqP <-|Hsub]; first exact Hkind.
+  by move/andP: (exception_reference_subtyping_domain Hsub) => [_ Htarget].
+Qed.
+
+Lemma reference_subtyping_to_exception r1 r2 :
+  exception_heap (ref_heap r2) ->
+  reference_subtyping r1 r2 ->
+  exception_heap (ref_heap r1).
+Proof.
+  move => Hkind /orP [/eqP ->|Hsub]; first exact Hkind.
+  by move/andP: (exception_reference_subtyping_domain Hsub) => [Hsource _].
+Qed.
+
+Lemma reference_subtyping_from_nonexception r1 r2 :
+  exception_heap (ref_heap r1) = false ->
+  reference_subtyping r1 r2 -> r1 = r2.
+Proof.
+  move => Hkind /orP [/eqP Heq|Hsub]; first exact Heq.
+  have Hdomain := exception_reference_subtyping_domain Hsub.
+  by rewrite Hkind in Hdomain.
+Qed.
+
+Lemma reference_subtyping_to_nonexception r1 r2 :
+  exception_heap (ref_heap r2) = false ->
+  reference_subtyping r1 r2 -> r1 = r2.
+Proof.
+  move => Hkind /orP [/eqP Heq|Hsub]; first exact Heq.
+  have Hdomain := exception_reference_subtyping_domain Hsub.
+  by rewrite Hkind andbF in Hdomain.
+Qed.
+
+Lemma value_subtyping_bot t : T_bot <t: t.
+Proof. by rewrite /value_subtyping eq_refl orbT. Qed.
+
+Lemma value_subtyping_cases t1 t2 :
+  t1 <t: t2 ->
+  t1 = t2 \/ t1 = T_bot \/
+  exists r1 r2, t1 = T_ref r1 /\ t2 = T_ref r2 /\
+    exception_reference_subtyping r1 r2.
+Proof.
+  move/orP => [/orP [/eqP Heq|/eqP Hbot]|Hreference]; first by left.
+  - by right; left.
+  - right; right; destruct t1, t2 => //; by do 2 eexists; eauto.
+Qed.
+
 Lemma value_subtyping_eq: forall t,
     t <t: t.
 Proof.
@@ -24,8 +179,14 @@ Lemma value_subtyping_trans: forall t1 t2 t3,
     t2 <t: t3 ->
     t1 <t: t3.
 Proof.
-  unfold value_subtyping.
-  move => t1 t2 t3 Hs1 Hs2; remove_bools_options; subst; rewrite eq_refl; by lias.
+  move => t1 t2 t3 H12 H23.
+  move/orP: H12 => [/orP [/eqP ->|/eqP ->]|Href]; first done.
+  - by rewrite /value_subtyping eq_refl orbT.
+  - destruct t1, t2 => //.
+    destruct (value_subtyping_ref_inv H23) as [r3 [-> Hr3]].
+    rewrite value_subtyping_ref /reference_subtyping.
+    move/orP: Hr3 => [/eqP <-|Hr3]; first by rewrite Href orbT.
+    by rewrite (exception_reference_subtyping_trans Href Hr3) orbT.
 Qed.
 
 Lemma values_subtyping_eq: forall ts,
@@ -231,10 +392,15 @@ Proof.
 Qed.
 
 Lemma ref_subtyping: forall tn t,
+    exception_heap (ref_heap tn) = false ->
     (T_ref tn <t: t) ->
     t = T_ref tn.
 Proof.
-  by intros; unfold value_subtyping in *; remove_bools_options.
+  move => tn t Hlegacy Hsub.
+  destruct (value_subtyping_ref_inv Hsub) as [r [-> Href]].
+  move/orP: Href => [/eqP ->|Hexn]; first reflexivity.
+  have Hdom := exception_reference_subtyping_domain Hexn.
+  by rewrite Hlegacy in Hdom.
 Qed.
 
 Lemma value_values_subtyping: forall t1 t2,
@@ -395,15 +561,27 @@ Ltac resolve_subtyping :=
   | |- (Tf nil nil <ti: Tf ?ts1 ?ts2) =>
     apply instr_subtyping_empty_impl
   | H: Tf nil nil <ti: Tf ?ts1 ?ts2 |- _ =>
-    apply instr_subtyping_empty_impl' in H
+     apply instr_subtyping_empty_impl' in H
+  | |- Tf nil ?ts1 <ti: Tf nil ?ts2 =>
+      apply instr_subtyping_empty1_impl; rewrite cat0s
+  | |- Tf ?ins ?outs1 <ti: Tf ?ins ?outs2 =>
+      apply instr_subtyping_weaken2 with (ty2 := outs1);
+        first apply instr_subtyping_eq
 
   (* Resolving top-level types. Need to be changed when a supremum type is introduced in future proposals *)
+  | H: is_true (reference_subtyping ?r1 ?r2) |-
+      context [T_ref ?r1 <t: T_ref ?r2] =>
+      rewrite value_subtyping_ref H => /=
   | H: is_true (T_num ?t <t: ?t') |- _ =>
     apply num_subtyping in H => //; subst
   | H: is_true (T_vec ?t <t: ?t') |- _ =>
     apply vec_subtyping in H => //; subst
   | H: is_true (T_ref ?t <t: ?t') |- _ =>
-    apply ref_subtyping in H => //; subst
+    let r := fresh "reference" in
+    let Heq := fresh "Hreference" in
+    let Hsub := fresh "Hreference_sub" in
+    destruct (value_subtyping_ref_inv H) as [r [Heq Hsub]];
+      clear H; try subst t'
 
   | H: T_num ?t1 = T_num ?t2 |- _ =>
     inversion H; subst; clear H
@@ -430,6 +608,8 @@ Ltac resolve_subtyping :=
       rewrite (values_subtyping_drop n H) => //
                         
   (* singleton list subtyping *)
+  | |- context [ [::?t1] <ts: [::?t2] ] =>
+      rewrite -value_values_subtyping
   | H: is_true ([::?t1] <ts: [::?t2]) |- _ =>
       rewrite - value_values_subtyping in H
       
@@ -791,8 +971,7 @@ Proof.
   move => s v t Hvt.
   unfold value_typing in Hvt; remove_bools_options.
   simpl in *; remove_bools_options.
-  apply ref_subtyping in Hvt; subst.
-  by eexists.
+  by destruct (value_subtyping_ref_inv Hvt) as [targetref [-> _]]; eexists.
 Qed.
 
 Lemma value_num_principal_typing: forall s v,
@@ -906,6 +1085,55 @@ Ltac total_destruction :=
     end.
 
 Section Lattice_properties.
+
+  Lemma t_inf_self t : t_inf t t = t.
+  Proof. by rewrite /t_inf eq_refl. Qed.
+
+  Lemma t_sup_self t : t_sup t t = Some t.
+  Proof. by rewrite /t_sup eq_refl; case: (t == T_bot). Qed.
+
+  Lemma t_inf_ref_strict r1 r2 r3 :
+    reference_subtyping r3 r1 ->
+    reference_subtyping r3 r2 ->
+    T_ref r3 <t: t_inf (T_ref r1) (T_ref r2).
+  Proof.
+    move => H31 H32.
+    case Hkind: (exception_heap (ref_heap r3)).
+    - have Hd1 := reference_subtyping_from_exception Hkind H31.
+      have Hd2 := reference_subtyping_from_exception Hkind H32.
+      destruct r1 as [b1 h1], r2 as [b2 h2], r3 as [b3 h3].
+      simpl in Hkind, Hd1, Hd2.
+      destruct h1; simpl in Hd1 => //;
+        destruct h2; simpl in Hd2 => //;
+        destruct h3; simpl in Hkind => //;
+        destruct b1, b2, b3; vm_compute in *; congruence.
+    - have Hr1 := reference_subtyping_from_nonexception Hkind H31.
+      have Hr2 := reference_subtyping_from_nonexception Hkind H32.
+      rewrite -Hr1 -Hr2.
+      rewrite t_inf_self; apply value_subtyping_eq.
+  Qed.
+
+  Lemma t_sup_ref_strict r1 r2 r3 :
+    reference_subtyping r1 r3 ->
+    reference_subtyping r2 r3 ->
+    exists sup, t_sup (T_ref r1) (T_ref r2) = Some sup /\
+      sup <t: T_ref r3.
+  Proof.
+    move => H13 H23.
+    case Hkind: (exception_heap (ref_heap r3)).
+    - have Hd1 := reference_subtyping_to_exception Hkind H13.
+      have Hd2 := reference_subtyping_to_exception Hkind H23.
+      destruct r1 as [b1 h1], r2 as [b2 h2], r3 as [b3 h3].
+      simpl in Hkind, Hd1, Hd2.
+      destruct h1; simpl in Hd1 => //;
+        destruct h2; simpl in Hd2 => //;
+        destruct h3; simpl in Hkind => //;
+        destruct b1, b2, b3; vm_compute in *; try discriminate;
+        by eexists; split.
+    - have -> := reference_subtyping_to_nonexception Hkind H13.
+      have -> := reference_subtyping_to_nonexception Hkind H23.
+      exists (T_ref r3); split; [apply t_sup_self | apply value_subtyping_eq].
+  Qed.
   
   (* Properties of inf and sup *)
   Lemma t_inf_comm t1 t2:
@@ -914,7 +1142,9 @@ Section Lattice_properties.
     unfold t_inf.
     destruct (t1 == t2) eqn:E.
     - move/eqP in E; subst. by rewrite eq_refl.
-    - by rewrite eq_sym E.
+    - rewrite eq_sym E.
+      destruct t1 as [n1|v1|[b1 h1]|], t2 as [n2|v2|[b2 h2]|] => //.
+      by destruct h1, h2, b1, b2.
   Qed.
   
   Lemma t_inf_sub t1 t2 tinf:
@@ -924,7 +1154,9 @@ Section Lattice_properties.
     move => ->. unfold t_inf.
     destruct (t1 == t2).
     - apply value_subtyping_eq.
-    - by rewrite /value_subtyping eq_refl orbT.
+    - destruct t1 as [n1|v1|[b1 h1]|], t2 as [n2|v2|[b2 h2]|];
+        try apply value_subtyping_bot.
+      by destruct h1, h2, b1, b2.
   Qed.
 
   Lemma t_inf_strict t1 t2 t3:
@@ -932,9 +1164,15 @@ Section Lattice_properties.
     t3 <t: t2 ->
     t3 <t: t_inf t1 t2.
   Proof.
-    unfold value_subtyping.
-    move => H1 H2; remove_bools_options; subst;
-      unfold t_inf; by rewrite ?eq_refl ?orbT.
+    move => H1 H2.
+    destruct t3 as [n|v|r|]; last apply value_subtyping_bot.
+    - apply num_subtyping in H1, H2; subst.
+      rewrite t_inf_self; apply value_subtyping_eq.
+    - apply vec_subtyping in H1, H2; subst.
+      rewrite t_inf_self; apply value_subtyping_eq.
+    - destruct (value_subtyping_ref_inv H1) as [r1 [-> Hr1]].
+      destruct (value_subtyping_ref_inv H2) as [r2 [-> Hr2]].
+      by apply t_inf_ref_strict.
   Qed.
   
   Lemma t_sup_comm t1 t2:
@@ -947,16 +1185,22 @@ Section Lattice_properties.
     - move/eqP in E2; subst. reflexivity.
     - destruct (t1 == t2) eqn:E.
       + move/eqP in E; subst. by rewrite eq_refl.
-      + by rewrite eq_sym E.
+      + rewrite eq_sym E.
+        destruct t1 as [n1|v1|[b1 h1]|], t2 as [n2|v2|[b2 h2]|] => //.
+        by destruct h1, h2, b1, b2.
   Qed.
   
   Lemma t_sup_sub t1 t2 tsup:
     t_sup t1 t2 = Some tsup ->
     t1 <t: tsup.
   Proof.
-    unfold t_sup; move => H; remove_bools_options; subst.
-    all: unfold value_subtyping; rewrite ?eq_refl ?orTb; try done.
-    by rewrite Hif orbT.
+    unfold t_sup; move => H.
+    case E1: (t1 == T_bot) in H; first by move/eqP: E1 => ->; injection H as <-; apply value_subtyping_bot.
+    case E2: (t2 == T_bot) in H; first by injection H as <-; apply value_subtyping_eq.
+    case E: (t1 == t2) in H; first by injection H as <-; apply value_subtyping_eq.
+    destruct t1 as [n1|v1|[b1 h1]|], t2 as [n2|v2|[b2 h2]|] => //.
+    destruct h1, h2; simpl in H => //;
+      destruct b1, b2; injection H as <-; reflexivity.
   Qed.
 
   Lemma t_sup_strict t1 t2 t3:
@@ -965,19 +1209,26 @@ Section Lattice_properties.
     exists tsup, t_sup t1 t2 = Some tsup /\
     tsup <t: t3.
   Proof.
-    unfold value_subtyping.
-    move/orP => [/eqP E1 | /eqP E1];
-      move/orP => [/eqP E2 | /eqP E2]; subst t1; subst t2.
-    - exists t3. split; last by rewrite eq_refl.
-      unfold t_sup. rewrite eq_refl.
-      destruct (t3 == T_bot) eqn:E; last reflexivity.
-      by move/eqP in E; subst.
-    - exists t3. split; last by rewrite eq_refl.
-      unfold t_sup. rewrite eq_refl.
-      destruct (t3 == T_bot) eqn:E; last reflexivity.
-      by move/eqP in E; subst.
-    - exists t3. split; [by rewrite /t_sup eq_refl | by rewrite eq_refl].
-    - exists T_bot. split; [by rewrite /t_sup eq_refl | by rewrite eq_refl orbT].
+    move => H1 H2.
+    case E1: (t1 == T_bot).
+    - move/eqP: E1 => ->; exists t2; split; last exact H2.
+      reflexivity.
+    - case E2: (t2 == T_bot).
+      + move/eqP: E2 => ->; exists t1; split; last exact H1.
+        by rewrite /t_sup E1 eq_refl.
+      + destruct (value_subtyping_cases H1) as [->|[Hbot|[r1 [r3 [-> [-> Hr1]]]]]].
+        * destruct (value_subtyping_cases H2) as [->|[Hbot|[r2 [r3 [-> [Heq Hr2]]]]]].
+          -- exists t3; split; [apply t_sup_self | apply value_subtyping_eq].
+          -- by subst t2; rewrite eq_refl in E2.
+          -- subst t3; apply t_sup_ref_strict; last by rewrite /reference_subtyping Hr2 orbT.
+             by rewrite /reference_subtyping eq_refl.
+        * by subst t1; rewrite eq_refl in E1.
+        * destruct (value_subtyping_cases H2) as [->|[Hbot|[r2 [r3' [-> [Heq Hr2]]]]]].
+          -- apply t_sup_ref_strict; first by rewrite /reference_subtyping Hr1 orbT.
+             by rewrite /reference_subtyping eq_refl.
+          -- by subst t2; rewrite eq_refl in E2.
+          -- injection Heq as <-; apply t_sup_ref_strict;
+               by rewrite /reference_subtyping ?Hr1 ?Hr2 orbT.
   Qed.
 
   Lemma ts_inf_length ts1 ts2 tsinf:

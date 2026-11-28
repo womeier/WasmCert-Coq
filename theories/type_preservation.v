@@ -2438,8 +2438,11 @@ derived from the two transitive pairs on the suffixes. Stated as an individual l
     by eapply ety_raise; eauto.
   - change (e_typing s (upd_local_label_return C' tlocs lab ret)
       ([::AI_ref_exn a] ++ [::AI_basic (BI_br l)]) (Tf nil extr)).
-    eapply ety_composition.
-    + by eapply ety_ref_exn; eauto.
+    eapply ety_composition with (t2s := [::T_ref reference]).
+    + eapply ety_subtyping; first by eapply ety_ref_exn; eauto.
+      apply instr_subtyping_weaken2 with
+        (ty2 := [::T_ref (Ref_type false HT_exn)]); first apply instr_subtyping_eq.
+      by rewrite -value_values_subtyping value_subtyping_ref.
     + apply ety_a with (bes := [::BI_br l]).
       by apply bet_br with (t1s := nil).
 Qed.

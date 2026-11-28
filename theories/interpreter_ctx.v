@@ -1775,7 +1775,7 @@ the condition that all values should live in the operand stack. *)
           eapply all_projection in Hif1; eauto.
           unfold value_typing in Hif1; simpl in *.
           simplify_multieq.
-          apply ref_subtyping in Hif1.
+          apply ref_subtyping in Hif1; last reflexivity.
           by rewrite Hconjl1 in Hif1.
         * resolve_invalid_typing.
           unfold_frame_type Hftype.
@@ -1786,8 +1786,7 @@ the condition that all values should live in the operand stack. *)
           unfold value_typing in Hif1; simpl in *.
           remove_bools_options.
           simplify_multieq.
-          apply ref_subtyping in Hif1.
-          by rewrite Hconjl1 in Hif1.
+          rewrite Hconjl1 in Hif1; discriminate Hif1.
       (* None *)
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_trap)), d>> => //.
         resolve_reduce_ctx vs0 es0.
@@ -1850,7 +1849,7 @@ the condition that all values should live in the operand stack. *)
           eapply all_projection in Hif1; eauto.
           unfold value_typing in Hif1; simpl in *.
           simplify_multieq.
-          apply ref_subtyping in Hif1.
+          apply ref_subtyping in Hif1; last reflexivity.
           by rewrite Hconjl1 in Hif1.
         * resolve_invalid_typing.
           unfold_frame_type Hftype.
@@ -1861,8 +1860,7 @@ the condition that all values should live in the operand stack. *)
           unfold value_typing in Hif1; simpl in *.
           remove_bools_options.
           simplify_multieq.
-          apply ref_subtyping in Hif1.
-          by rewrite Hconjl1 in Hif1.
+          rewrite Hconjl1 in Hif1; discriminate Hif1.
       (* None *)
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_trap)), d>> => //.
         resolve_reduce_ctx vs0 es0.
@@ -2023,12 +2021,14 @@ the condition that all values should live in the operand stack. *)
         resolve_invalid_value.
         unfold is_exception_reference in *; simplify_multieq.
         unfold value_typing in H; simpl in H; remove_bools_options.
-        apply ref_subtyping in H; injection H as Hr; rewrite Hr in Hconjr; discriminate Hconjr.
+        apply ref_subtyping in H; last reflexivity.
+        injection H as Hr; rewrite Hr in Hconjr; discriminate Hconjr.
       + resolve_invalid_typing.
         resolve_invalid_value.
         unfold is_exception_reference in *; simplify_multieq.
         unfold value_typing in H; simpl in H; remove_bools_options.
-        apply ref_subtyping in H; injection H as Hr; rewrite Hr in Hconjr; discriminate Hconjr.
+        apply ref_subtyping in H; last reflexivity.
+        injection H as Hr; rewrite Hr in Hconjr; discriminate Hconjr.
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_raise a)), d>> => //.
         resolve_reduce_ctx vs0 es0.
         by apply r_simple, rs_throw_ref_exn.

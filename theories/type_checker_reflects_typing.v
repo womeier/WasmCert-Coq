@@ -926,6 +926,9 @@ Proof.
       unfold ct_subtyping, c_types_agree in *; simpl in *; simplify_tc_goal;
       try destruct t1; try destruct t1'; simplify_tc_goal;
       try (by exists <<nil, true>>; split => //=).
+    all: have Hkind := reference_subtyping_to_exception Hif Hreference_sub.
+    all: change (is_true (is_exception_reference r0)) in Hkind.
+    all: rewrite Hkind; exists <<nil, true>>; by split.
 Qed.
 
 Lemma check_subtyping: forall C es ct1 ct1' ct2,
@@ -1412,11 +1415,16 @@ Proof.
     (* Replace_vec *)
     + by resolve_tc_be_typing.
     (* Ref_null *)
-    + by resolve_tc_be_typing.
+    + apply bet_weakening_empty_1.
+      eapply bet_subtyping; first by apply bet_ref_null.
+      by resolve_subtyping.
     (* Ref_is_null *)
     + by apply type_update_ref_is_null_bet with (cts' := cts').
     (* Ref_func *)
     + move/inP in Hif.
+      have Href := reference_subtyping_from_nonexception
+        (r1 := T_funcref) erefl Hreference_sub.
+      subst reference.
       apply bet_weakening_empty_1, bet_ref_func with (t := (rev_tf f0)) => //.
       apply nth_error_map in Hoption as [ft [? <-]].
       by destruct ft; unfold rev_tf; repeat rewrite revK.
@@ -1442,7 +1450,10 @@ Proof.
     (* Global_get *)
     + by resolve_tc_be_typing.
     (* Table_get *)
-    + by resolve_tc_be_typing.
+    + apply bet_weakening.
+      unfold rev => /=.
+      eapply bet_subtyping; first (by econstructor; eauto).
+      by resolve_subtyping.
     (* Table_set *)
     + by resolve_tc_be_typing.
     (* Table_size *)
@@ -1608,7 +1619,9 @@ Proof.
       by resolve_tc_be_typing.
     (* Call_indirect *)
     + destruct f.
-      move/eqP in Hif.
+      have Hif_eq := reference_subtyping_to_nonexception
+        (r2 := T_funcref) erefl Hif.
+      clear Hif; rename Hif_eq into Hif.
       apply nth_error_map in Hoption0 as [ts [Hnth Hmap]].
       destruct ts; simpl in Hmap; inversion Hmap; subst; clear Hmap.
       eapply type_update_agree_subtyping in Hupdate; eauto.
@@ -1632,7 +1645,9 @@ Proof.
       by eauto.
     (* Return_call_indirect *)      
     + destruct f as [tn0 tm0].
-      move/eqP in Hif.
+      have Hif_eq := reference_subtyping_to_nonexception
+        (r2 := T_funcref) erefl Hif.
+      clear Hif; rename Hif_eq into Hif.
       remove_bools_options.
       move/eqP in Hif0; subst.
       eapply type_update_top_agree_subtyping in Hupdate; eauto.
