@@ -57,7 +57,7 @@
  (alias runtest)
  (deps section_framing_binary.wast)
  (action
-  (bash "set -o pipefail; %{exe:../src/wasm_coq_interpreter.exe} --wast %{dep:section_framing_binary.wast} | grep 'Result: 30/30 '")))
+  (bash "set -o pipefail; %{exe:../src/wasm_coq_interpreter.exe} --wast %{dep:section_framing_binary.wast} | grep 'Result: 40/40 '")))
 
 (rule
  (alias runtest)

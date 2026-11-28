@@ -28,6 +28,16 @@ Lemma section_payload_cannot_include_next_section :
     (empty_module_header ++ (x01 :: x04 :: x00 :: x03 :: x01 :: x00 :: nil)) = None.
 Proof. vm_compute. reflexivity. Qed.
 
+Lemma custom_section_missing_positive_payload_rejected :
+  run_parse_module (empty_module_header ++ (x00 :: x03 :: x00 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma custom_section_exact_empty_payload_accepted :
+  option_map (fun _ => true)
+    (run_parse_module (empty_module_header ++ (x00 :: x01 :: x00 :: nil))) =
+    Some true.
+Proof. vm_compute. reflexivity. Qed.
+
 Lemma block_index_64_uses_signed_encoding :
   binary_of_block_type (BT_id 64%N) = xc0 :: x00 :: nil.
 Proof. vm_compute. reflexivity. Qed.

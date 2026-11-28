@@ -1082,10 +1082,13 @@ Definition parse_customsec {n} : byte_parser (name * list byte) n :=
     (fun '(sz_sec, (name, sz_name, obs)) =>
         if N.ltb sz_sec sz_name then None
         else
-          Some (match obs with
-          | Some bs => (name, bs)
-          | None => (name, nil)
-          end)
+           match obs with
+           | Some bs => Some (name, bs)
+           | None =>
+               (* Optional failure is only the zero-byte case.  A positive
+                  declared payload must not silently become empty on EOF. *)
+               if N.eqb sz_sec sz_name then Some (name, nil) else None
+           end
     )
     (parse_u32_as_N &>>=
     (fun sz_sec =>

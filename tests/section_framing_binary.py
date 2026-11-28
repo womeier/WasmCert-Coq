@@ -28,6 +28,20 @@ for sections in [
     b"\x03\x02\x01\x00",          # missing corresponding code
 ]:
     commands.append(malformed(HEADER + sections))
-assert len(commands) == 30
+for wrong_size in [2, 3, 4, 5]:
+    commands.append(malformed(HEADER + bytes([0, wrong_size, 0])))
+for custom in [
+    b"\x00\x01\x00",           # empty name, no payload
+    b"\x00\x05\x03foo*",       # name plus one raw payload byte
+    b"\x00\x81\x00\x00",       # legal padded section-size header
+]:
+    commands.append(f"(module binary {quoted(HEADER + custom)})")
+for custom in [
+    b"\x00\x00\x00",           # name does not fit declared zero size
+    b"\x00\x02\x02a",          # truncated name
+    b"\x00\x03\x00\x01\x01\x00",  # trailing incomplete custom section
+]:
+    commands.append(malformed(HEADER + custom))
+assert len(commands) == 40
 with open(sys.argv[1], "w") as output:
     output.write("\n".join(commands) + "\n")
