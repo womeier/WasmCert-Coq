@@ -24,6 +24,11 @@
  (modules multi_memory_array_extracted)
  (libraries wasmcert_runtime parray zarith))
 
+(test
+ (name multi_memory_store_extracted)
+ (modules multi_memory_store_extracted)
+ (libraries wasmcert_runtime parray zarith))
+
 (rule
  (alias runtest)
  (deps run_wast_test.sh ../run_wast.sh)

@@ -102,6 +102,41 @@ Proof.
   now apply smem_replace_address_observation with (old := old).
 Qed.
 
+Theorem smem_grow_address_effect : forall s inst x delta s' previous,
+  smem_grow s inst x delta = Some (s', previous) ->
+  exists addr old new,
+    lookup_N inst.(inst_mems) x = Some addr /\
+    lookup_N s.(s_mems) addr = Some old /\
+    operations.mem_grow old delta = Some new /\
+    previous = mem_size old /\
+    s' = upd_s_mem s (set_nth new s.(s_mems) (N.to_nat addr) new) /\
+    forall y, smem s' inst y =
+      match lookup_N inst.(inst_mems) y with
+      | Some other => if N.eqb other addr then Some new else smem s inst y
+      | None => None
+      end.
+Proof.
+  intros s inst x delta s' previous H. unfold smem_grow in H.
+  destruct (lookup_N (inst_mems inst) x) as [addr|] eqn:Hx; [|discriminate].
+  destruct (lookup_N (s_mems s) addr) as [old|] eqn:Hold; [|discriminate].
+  destruct (operations.mem_grow old delta) as [new|] eqn:Hnew; [|discriminate].
+  inversion H; subst s' previous.
+  exists addr, old, new. repeat split; try assumption; try reflexivity.
+  now apply smem_replace_address_observation with (old := old).
+Qed.
+
+Theorem smem_missing_store_address : forall s inst x addr,
+  lookup_N inst.(inst_mems) x = Some addr ->
+  lookup_N s.(s_mems) addr = None ->
+  smem s inst x = None /\
+  (forall delta, smem_grow s inst x delta = None) /\
+  (forall n off v tp, smem_store_packed s inst x n off v tp = None).
+Proof.
+  intros s inst x addr Hinst Hstore.
+  unfold smem, smem_grow, smem_store_packed.
+  rewrite Hinst Hstore. repeat split; reflexivity.
+Qed.
+
 End Store.
 
 Definition native63_nonnegative (n: N) := (n <= 4611686018427387903)%N.
