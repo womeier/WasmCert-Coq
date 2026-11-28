@@ -1,6 +1,7 @@
 (** Miscellaneous properties about Wasm operations **)
 
 From Wasm Require Export datatypes_properties operations typing opsem common.
+From Wasm Require Import gc_type_context gc_type_context_properties.
 From mathcomp Require Import ssreflect ssrfun ssrnat ssrbool eqtype seq.
 From Stdlib Require Import Bool Program NArith ZArith Wf_nat.
 
@@ -320,7 +321,7 @@ Proof.
   split.
   - case v => //=; move => v' <- => //=.
     by case v' => //=.
-  - case e => //=; move => e'. 2,3: by move => [<-].
+  - case e => //=; move => e'. 2,3,4,5: by move => [<-].
     case e' => //=; by move => ? [<-] => //.
 Qed.
 
@@ -337,7 +338,7 @@ Lemma ve_inj: forall v1 v2,
     v1 = v2.
 Proof.
   move => v1 v2.
-  destruct v1 as [ | | [| |]]; destruct v2 as [ | | [| |]] => //=; by move => [<-].
+  destruct v1 as [ | | [| | | |]]; destruct v2 as [ | | [| | | |]] => //=; by move => [<-].
 Qed.
 
 Lemma v_to_e_inj: forall l1 l2,
@@ -1318,10 +1319,13 @@ Lemma default_value_typing: forall s t v,
     value_typing s v t.
 Proof.
   move => s t v Hval.
-  destruct t, v => //; simpl in *; try inversion Hval; subst => //=.
-  - by destruct n.
-  - by destruct v0.
-  - by destruct r.
+  destruct t as [n|w|[b h]|]; simpl in Hval.
+  - destruct n; inversion Hval; subst; by [].
+  - destruct w; inversion Hval; subst; by [].
+  - destruct b; simpl in Hval; try discriminate.
+    inversion Hval; subst.
+    by unfold value_typing; simpl; rewrite /value_subtyping eq_refl.
+  - discriminate.
 Qed.
 
 Lemma default_values_typing: forall s ts vs,
@@ -1448,7 +1452,8 @@ Lemma not_reduce_simple_nil : forall es', ~ reduce_simple [::] es'.
 Proof.
   move => ? Hcontra.
   inversion Hcontra; subst.
-  destruct lh as [vs | ? vs] => //; by destruct vs => //.
+  all: try (by eapply cat_cons_not_nil; eauto).
+  all: destruct lh as [vs | ? vs | ? vs] => //; by destruct vs => //.
 Qed.
 
 (* further list operations *)
@@ -2036,6 +2041,20 @@ Proof.
   move => Hext1 Hext2.
   unfold store_extension, operations.store_extension in *.
   remove_bools_options.
+  apply/andP; split; last first.
+  { eapply component_extension_trans; eauto.
+    move => x y z Hxy Hyz.
+    apply gc_type_context_properties.defined_type_eqb_correct in Hxy, Hyz.
+    subst; apply gc_type_context_properties.defined_type_eqb_correct; reflexivity. }
+  apply/andP; split; last by eapply gc_type_context_properties.canonical_registry_prefixb_trans; eauto.
+  apply/andP; split; last first.
+  { eapply component_extension_trans; eauto.
+    move => x y z /eqP -> /eqP ->; by rewrite eq_refl.
+  }
+  apply/andP; split; last first.
+  { eapply component_extension_trans; eauto.
+    move => x y z /eqP -> /eqP ->; by rewrite eq_refl.
+  }
   apply/andP; split; last by eapply component_extension_trans; eauto; apply data_extension_trans.
   apply/andP; split; last by eapply component_extension_trans; eauto; apply elem_extension_trans.
   apply/andP; split; last by eapply component_extension_trans; eauto; apply global_extension_trans.
@@ -2048,6 +2067,7 @@ Lemma store_extension_same: forall s,
     store_extension s s.
 Proof.
   move => s. unfold store_extension.
+  rewrite gc_type_context_properties.canonical_registry_prefixb_refl andbT.
   repeat (apply/andP; split => //); rewrite length_is_size take_size.
   + by apply all2_func_extension_same.
   + by apply all2_table_extension_same.
@@ -2055,6 +2075,10 @@ Proof.
   + by apply all2_global_extension_same.
   + by apply all2_elem_extension_same.
   + by apply all2_data_extension_same.
+  + apply reflexive_all2_same; move => x; by rewrite eq_refl.
+  + apply reflexive_all2_same; move => x; by rewrite eq_refl.
+  + apply reflexive_all2_same; move => x.
+    by apply gc_type_context_properties.defined_type_eqb_correct.
 Qed.
 
 Lemma component_extension_lookup {T: Type} (l1 l2: list T) f n x:
@@ -2073,6 +2097,62 @@ Proof.
   by exists y.
 Qed.
 
+Lemma store_extension_type_groups s s' :
+  store_extension s s' -> exists suffix, s'.(s_types) = s.(s_types) ++ suffix.
+Proof.
+  unfold store_extension. move/andP => [/andP [_ Prefix] _].
+  now apply canonical_registry_prefixb_correct.
+Qed.
+
+Lemma store_extension_lookup_tag_id s s' address id :
+  store_extension s s' ->
+  lookup_N s.(s_tag_ids) address = Some id ->
+  lookup_N s'.(s_tag_ids) address = Some id.
+Proof.
+  unfold store_extension; move/andP => [_ Ids] Lookup.
+  destruct (component_extension_lookup Ids Lookup) as [other [Found Same]].
+  apply gc_type_context_properties.defined_type_eqb_correct in Same.
+  by subst other.
+Qed.
+
+Lemma store_typing_tag_ids_length s :
+  store_typing s ->
+  List.length s.(s_tag_ids) = List.length s.(s_tags).
+Proof.
+  unfold store_typing; destruct s => /=.
+  tauto.
+Qed.
+
+Lemma store_extension_host_identity s s' source :
+  store_extension s s' ->
+  canonical_function_identityb s.(s_types) source = true ->
+  canonical_function_identityb s'.(s_types) source = true.
+Proof.
+  intros Extends Identity.
+  destruct (store_extension_type_groups Extends) as [suffix Registry].
+  rewrite Registry.
+  exact (canonical_function_identityb_extension _ _ _ Identity).
+Qed.
+
+Lemma inst_typing_identities s inst C :
+  inst_typing s inst = Some C ->
+  gc_declaration_typing.source_type_identitiesb s.(s_types)
+    inst.(inst_defined_types) inst.(inst_types) inst.(inst_defined_types) = true.
+Proof.
+  unfold inst_typing. destruct inst. simpl.
+  destruct (all _ _ && _) eqn:Checked; [|discriminate].
+  move/andP in Checked. tauto.
+Qed.
+
+Lemma inst_typing_functypes_valid s inst C :
+  inst_typing s inst = Some C ->
+  all source_subtype_valid inst.(inst_types) = true.
+Proof.
+  unfold inst_typing. destruct inst. simpl.
+  destruct (all _ _ && _) eqn:Checked; [|discriminate].
+  move/andP in Checked. tauto.
+Qed.
+
 Definition component_extension_extend {T: Type} (l1 l2 l3: list T) f:
   l2 = l1 ++ l3 ->
   (forall l, all2 f l l) ->
@@ -2082,6 +2162,51 @@ Proof.
   unfold component_extension.
   apply/andP; split; first by rewrite List.length_app; lias.
   by rewrite length_is_size take_size_cat.
+Qed.
+
+Lemma store_extension_lookup_tag: forall s s' n ps,
+    store_extension s s' ->
+    lookup_N (s_tags s) n = Some ps ->
+    lookup_N (s_tags s') n = Some ps.
+Proof.
+  move => s s' n ps Hext Hlookup.
+  unfold store_extension in Hext.
+  move/andP in Hext; destruct Hext as [Hext _].
+  move/andP in Hext; destruct Hext as [Hext _].
+  move/andP in Hext; destruct Hext as [Hext _].
+  move/andP in Hext; destruct Hext as [_ Htags].
+  destruct (component_extension_lookup Htags Hlookup) as [ps' [Hlookup' Heq]].
+  move/eqP in Heq; by subst ps'.
+Qed.
+
+Lemma store_extension_lookup_exn: forall s s' n e,
+    store_extension s s' ->
+    lookup_N (s_exns s) n = Some e ->
+    lookup_N (s_exns s') n = Some e.
+Proof.
+  move => s s' n e Hext Hlookup.
+  unfold store_extension in Hext.
+  move/andP in Hext; destruct Hext as [Hext _].
+  move/andP in Hext; destruct Hext as [Hext _].
+  move/andP in Hext; destruct Hext as [_ Hexns].
+  destruct (component_extension_lookup Hexns Hlookup) as [e' [Hlookup' Heq]].
+  move/eqP in Heq; by subst e'.
+Qed.
+
+Lemma tag_parameters_transport (old_tags new_tags : list result_type) addresses parameters :
+  (forall a ps, lookup_N old_tags a = Some ps ->
+                lookup_N new_tags a = Some ps) ->
+  those (map (lookup_N old_tags) addresses) = Some parameters ->
+  those (map (lookup_N new_tags) addresses) = Some parameters.
+Proof.
+  move => Lookup.
+  rewrite -!those_those0.
+  move: parameters; induction addresses as [|a addresses IH]; move => ps => /=.
+  - by move => [<-].
+  - destruct (lookup_N old_tags a) as [p|] eqn:Head => //.
+    destruct (those0 (map (lookup_N old_tags) addresses)) as [tail|] eqn:Tail => //.
+    move => [<-].
+    by rewrite (Lookup _ _ Head) (IH _ (Logic.eq_refl _)).
 Qed.
 
 Lemma store_extension_lookup_func: forall s s' n cl,
@@ -2156,12 +2281,24 @@ Qed.
 (** Lookups connecting module instance, store, and typing context *)
 Lemma inst_typing_type_lookup: forall s inst C n,
     inst_typing s inst = Some C ->
-    lookup_N inst.(inst_types) n = lookup_N C.(tc_types) n.
+    lookup_function_type inst.(inst_types) n = lookup_function_type C.(tc_types) n.
 Proof.
   move => s inst C n Hit.
   unfold inst_typing in Hit.
   destruct inst; remove_bools_options; simpl in *.
   by eauto.
+Qed.
+
+Lemma inst_typing_tag_lookup: forall s inst C n a,
+    inst_typing s inst = Some C ->
+    lookup_N inst.(inst_tags) n = Some a ->
+    exists ps, lookup_N s.(s_tags) a = Some ps /\
+               lookup_N C.(tc_tags) n = Some ps.
+Proof.
+  move => s inst C n a Hinst Hnth.
+  unfold inst_typing in Hinst.
+  destruct inst; remove_bools_options; simpl in *.
+  by eapply those_map_lookup in Hoption5; eauto.
 Qed.
 
 Lemma inst_typing_func_lookup: forall s inst C n x,
@@ -2356,7 +2493,7 @@ Lemma store_typing_func_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [Hf _]; simpl in *.
+  destruct Hst as [_ [Hf _]]; simpl in *.
   by eapply Forall_lookup in Hf; eauto.
 Qed.
 
@@ -2367,7 +2504,7 @@ Lemma store_typing_table_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [Hf [Ht _]]; simpl in *.
+  destruct Hst as [_ [Hf [Ht _]]]; simpl in *.
   by eapply Forall_lookup in Ht; eauto.
 Qed.
 
@@ -2378,7 +2515,7 @@ Lemma store_typing_mem_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [Hf [Ht [Hm _]]]; simpl in *.
+  destruct Hst as [_ [Hf [Ht [Hm _]]]]; simpl in *.
   by eapply Forall_lookup in Hm; eauto.
 Qed.
 
@@ -2389,7 +2526,7 @@ Lemma store_typing_global_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [_ [_ [_ [Hg _]]]]; simpl in *.
+  destruct Hst as [_ [_ [_ [_ [Hg _]]]]]; simpl in *.
   by eapply Forall_lookup in Hg; eauto.
 Qed.
 
@@ -2400,7 +2537,7 @@ Lemma store_typing_elem_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [_ [_ [_ [_ [He _]]]]]; simpl in *.
+  destruct Hst as [_ [_ [_ [_ [_ [He _]]]]]]; simpl in *.
   by eapply Forall_lookup in He; eauto.
 Qed.
 
@@ -2411,8 +2548,19 @@ Lemma store_typing_data_lookup: forall s n x,
 Proof.
   move => s n x Hst Hnth.
   unfold store_typing in Hst; destruct s.
-  destruct Hst as [_ [_ [_ [_ [_ Hd]]]]]; simpl in *.
+  destruct Hst as [_ [_ [_ [_ [_ [_ [Hd _]]]]]]]; simpl in *.
   by eapply Forall_lookup in Hd; eauto.
+Qed.
+
+Lemma store_typing_exn_lookup: forall s n e,
+    store_typing s ->
+    lookup_N s.(s_exns) n = Some e ->
+    exninst_typing s e.
+Proof.
+  move => s n e Hst Hnth.
+  unfold store_typing in Hst; destruct s.
+  destruct Hst as [_ [_ [_ [_ [_ [_ [_ [Hexns _]]]]]]]]; simpl in *.
+  by eapply Forall_lookup in Hexns; eauto.
 Qed.
 
 End Host.
@@ -2426,6 +2574,9 @@ Proof.
   { move => k' vs n es lh' IH vs' ?? <- ?.
     by destruct vs.
   }
+  { move => k' vs n cs lh' IH vs' ?? <- ?.
+    by destruct vs.
+  }
 Qed.
 
 (** label context arithmetics **)
@@ -2433,6 +2584,7 @@ Fixpoint empty_vs_base {k} (lh: lholed k) : bool :=
   match lh with
   | LH_base [::] _ => true
   | LH_rec _ _ _ _ lh _ => empty_vs_base lh
+  | LH_handler _ _ _ _ lh _ => empty_vs_base lh
   | _ => false
   end.
 
@@ -2442,18 +2594,22 @@ Fixpoint lh_push_base_vs {k} (lh: lholed k) rvs: lholed k :=
   | LH_rec _ vs n es lh' es' =>
       let lh_pushed := lh_push_base_vs lh' rvs in
       LH_rec vs n es lh_pushed es'
+  | LH_handler _ vs n cs lh' es' =>
+      LH_handler vs n cs (lh_push_base_vs lh' rvs) es'
   end.
 
 Definition lh_push_front_vs {k} vcs (lh: lholed k): lholed k :=
   match lh with
   | LH_base vs es => LH_base (vcs ++ vs) es
   | LH_rec _ vs n es lh' es' => LH_rec (vcs ++ vs) n es lh' es'
+  | LH_handler _ vs n cs lh' es' => LH_handler (vcs ++ vs) n cs lh' es'
   end.
 
 Definition lh_drop_vs {k} l (lh: lholed k): lholed k :=
   match lh with
   | LH_base vs es => LH_base (drop l vs) es
   | LH_rec _ vs n es lh' es' => LH_rec (drop l vs) n es lh' es'
+  | LH_handler _ vs n cs lh' es' => LH_handler (drop l vs) n cs lh' es'
   end.
 
 Definition lh_drop_vs_o {k} l (lh: lholed k): option (lholed k) :=
@@ -2464,20 +2620,26 @@ Definition lh_drop_vs_o {k} l (lh: lholed k): option (lholed k) :=
   | LH_rec _ vs n es lh' es' =>
       if l <= length vs then Some (LH_rec (drop l vs) n es lh' es')
       else None
+  | LH_handler _ vs n cs lh' es' =>
+      if l <= length vs then Some (LH_handler (drop l vs) n cs lh' es')
+      else None
   end.
 
 Definition lh_push_back_es {k} es0 (lh: lholed k): lholed k :=
   match lh with
   | LH_base vs es => LH_base vs (es ++ es0)
   | LH_rec _ vs n es lh' es' => LH_rec vs n es lh' (es' ++ es0)
+  | LH_handler _ vs n cs lh' es' => LH_handler vs n cs lh' (es' ++ es0)
   end.
 
 Lemma lfill_push_base_vs {k} : forall (lh: lholed k) vs ves es,
   ves = v_to_e_list vs ->
   lfill lh (ves ++ es) = lfill (lh_push_base_vs lh vs) es.
 Proof.
-  induction lh as [vs es | ? vs n es lh' IH es'']; intros rvs vcs e ->; simpl in *.
+  induction lh as [vs es | ? vs n es lh' IH es'' | ? vs n cs lh' IH es'']; intros rvs vcs e ->; simpl in *.
   - by rewrite/v_to_e_list map_cat -catA -catA.
+  - do 3 f_equal.
+    by eapply IH; eauto.
   - do 3 f_equal.
     by eapply IH; eauto.
 Qed.
@@ -2542,14 +2704,18 @@ Lemma lfill_const: forall k (lh: lholed k) e lf,
     {vs & {es & {Heq: k = 0 & lholed_cast lh Heq = (LH_base vs es) /\ lf = v_to_e_list vs ++ [::e] ++ es}}}.
 Proof.
   move => k lh.
-  destruct lh as [lvs les | k lvs j lces lh les] => //.
+  destruct lh as [lvs les | k lvs j lces lh les | k lvs j cs lh les] => //.
   - move => e lf /=Hconst Hlf.
     subst.
     apply const_list_split in Hconst as [_ Hconst].
     simpl in Hconst.
     move/andP in Hconst; destruct Hconst as [? Hconst].
-    destruct e as [b | | | | | | | ] => //; try destruct b => //;
+    destruct e as [b | | | | | | | | | | | ] => //; try destruct b => //;
     exists lvs, les, (Logic.eq_refl 0); by split => //.
+  - move => e lf Hconst Hlf. subst.
+    exfalso.
+    apply const_list_split in Hconst as [_ Hconst].
+    by simpl in Hconst.
   - move => e lf Hconst Hlf. subst.
     exfalso.
     apply const_list_split in Hconst as [_ Hconst].
@@ -2559,6 +2725,7 @@ Qed.
 Definition lfill_ctx_instr (e: administrative_instruction) : bool :=
   match e with
   | AI_label _ _ _ => true
+  | AI_handler _ _ _ => true
   | _ => is_const e
   end.
 
@@ -2571,7 +2738,7 @@ Lemma lfill_singleton_invert: forall k (lh: lholed k) es es' fes e,
     {Heq: k = 0 & lholed_cast lh Heq = LH_base nil nil} /\ es = fes /\ es' = [::e].
 Proof.
   move => k lh.
-  destruct lh as [vs es | ] => /=; intros ???? Hlf1 Hlf2 Hnmem Hnfill => //=.
+  destruct lh as [vs es | | ] => /=; intros ???? Hlf1 Hlf2 Hnmem Hnfill => //=.
   - destruct vs; simpl in *.
     + destruct es'; simpl in *; subst => //.
       * by rewrite mem_cat mem_seq1 eq_refl orb_true_r in Hnmem.
@@ -2587,6 +2754,10 @@ Proof.
     + destruct l1 => //; simpl in *.
       inversion Hlf1; inversion Hlf2; by subst => //.
     + by destruct l => //.
+  - destruct l as [ | ? l].
+    + destruct l1 => //; simpl in *.
+      inversion Hlf1; inversion Hlf2; by subst => //.
+    + by destruct l => //.
 Qed.
 
 Lemma const_seq_factorise (fe: nat -> administrative_instruction) (ves: list administrative_instruction):
@@ -2598,7 +2769,7 @@ Proof.
   - subst.
     left; by exists nil, ves'.
   - destruct (e_to_v_opt e) as [v | ] eqn:Hconst.
-    { destruct e as [ b | | | | | | |] => //; first destruct b => //.
+    { destruct e as [ b | | | | | | | | | | |] => //; first destruct b => //.
       all: apply ve_inv in Hconst; destruct (IHves' fe) as [[vs [es ->]] | Hcontra]; first by (left; exists (v :: vs), es); rewrite - Hconst.
       all: right; move => vs es Heq;
       destruct vs as [| v' vs'] => //; simpl in *; first by inversion Heq.
@@ -2615,6 +2786,7 @@ Qed.
 Fixpoint ai_gen_measure (e: administrative_instruction) : nat :=
   match e with
   | AI_label _ _ es => 1 + List.list_max (map ai_gen_measure es)
+  | AI_handler _ _ es => 1 + List.list_max (map ai_gen_measure es)
   | _ => 0
   end.
 
@@ -2640,7 +2812,7 @@ Proof.
     by apply Hcontra in Heq.
   - specialize (split_vals_nconst Hsplit) as Hnconst.
     apply split_vals_inv in Hsplit as ->.
-    destruct e as [ | | | | | | j lvs les |].
+    destruct e as [ | | | | | | j lvs les | | | j cs les | |].
     7: {
       destruct (Hrec (fun n => fe (S n)) les) as [IH | IH] => /=.
       (* measure *)
@@ -2656,14 +2828,35 @@ Proof.
         by rewrite Hlf.
       }
       { right. move => n lh Hlf.
-        destruct lh as [lvs' les' | n' lvs' les' lh' les'']; simpl in *; first by apply (Hcontra lvs' les').
+        destruct lh as [lvs' les' | n' lvs' les' lh' les'' | n' lvs' j' cs' lh' les'']; simpl in *; first by apply (Hcontra lvs' les').
+        2: { apply const_list_concat_inv in Hlf as [_ [Hbad _]] => //; by apply v_to_e_const. }
         apply const_list_concat_inv in Hlf as [Heq [Heqlab <-]] => //; try by apply v_to_e_const.
         apply v_to_e_inj in Heq as ->.
         injection Heqlab as <- <- <-.
         by eapply IH.
       }
     }
-    all: right; move => n' lh Hlf; destruct lh as [lvs' les' | n' lvs' les' lh' les'']; simpl in *; (try by apply (Hcontra lvs' les')); apply const_list_concat_inv in Hlf as [Heq [Heqlab <-]] => //; by apply v_to_e_const.
+    9: {
+      destruct (Hrec fe les) as [IH | IH] => /=.
+      { unfold ais_gen_measure.
+        rewrite - cat1s map_cat map_cat cat_app cat_app.
+        repeat rewrite List.list_max_app => /=.
+        destruct (List.list_max (map ai_gen_measure es')); by lias.
+      }
+      { destruct IH as [n' [lh' Hlf]].
+        left; exists n', (LH_handler vs j cs lh' es') => /=.
+        by rewrite Hlf.
+      }
+      { right; move => n lh Hlf.
+        destruct lh as [lvs' les' | n' lvs' les' lh' les'' | n' lvs' j' cs' lh' les'']; simpl in *; first by apply (Hcontra lvs' les').
+        - apply const_list_concat_inv in Hlf as [_ [Hbad _]] => //; by apply v_to_e_const.
+        - apply const_list_concat_inv in Hlf as [Heq [Heqhandler <-]] => //; try by apply v_to_e_const.
+          apply v_to_e_inj in Heq as ->.
+          injection Heqhandler as <- <- <-.
+          by eapply IH.
+      }
+    }
+    all: right; move => n' lh Hlf; destruct lh as [lvs' les' | n' lvs' les' lh' les'' | n' lvs' j' cs' lh' les'']; simpl in *; (try by apply (Hcontra lvs' les')); apply const_list_concat_inv in Hlf as [Heq [Heqlab <-]] => //; by apply v_to_e_const.
 Defined.
 
 Program Fixpoint lfill_factorise fe es {measure (ais_gen_measure es)} :=

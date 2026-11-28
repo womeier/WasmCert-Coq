@@ -15,18 +15,115 @@ Section Host.
 
 Context {hfc: host_function_class}.
 
+Lemma catch_clause_context_reverse C c :
+  catch_clause_checker (context_reverse C) c = catch_clause_typing C c.
+Proof.
+  destruct c as [x l|l|x l|l]; unfold catch_clause_checker, catch_clause_typing.
+  - change (match lookup_N (map rev (tc_tags C)) x,
+                  lookup_N (map rev (tc_labels C)) l with
+            | Some ps, Some ts => values_subtyping ps ts
+            | _, _ => false end =
+            match lookup_N (tc_tags C) x, lookup_N (tc_labels C) l with
+            | Some ps, Some ts => values_subtyping ps ts
+            | _, _ => false end).
+    rewrite !lookup_N_map.
+    case Htags: (lookup_N (tc_tags C) x) => [ps|];
+      case Hlabels: (lookup_N (tc_labels C) l) => [ts|] //=.
+    apply/idP/idP => Hsub.
+    + apply values_subtyping_rev in Hsub; by rewrite !revK in Hsub.
+    + by apply values_subtyping_rev.
+  - change (match lookup_N (map rev (tc_labels C)) l with
+            | Some ts => values_subtyping nil ts
+            | None => false end =
+            match lookup_N (tc_labels C) l with
+            | Some ts => values_subtyping nil ts
+            | None => false end).
+    rewrite lookup_N_map.
+    case Hlabels: (lookup_N (tc_labels C) l) => [ts|] //=.
+    change (values_subtyping nil (rev ts) = values_subtyping nil ts).
+    apply/idP/idP => Hsub.
+    + apply values_subtyping_rev in Hsub; by rewrite !revK in Hsub.
+    + exact (values_subtyping_rev Hsub).
+  - change (match lookup_N (map rev (tc_tags C)) x,
+                  lookup_N (map rev (tc_labels C)) l with
+            | Some ps, Some ts => values_subtyping (T_ref (Ref_type false HT_exn) :: ps) ts
+            | _, _ => false end =
+            match lookup_N (tc_tags C) x, lookup_N (tc_labels C) l with
+            | Some ps, Some ts => values_subtyping (ps ++ [::T_ref (Ref_type false HT_exn)]) ts
+            | _, _ => false end).
+    rewrite !lookup_N_map.
+    case Htags: (lookup_N (tc_tags C) x) => [ps|];
+      case Hlabels: (lookup_N (tc_labels C) l) => [ts|] //=.
+    change (values_subtyping (T_ref (Ref_type false HT_exn) :: rev ps) (rev ts) =
+      values_subtyping (ps ++ [::T_ref (Ref_type false HT_exn)]) ts).
+    apply/idP/idP => Hsub.
+    + apply values_subtyping_rev in Hsub.
+      rewrite rev_cons !revK -cats1 in Hsub.
+      exact Hsub.
+    + apply values_subtyping_rev in Hsub.
+      by rewrite rev_cat /= in Hsub.
+  - change (match lookup_N (map rev (tc_labels C)) l with
+            | Some ts => values_subtyping [::T_ref (Ref_type false HT_exn)] ts
+            | None => false end =
+            match lookup_N (tc_labels C) l with
+            | Some ts => values_subtyping [::T_ref (Ref_type false HT_exn)] ts
+            | None => false end).
+    rewrite lookup_N_map.
+    case Hlabels: (lookup_N (tc_labels C) l) => [ts|] //=.
+    change (values_subtyping [::T_ref (Ref_type false HT_exn)] (rev ts) =
+      values_subtyping [::T_ref (Ref_type false HT_exn)] ts).
+    apply/idP/idP => Hsub.
+    + apply values_subtyping_rev in Hsub; by rewrite revK in Hsub.
+    + exact (values_subtyping_rev Hsub).
+Qed.
+
+Lemma type_update_throw_ref_witness ct ct' :
+  type_update_throw_ref ct = Some ct' ->
+  exists r, is_exception_reference r /\
+    type_update_top ct [::T_ref r] nil = Some ct'.
+Proof.
+  destruct ct as [[|t tail] unr]; unfold type_update_throw_ref => /=.
+  - destruct unr => //; move => [<-].
+    by exists (Ref_type true HT_exn).
+  - destruct t as [n|v|r|] => //=.
+    + case Hr: (is_exception_reference r) => //; move => [<-].
+      exists r; split => //.
+      unfold type_update_top => /=.
+      by rewrite value_subtyping_eq.
+    + move => [<-]; exists (Ref_type true HT_exn); split => //.
+Qed.
+
 Definition ct_subtyping (ct1 ct2: checker_type) :=
   c_types_agree ct1 ct2.(CT_type) &&
     ((ct1.(CT_unr) == true) || (ct2.(CT_unr) == false)).
 
 Notation "ct1 <ct: ct2" := (ct_subtyping ct1 ct2) (at level 5).
 
+Lemma lookup_function_type_reverse types index :
+  lookup_function_type (map rev_source_subtype types) index =
+    option_map rev_tf (lookup_function_type types index).
+Proof.
+  unfold lookup_function_type. rewrite lookup_N_map.
+  destruct (lookup_N types index) as [source|]; simpl; [|reflexivity].
+  unfold rev_source_subtype.
+  destruct source as [final supers composite]; destruct composite; reflexivity.
+Qed.
+
+Lemma lookup_function_type_reverse_inv types index f :
+  lookup_function_type (map rev_source_subtype types) index = Some f ->
+  exists source, lookup_function_type types index = Some source /\ rev_tf source = f.
+Proof.
+  rewrite lookup_function_type_reverse.
+  destruct (lookup_function_type types index) as [source|]; simpl; [|discriminate].
+  intro E. inversion E; subst f. exists source. auto.
+Qed.
+
 Lemma expand_t_context_reverse: forall C tb tf,
     expand_t C tb = Some tf ->
     expand_t (context_reverse C) tb = Some (rev_tf tf).
 Proof.
   intros.
-  unfold expand_t in *; destruct tb => //=; first by rewrite lookup_N_map H.
+  unfold expand_t in *; destruct tb => //=; first by rewrite lookup_function_type_reverse H.
   by remove_bools_options.
 Qed.
 
@@ -41,7 +138,11 @@ Lemma context_reverseK:
     involutive context_reverse.
 Proof.
   move => C.
-  destruct C; unfold context_reverse => /=; f_equal; try rewrite mapK => //; try (by apply rev_tfK); try by apply revK.
+  assert (SourceK : involutive rev_source_subtype).
+  { intros [final supers composite]. destruct composite as [[args results]|fields|field];
+      unfold rev_source_subtype; simpl; try reflexivity; now rewrite !revK. }
+  destruct C; unfold context_reverse => /=; f_equal; try rewrite mapK => //;
+    try (by apply rev_tfK); try (by apply SourceK); try by apply revK.
   destruct tc_return => //=; by rewrite revK.
 Qed.
 
@@ -237,7 +338,10 @@ Ltac simplify_tc_goal :=
   | H: ?expr = _ |-
     context [?expr] =>
       rewrite H
-  | H: lookup_N ?l ?n = ?x
+   | H: lookup_function_type ?l ?n = ?x
+     |- context [lookup_function_type (map rev_source_subtype ?l) ?n] =>
+     rewrite lookup_function_type_reverse H
+   | H: lookup_N ?l ?n = ?x
     |- context [lookup_N (map _ ?l) ?n] =>
     rewrite lookup_N_map H
   | H: expand_t ?C ?tb = ?tf
@@ -268,6 +372,7 @@ Ltac fold_remember_check :=
 Fixpoint be_size_single (be: basic_instruction): nat :=
   match be with
   | BI_block _ l => 1 + (List.fold_left addn (map be_size_single l)) 1 + size l
+  | BI_try_table _ _ l => 1 + (List.fold_left addn (map be_size_single l)) 1 + size l
   | BI_loop _ l => 1 + (List.fold_left addn (map be_size_single l)) 1 + size l
   | BI_if _ l1 l2 => 1 + ((List.fold_left addn (map be_size_single l1) 1) + size l1) + ((List.fold_left addn (map be_size_single l2) 1) + size l2)
   | _ => 1
@@ -641,6 +746,13 @@ Proof.
   (* return_call_indirect *)
   - destruct f.
     by unfold type_update_top in Htc; simplify_tc_goal.
+  - unfold type_update_ref_as_non_null in Htc.
+    destruct ct as [[|t c_ts] unr]; destruct unr; simplify_tc_goal.
+  - unfold type_update_throw_ref in Htc.
+    destruct ct as [[|t c_ts] unr]; simpl in Htc; try destruct t;
+      simplify_tc_goal; unfold type_update_top in Htc; simplify_tc_goal.
+  - unfold type_update_i31_get in Htc.
+    destruct ct as [[|t c_ts] unr]; destruct unr; simplify_tc_goal.
 Qed.
   
 Lemma check_single_None: forall C e,
@@ -673,6 +785,11 @@ Proof.
     + simpl in *.
       do 3 (try destruct ts => //; simpl in * ); simplify_tc_goal.
       by apply type_update_extend with (l2 := ts2) in Htc.
+  - by unfold type_update_ref_as_non_null in *; destruct ts; simplify_tc_goal.
+  - unfold type_update_throw_ref in Htc.
+    destruct ts as [|t tail]; simpl in Htc; try destruct t;
+      simplify_tc_goal; unfold type_update_top in Htc; simplify_tc_goal.
+  - by unfold type_update_i31_get in *; destruct ts; simplify_tc_goal.
 Qed.
 
 Lemma check_single_extend_top: forall C e ts ts2 ts0,
@@ -690,6 +807,11 @@ Proof.
     + simpl in *.
       do 3 (try destruct ts => //; simpl in * ); simplify_tc_goal.
       by apply type_update_preserve_unr in Htc.
+  - by unfold type_update_ref_as_non_null in *; destruct ts; simplify_tc_goal.
+  - unfold type_update_throw_ref in *.
+    destruct ts as [|t tail]; simpl in *; try destruct t;
+      by simplify_tc_goal.
+  - by unfold type_update_i31_get in *; destruct ts; simplify_tc_goal.
 Qed.
 
 Lemma value_type_select_subtyping: forall v1 v2 v3 v4 v,
@@ -724,6 +846,16 @@ Proof.
   unfold c_types_agree.
   move => ts [c_ts [|]] -> => /=; simplify_tc_goal.
   by rewrite take_size; resolve_subtyping.
+Qed.
+
+Lemma is_i31_t_subtyping t1 t2 :
+  t1 <t: t2 -> is_i31_t t2 -> is_i31_t t1.
+Proof.
+  move => Hsub Htype.
+  destruct (value_subtyping_cases Hsub) as [->|[->|[r1 [r2 [-> [-> Hexn]]]]]] => //.
+  have Hdomain := exception_reference_subtyping_domain Hexn.
+  destruct r2 as [n h]; destruct h; simpl in Hdomain, Htype => //.
+  all: destruct r1 as [n1 h1]; destruct h1; simpl in * => //.
 Qed.
 
 Lemma check_single_subtyping: forall C e ct1 ct1' ct2,
@@ -819,6 +951,31 @@ Proof.
           by resolve_subtyping.
         }
       }
+  - unfold type_update_ref_as_non_null in *; simpl in *.
+    destruct ct1 as [[|t1 ts1] unr]; destruct ct1' as [[|t1' ts1'] [|]];
+      unfold ct_subtyping, c_types_agree in *; simpl in *; simplify_tc_goal;
+      try by (eexists; split; eauto => //=; try rewrite take0 => //; resolve_subtyping).
+    + exists <<[::T_bot], true>>; split => //=.
+      by rewrite take0 /= /value_subtyping eq_refl orbT.
+    + replace (is_ref_t t1') with true; last by destruct t1, t1'.
+      by eexists; split; eauto => /=; resolve_subtyping.
+     + replace (is_ref_t t1') with true; last by destruct t1, t1'.
+       by eexists; split; eauto => /=; resolve_subtyping.
+  - unfold type_update_throw_ref in *.
+    destruct ct1 as [[|t1 ts1] unr]; destruct ct1' as [[|t1' ts1'] [|]];
+      unfold ct_subtyping, c_types_agree in *; simpl in *; simplify_tc_goal;
+      try destruct t1; try destruct t1'; simplify_tc_goal;
+      try (by exists <<nil, true>>; split => //=).
+    all: try (have Hkind := reference_subtyping_to_exception Hif Hreference_sub;
+      change (is_true (is_exception_reference r0)) in Hkind;
+      rewrite Hkind; exists <<nil, true>>; by split).
+  - unfold type_update_i31_get in *; simpl in *.
+    destruct ct1 as [[|t1 ts1] unr]; destruct ct1' as [[|t1' ts1'] [|]];
+      unfold ct_subtyping, c_types_agree in *; simpl in *; simplify_tc_goal;
+      try by (eexists; split; eauto => //=; try rewrite take0 => //; resolve_subtyping).
+    all: replace (is_i31_t t1') with true;
+      last by symmetry; eapply is_i31_t_subtyping; eauto.
+    all: by eexists; split; eauto => /=; resolve_subtyping.
 Qed.
 
 Lemma check_subtyping: forall C es ct1 ct1' ct2,
@@ -863,6 +1020,10 @@ Proof.
     + do 2 (try destruct l => //).
       by apply type_update_preserve_top in Hcheck.
     + do 3 (try destruct cts1 => //); simplify_tc_goal; by apply type_update_preserve_top in Hcheck.
+  - by unfold type_update_ref_as_non_null in Hcheck; destruct cts1; simplify_tc_goal.
+  - unfold type_update_throw_ref in Hcheck.
+    destruct cts1 as [|t tail]; simpl in *; try destruct t; by simplify_tc_goal.
+  - by unfold type_update_i31_get in Hcheck; destruct cts1; simplify_tc_goal.
 Qed.
 
 Lemma check_preserve_top: forall C es cts1 cts2 unr,
@@ -995,6 +1156,60 @@ Proof.
       apply instr_subtyping_weaken1 with (tx1 := [::T_bot]); by resolve_subtyping.
 Qed.
       
+Lemma type_update_i31_get_bet: forall C cts cts' tm signed,
+  type_update_i31_get cts = Some cts' ->
+  c_types_agree cts' tm ->
+  exists tn, c_types_agree cts tn /\
+    be_typing C [::BI_i31_get signed] (Tf (rev tn) (rev tm)).
+Proof.
+  move => C cts cts' tm signed Hupdate Hct.
+  unfold type_update_i31_get in Hupdate.
+  destruct cts as [[ | t ts] unr]; simplify_tc_goal.
+  - apply c_types_agree_cons_split in Hct as [t' [ts' [-> [Hsub Hagree]]]].
+    exists ([::T_bot] ++ ts'); split => //.
+    rewrite rev_cons -cats1 rev_cat rev_cons -cats1.
+    apply bet_weakening => /=.
+    eapply bet_subtyping; first by apply bet_i31_get with (nullable := false).
+    resolve_subtyping.
+    apply instr_subtyping_weaken1 with (tx1 := [::T_bot]); by resolve_subtyping.
+  - apply c_types_agree_cons_split in Hct as [t' [ts' [-> [Hsub Hagree]]]].
+    exists ([::t] ++ ts'); split => //.
+    { by simpl; apply c_types_agree_cons; split; resolve_subtyping. }
+    rewrite rev_cons -cats1 rev_cat rev_cons -cats1.
+    apply bet_weakening => /=.
+    destruct t as [nt|vt|[nullable heap]|] => //.
+    + destruct heap => //.
+      eapply bet_subtyping; first by apply bet_i31_get with (nullable := nullable).
+      by resolve_subtyping.
+    + eapply bet_subtyping; first by apply bet_i31_get with (nullable := false).
+      resolve_subtyping.
+      apply instr_subtyping_weaken1 with (tx1 := [::T_bot]); by resolve_subtyping.
+Qed.
+
+Lemma type_update_ref_as_non_null_bet: forall C cts cts' tm,
+  type_update_ref_as_non_null cts = Some cts' ->
+  c_types_agree cts' tm ->
+  exists tn, c_types_agree cts tn /\
+    be_typing C [::BI_ref_as_non_null] (Tf (rev tn) (rev tm)).
+Proof.
+  move => C cts cts' tm Hupdate Hct.
+  unfold type_update_ref_as_non_null in Hupdate.
+  destruct cts as [[|t ts] unr]; simplify_tc_goal.
+  - apply c_types_agree_cons_split in Hct as [t' [ts' [-> [Hsub Hagree]]]].
+    exists ([::T_bot] ++ ts'); split => //.
+    rewrite rev_cons -cats1 rev_cat rev_cons -cats1.
+    apply bet_weakening => /=.
+    eapply bet_subtyping; first by apply bet_ref_as_non_null with (t := T_bot).
+    by resolve_subtyping.
+  - apply c_types_agree_cons_split in Hct as [t' [ts' [-> [Hsub Hagree]]]].
+    exists ([::t] ++ ts'); split.
+    { by simpl; apply c_types_agree_cons; split; resolve_subtyping. }
+    rewrite rev_cons -cats1 rev_cat rev_cons -cats1.
+    apply bet_weakening => /=.
+    eapply bet_subtyping; first by apply bet_ref_as_non_null with (t := t).
+    by resolve_subtyping.
+Qed.
+
 Lemma type_update_drop_bet: forall C cts cts' tm,
   type_update_drop cts = Some cts' ->
   c_types_agree cts' tm ->
@@ -1278,11 +1493,16 @@ Proof.
     (* Replace_vec *)
     + by resolve_tc_be_typing.
     (* Ref_null *)
-    + by resolve_tc_be_typing.
+    + apply bet_weakening_empty_1.
+      eapply bet_subtyping; first by apply bet_ref_null.
+      by resolve_subtyping.
     (* Ref_is_null *)
     + by apply type_update_ref_is_null_bet with (cts' := cts').
     (* Ref_func *)
     + move/inP in Hif.
+      have Href := reference_subtyping_from_nonexception
+        (r1 := T_funcref) erefl Hreference_sub.
+      subst reference.
       apply bet_weakening_empty_1, bet_ref_func with (t := (rev_tf f0)) => //.
       apply nth_error_map in Hoption as [ft [? <-]].
       by destruct ft; unfold rev_tf; repeat rewrite revK.
@@ -1308,7 +1528,10 @@ Proof.
     (* Global_get *)
     + by resolve_tc_be_typing.
     (* Table_get *)
-    + by resolve_tc_be_typing.
+    + apply bet_weakening.
+      unfold rev => /=.
+      eapply bet_subtyping; first (by econstructor; eauto).
+      by resolve_subtyping.
     (* Table_set *)
     + by resolve_tc_be_typing.
     (* Table_size *)
@@ -1474,8 +1697,10 @@ Proof.
       by resolve_tc_be_typing.
     (* Call_indirect *)
     + destruct f.
-      move/eqP in Hif.
-      apply nth_error_map in Hoption0 as [ts [Hnth Hmap]].
+      have Hif_eq := reference_subtyping_to_nonexception
+        (r2 := T_funcref) erefl Hif.
+      clear Hif; rename Hif_eq into Hif.
+      apply lookup_function_type_reverse_inv in Hoption0 as [ts [Hnth Hmap]].
       destruct ts; simpl in Hmap; inversion Hmap; subst; clear Hmap.
       eapply type_update_agree_subtyping in Hupdate; eauto.
       destruct Hupdate as [tn [Hagree' Hsub]].
@@ -1498,12 +1723,14 @@ Proof.
       by eauto.
     (* Return_call_indirect *)      
     + destruct f as [tn0 tm0].
-      move/eqP in Hif.
+      have Hif_eq := reference_subtyping_to_nonexception
+        (r2 := T_funcref) erefl Hif.
+      clear Hif; rename Hif_eq into Hif.
       remove_bools_options.
       move/eqP in Hif0; subst.
       eapply type_update_top_agree_subtyping in Hupdate; eauto.
       destruct Hupdate as [tn [ts1 [ts2 [Hagree' Hsub]]]].
-      apply nth_error_map in Hoption as [ts [Hnth Heq]].
+      apply lookup_function_type_reverse_inv in Hoption as [ts [Hnth Heq]].
       destruct ts; simpl in Heq.
       injection Heq as <- Hrevr.
       apply (f_equal rev) in Hrevr; repeat rewrite revK in Hrevr; subst.
@@ -1511,6 +1738,59 @@ Proof.
       exists tn; split => //.
       eapply bet_subtyping; first by eapply bet_return_call_indirect with (t1s := r0) (t2s := r); eauto.
       by eauto.
+    (* Throw *)
+    + apply nth_error_map in Hoption as [ps [Hnth <-]].
+      eapply type_update_top_agree_subtyping in Hupdate; eauto.
+      destruct Hupdate as [tn [ts1 [ts2 [Hagree' Hsub]]]].
+      rewrite revK in Hsub.
+      exists tn; split => //.
+      eapply bet_subtyping; first by eapply bet_throw with (ps := ps); eauto.
+      by apply Hsub.
+    (* try_table *)
+    + destruct i.
+      rewrite upd_label_context_reverse in Hupdate.
+      simpl in Hupdate.
+      rewrite mapK in Hupdate; last by apply revK.
+      apply expand_t_context_reverse in Hoption; simpl in Hoption.
+      rewrite context_reverseK in Hoption.
+      fold_remember_check.
+      assert (be_size_list l0 < d)%coq_nat as Hmeasure; first by unfold be_size_list; lias.
+      apply H in Hmeasure; destruct Hmeasure as [IH _]; clear H.
+      simplify_tc_goal.
+      eapply IH in Hoption0 => //; last by apply H0.
+      destruct Hoption0 as [tn [Hct Hbet]].
+      unfold c_types_agree in Hct; simplify_tc_goal.
+      apply values_subtyping_rev in Hct.
+      eapply bet_subtyping with (t1s' := rev r) (t2s' := rev r0) in Hbet; last by resolve_subtyping.
+      rewrite (eq_all (catch_clause_context_reverse C)) in H.
+      eapply bet_try_table in Hbet; eauto.
+      specialize (type_update_agree_subtyping Hupdate Hagree) as [tx [Hagree0 Hsub]].
+      eapply bet_subtyping in Hbet; last by apply Hsub.
+      by exists tx.
+    + by eapply type_update_ref_as_non_null_bet; eauto.
+    + destruct r as [|t labels] => //=.
+      simpl in *.
+      apply nth_error_map in Hoption as [source_labels [Hnth Hrev]].
+      apply (f_equal rev) in Hrev.
+      rewrite revK rev_cons -cats1 in Hrev.
+      subst source_labels.
+      eapply type_update_agree_subtyping in Hupdate; eauto.
+      destruct Hupdate as [tn [Hagree' Hsub]].
+      rewrite rev_cons -cats1 in Hsub.
+      exists tn; split => //.
+      eapply bet_subtyping; first by eapply bet_br_on_non_null; eauto.
+      exact Hsub.
+    + destruct (type_update_throw_ref_witness Hupdate) as [r [Href Htop]].
+      eapply type_update_top_agree_subtyping in Htop; eauto.
+      destruct Htop as [tn [ts1 [ts2 [Hagree' Hsub]]]].
+      exists tn; split => //.
+      eapply bet_subtyping; first by eapply bet_throw_ref; eauto.
+      by apply Hsub.
+     + have Href := reference_subtyping_from_nonexception
+         (r1 := Ref_type false HT_i31) erefl Hreference_sub.
+       subst reference.
+       by resolve_tc_be_typing.
+      + by eapply type_update_i31_get_bet; eauto.
 Qed.
       
 Lemma tc_to_bet_list: forall C cts bes tm cts',
@@ -1567,6 +1847,13 @@ Proof.
         by unfold c_types_agree; simplify_tc_goal.
       }
     (* Call *)
+    +
+      rewrite (eq_all (catch_clause_context_reverse C)).
+      simplify_tc_goal.
+      by unfold c_types_agree; simplify_tc_goal.
+    + unfold type_update_throw_ref => /=.
+      simplify_tc_goal.
+      by unfold c_types_agree; simplify_tc_goal.
     + destruct tf as [t1 t2] => /=.
       by unfold c_types_agree, type_update; simplify_tc_goal.
     (* Composition *)
@@ -1607,6 +1894,9 @@ Proof.
           rewrite values_subtyping_cat; last by apply values_subtyping_size in IHHbet; apply values_subtyping_size in Hconjr0; lias.
           by resolve_subtyping.
       }
+     + unfold type_update_ref_as_non_null; simpl.
+       rewrite H.
+       by unfold c_types_agree; simplify_tc_goal.
 Qed.
       
 End Host.

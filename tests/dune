@@ -2,4 +2,64 @@
   (deps 
      (package coq-wasm)
      (glob_files *.wasm))
-)
+ )
+
+(rule
+ (alias runtest)
+ (deps run_wast_runner.sh ../run_wast.sh)
+ (action (run bash %{dep:run_wast_runner.sh} %{dep:../run_wast.sh})))
+
+(rule
+  (alias runtest)
+  (deps exception_tags.py)
+ (action
+   (run python3 %{dep:exception_tags.py} %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+  (alias runtest)
+  (deps exception_handlers.py)
+  (action
+    (run python3 %{dep:exception_handlers.py} %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps exception_projection_tests.py prepare_exception_binary.py)
+ (action
+  (run python3 %{dep:exception_projection_tests.py} %{exe:eh_script/eh_script.exe})))
+
+(rule
+  (alias runtest)
+  (deps memarg_stages.py)
+  (action
+   (run python3 %{dep:memarg_stages.py} %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps wast_assertion_stages.py)
+ (action
+  (run python3 %{dep:wast_assertion_stages.py} %{exe:../src/wasm_coq_interpreter.exe})))
+(rule
+ (alias runtest)
+ (deps run_wast_tests.sh ../run_wast.sh)
+ (action (run bash %{dep:run_wast_tests.sh} %{dep:../run_wast.sh})))
+
+(rule
+ (alias runtest)
+ (deps function_references_binary.py)
+ (action
+  (run python3 %{dep:function_references_binary.py}
+    %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps gc_i31_binary.py)
+ (action
+  (run python3 %{dep:gc_i31_binary.py}
+   %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+ (alias runtest)
+ (deps gc_declarations_binary.py)
+ (action
+  (run python3 %{dep:gc_declarations_binary.py}
+   %{exe:../src/wasm_coq_interpreter.exe})))

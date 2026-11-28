@@ -43,6 +43,7 @@ Definition eqnumber_typeP : Equality.axiom number_type_eqb :=
 
 HB.instance Definition number_type_eqMixin := hasDecEq.Build number_type eqnumber_typeP.
 
+Scheme Equality for heap_type.
 Scheme Equality for reference_type.
 Definition reference_type_eqb v1 v2 : bool := reference_type_eq_dec v1 v2.
 Definition eqreference_typeP : Equality.axiom reference_type_eqb :=
@@ -87,6 +88,15 @@ Definition eqfunction_typeP : Equality.axiom function_type_eqb :=
   eq_dec_Equality_axiom function_type_eq_dec.
 
 HB.instance Definition function_type_eqMixin := hasDecEq.Build function_type eqfunction_typeP.
+
+Definition source_subtype_eq_dec : forall x y : source_subtype, {x = y} + {x <> y}.
+Proof. decidable_equality. Defined.
+
+Definition source_subtype_eqb x y : bool := source_subtype_eq_dec x y.
+Definition eqsource_subtypeP : Equality.axiom source_subtype_eqb :=
+  eq_dec_Equality_axiom source_subtype_eq_dec.
+HB.instance Definition source_subtype_eqMixin :=
+  hasDecEq.Build source_subtype eqsource_subtypeP.
 
 Definition t_context_eq_dec : forall x y : t_context, {x = y} + {x <> y}.
 Proof. decidable_equality. Defined.
@@ -169,6 +179,13 @@ Definition eqvalueP : Equality.axiom value_eqb :=
 
 HB.instance Definition value_eqMixin := hasDecEq.Build value eqvalueP.
 
+Definition exninst_eq_dec : forall x y : exninst, {x = y} + {x <> y}.
+Proof. decidable_equality. Defined.
+Definition exninst_eqb x y : bool := exninst_eq_dec x y.
+Definition eqexninstP : Equality.axiom exninst_eqb :=
+  eq_dec_Equality_axiom exninst_eq_dec.
+HB.instance Definition exninst_eqMixin := hasDecEq.Build exninst eqexninstP.
+
 Definition value_num_eq_dec : forall v1 v2 : value_num, {v1 = v2} + {v1 <> v2}.
 Proof. decidable_equality. Defined.
 
@@ -211,6 +228,10 @@ Definition basic_instruction_rect' :=
 
 Definition basic_instruction_ind' (P : basic_instruction -> Prop) :=
   @basic_instruction_rect' P.
+
+Definition catch_clause_eq_dec : forall c1 c2 : catch_clause,
+  {c1 = c2} + {c1 <> c2}.
+Proof. decidable_equality. Defined.
 
 Definition basic_instruction_eq_dec : forall e1 e2 : basic_instruction,
   {e1 = e2} + {e1 <> e2}.
@@ -407,46 +428,63 @@ Ltac decide_eq_arg x y :=
 Definition lh_case: forall n (P: lholed n -> Type),
     (forall (H: 0 = n) vs es, P (lholed_cast (LH_base vs es) H)) ->
     (forall n' (H: S n' = n) vs k es (lh: lholed n') es', P (lholed_cast (LH_rec vs k es lh es') H)) ->
+    (forall n' (H: n' = n) vs k cs (lh: lholed n') es', P (lholed_cast (LH_handler vs k cs lh es') H)) ->
     (forall (lh: lholed n), P lh).
 Proof.
-  move => n P H0 Hrec lh.
-  destruct lh as [lvs les | n lvs k les lh les'].
+  move => n P H0 Hrec Hhandler lh.
+  destruct lh as [lvs les | n lvs k les lh les' | n lvs k cs lh les'].
   - by specialize (H0 (erefl 0) lvs les).
   - by specialize (Hrec _ (erefl (S n)) lvs k les lh les'). 
+  - by specialize (Hhandler _ (erefl n) lvs k cs lh les').
 Defined.
 
 (* Decidable equality of lholed without eq_rect_eq *)
 Definition lholed_eq_dec : forall k (lh1 lh2 : lholed k), {lh1 = lh2} + {lh1 <> lh2}.
 Proof.
-  elim.
-  {
-    move => lh1.
-    eapply lh_case; last done.
-    move => H vs es; rewrite lh_cast_eq.
-    move: lh1.
-    eapply lh_case; last done.
-    move => H' vs' es'; rewrite lh_cast_eq.
-    decide_equality_injection; by decidable_equality.
-  }
-  {
-    move => n IH lh.
-    eapply lh_case; first done.
-    move => n1 H1 vs1 k1 es1 lh1 es1'; injection H1 as ->; rewrite lh_cast_eq.
-    move: lh.
-    eapply lh_case; first done.
-    move => n2 H2 vs2 k2 es2 lh2 es2'; injection H2 as ->; rewrite lh_cast_eq.
-    decide_eq_arg vs2 vs1.
-    decide_eq_arg k2 k1.
-    decide_eq_arg es2 es1.
-    decide_eq_arg es2' es1'.
-    destruct (IH lh1 lh2) as [ | Hneq]; subst; first by left.
-    right. move => Hcontra; apply Hneq.
-    clear - Hcontra.
-    inversion Hcontra.
-    (* This one is axiom free *)
-    apply Eqdep_dec.inj_pair2_eq_dec in H0 => //.
-    decide equality.
-  }
+  fix IH 2.
+  move => k lh1.
+  destruct lh1 as [vs es | k vs n ces lh es | k vs n cs lh es].
+  - apply lh_case.
+    + move => H vs' es'; rewrite lh_cast_eq.
+      decide_equality_injection; by decidable_equality.
+    + by move => k H; discriminate H.
+    + move => k H vs' n cs lh' es'; subst k; rewrite lh_cast_eq.
+      right; discriminate.
+  - apply lh_case.
+    + by move => H; discriminate H.
+    + move => k' H vs' n' ces' lh' es'; injection H as ->; rewrite lh_cast_eq.
+      decide_eq_arg vs vs'.
+      decide_eq_arg n n'.
+      decide_eq_arg ces ces'.
+      decide_eq_arg es es'.
+      destruct (IH k lh lh') as [-> | Hneq]; first by left.
+      right; move => Hcontra; apply Hneq.
+      inversion Hcontra.
+      match goal with
+      | Hpair: existT _ _ _ = existT _ _ _ |- _ =>
+          apply Eqdep_dec.inj_pair2_eq_dec in Hpair => //; decide equality
+      end.
+    + move => k' H vs' n' cs' lh' es'; subst k'; rewrite lh_cast_eq.
+      right; discriminate.
+  - apply lh_case.
+    + move => H vs' es'; subst k; rewrite lh_cast_eq.
+      right; discriminate.
+    + move => k' H vs' n' ces' lh' es'; subst k; rewrite lh_cast_eq.
+      right; discriminate.
+    + move => k' H vs' n' cs' lh' es'; subst k'; rewrite lh_cast_eq.
+      decide_eq_arg vs vs'.
+      decide_eq_arg n n'.
+      assert ({cs = cs'} + {cs <> cs'}) as Hcs by decidable_equality.
+      destruct Hcs as [-> | Hneq].
+      2: { right; move => Hcontra; injection Hcontra; by intros. }
+      decide_eq_arg es es'.
+      destruct (IH k lh lh') as [-> | Hneq]; first by left.
+      right; move => Hcontra; apply Hneq.
+      inversion Hcontra.
+      match goal with
+      | Hpair: existT _ _ _ = existT _ _ _ |- _ =>
+          apply Eqdep_dec.inj_pair2_eq_dec in Hpair => //; decide equality
+      end.
 Defined.
 
 Definition lholed_eqb {k} (v1 v2: lholed k) : bool := lholed_eq_dec v1 v2.

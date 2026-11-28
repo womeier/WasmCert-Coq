@@ -48,29 +48,6 @@ Definition pp_vector_type (vt: vector_type) : string :=
     end in
   with_fg type_style s.
 
-Definition pp_reference_type (vt : reference_type) : string :=
-  let s :=
-    match vt with
-    | T_funcref => "funcref"
-    | T_externref => "externref"
-    end in
-  with_fg type_style s.
-
-Definition pp_value_type (vt: value_type) : string :=
-  match vt with
-  | T_num t => pp_number_type t
-  | T_vec t => pp_vector_type t
-  | T_ref t => pp_reference_type t
-  | T_bot => "Bot" (* Should not happen *)
-  end.
-
-Definition pp_value_types (vts : list value_type) : string :=
-  "[" ++ String.concat ", " (List.map pp_value_type vts) ++ "]".
-
-Definition pp_function_type (tf : function_type) : string :=
-  let '(Tf ts1 ts2) := tf in
-  pp_value_types ts1 ++ " -> " ++ pp_value_types ts2.
-
 Fixpoint string_of_uint (i : uint) : string :=
   match i with
   | Nil => ""
@@ -88,6 +65,40 @@ Fixpoint string_of_uint (i : uint) : string :=
 
 Definition pp_N (n: N) : string :=
   string_of_uint (N.to_uint n).
+
+Definition pp_heap_type (ht : heap_type) : string :=
+  match ht with
+  | HT_func => "func" | HT_extern => "extern"
+  | HT_any => "any" | HT_eq => "eq" | HT_i31 => "i31"
+  | HT_struct => "struct" | HT_array => "array"
+  | HT_none => "none" | HT_nofunc => "nofunc" | HT_noextern => "noextern"
+  | HT_exn => "exn" | HT_noexn => "noexn"
+  | HT_type i => pp_N i
+  end.
+
+Definition pp_reference_type (vt : reference_type) : string :=
+  with_fg type_style
+    (match vt with
+     | T_funcref => "funcref"
+     | T_externref => "externref"
+     | Ref_type n h =>
+         "(ref " ++ (if n then "null " else "") ++ pp_heap_type h ++ ")"
+     end).
+
+Definition pp_value_type (vt: value_type) : string :=
+  match vt with
+  | T_num t => pp_number_type t
+  | T_vec t => pp_vector_type t
+  | T_ref t => pp_reference_type t
+  | T_bot => "Bot" (* Should not happen *)
+  end.
+
+Definition pp_value_types (vts : list value_type) : string :=
+  "[" ++ String.concat ", " (List.map pp_value_type vts) ++ "]".
+
+Definition pp_function_type (tf : function_type) : string :=
+  let '(Tf ts1 ts2) := tf in
+  pp_value_types ts1 ++ " -> " ++ pp_value_types ts2.
 
 Definition pp_positive (p: positive) : string :=
   string_of_uint (Pos.to_uint p).
@@ -365,6 +376,7 @@ Definition pp_extern_value (extv: extern_value) : string :=
   | EV_table a => "table " ++ pp_addr a
   | EV_mem a => "mem " ++ pp_addr a
   | EV_global a => "global " ++ pp_addr a
+  | EV_tag a => "tag " ++ pp_addr a
   end.
 
 Definition pp_value_num (v : value_num) : string :=
@@ -385,9 +397,11 @@ Definition pp_value_vec (v : value_vec) : string :=
 
 Definition pp_value_ref (v : value_ref) : string :=
   match v with
-  | VAL_ref_null t => pp_reference_type t ++ ".null" ++ newline
+  | VAL_ref_null t => pp_reference_type (Ref_type true t) ++ ".null" ++ newline
   | VAL_ref_func a => "funcref " ++ pp_addr a ++ newline
   | VAL_ref_extern a => "externref " ++ pp_addr a ++ newline
+  | VAL_ref_exn a => "exnref " ++ pp_addr a ++ newline
+  | VAL_ref_i31 n => "i31ref " ++ pp_Z (Wasm_int.Int31.unsigned n) ++ newline
   end.
 
 Definition pp_value (v: value) : string :=
@@ -591,11 +605,22 @@ Fixpoint pp_basic_instruction (i : indentation) (be : basic_instruction) : strin
   | BI_drop => indent i (with_fg be_style "drop" ++ newline)
   | BI_select None => indent i (with_fg be_style "select" ++ newline)
   | BI_select (Some ts) => indent i (with_fg be_style "select " ++ pp_list pp_value_type ts ++ newline)
-  | BI_ref_null t => indent i (with_fg be_style "ref.null " ++ pp_reference_type t ++ newline)
+  | BI_ref_null t => indent i (with_fg be_style "ref.null " ++ pp_reference_type (Ref_type true t) ++ newline)
   | BI_ref_is_null => indent i (with_fg be_style "ref.is_null " ++ newline)
   | BI_ref_func addr => indent i (with_fg be_style "ref.func " ++ pp_addr addr ++ newline)
+  | BI_ref_as_non_null => indent i (with_fg be_style "ref.as_non_null" ++ newline)
+  | BI_ref_i31 => indent i (with_fg be_style "ref.i31" ++ newline)
+  | BI_i31_get SX_S => indent i (with_fg be_style "i31.get_s" ++ newline)
+  | BI_i31_get SX_U => indent i (with_fg be_style "i31.get_u" ++ newline)
+  | BI_call_ref x => indent i (with_fg be_style "call_ref " ++ pp_id x ++ newline)
+  | BI_return_call_ref x => indent i (with_fg be_style "return_call_ref " ++ pp_id x ++ newline)
+  | BI_br_on_non_null x => indent i (with_fg be_style "br_on_non_null " ++ pp_id x ++ newline)
   | BI_block tf bes =>
     indent i (with_fg be_style "block" ++ with_fg type_style (pp_block_type tf) ++ newline)
+    ++ pp_basic_instructions bes (S i)
+    ++ indent i (with_fg be_style "end" ++ newline)
+  | BI_try_table tf cs bes =>
+    indent i (with_fg be_style "try_table" ++ with_fg type_style (pp_block_type tf) ++ newline)
     ++ pp_basic_instructions bes (S i)
     ++ indent i (with_fg be_style "end" ++ newline)
   | BI_loop tf bes =>
@@ -628,6 +653,10 @@ Fixpoint pp_basic_instruction (i : indentation) (be : basic_instruction) : strin
     indent i (with_fg be_style "return_call " ++ pp_id x ++ newline)
   | BI_return_call_indirect x y =>
     indent i (with_fg be_style "return_call_indirect " ++ pp_id x ++ " " ++ pp_id y ++ newline)
+  | BI_throw x =>
+    indent i (with_fg be_style "throw " ++ pp_id x ++ newline)
+  | BI_throw_ref =>
+    indent i (with_fg be_style "throw_ref" ++ newline)
   | BI_local_get x =>
     indent i (with_fg be_style "local.get " ++ pp_id x ++ newline)
   | BI_local_set x =>
@@ -759,6 +788,8 @@ Fixpoint pp_administrative_instruction (n : indentation) (e : administrative_ins
     indent n (with_fg ae_style "ref " ++ pp_addr a ++ newline)
   | AI_ref_extern a =>
     indent n (with_fg ae_style "ref_extern " ++ pp_addr a ++ newline)
+  | AI_ref_i31 v =>
+    indent n (with_fg ae_style "ref_i31 " ++ pp_Z (Wasm_int.Int31.unsigned v) ++ newline)
   | AI_invoke a =>
     indent n (with_fg ae_style "invoke " ++ pp_addr a ++ newline)
   | AI_return_invoke a =>
@@ -776,6 +807,13 @@ Fixpoint pp_administrative_instruction (n : indentation) (e : administrative_ins
     indent n (with_fg ae_style "with values " ++ pp_values_hint_empty f.(f_locs) ++ newline) ++
     pp_administrative_instructions (n.+1) es ++
     indent n (with_fg ae_style "end frame" ++ newline)
+  | AI_raise a =>
+    indent n (with_fg ae_style "exception " ++ pp_addr a ++ newline)
+  | AI_handler k cs es =>
+    indent n (with_fg ae_style "handler " ++ string_of_nat k ++ newline)
+    ++ pp_administrative_instructions (S n) es
+  | AI_ref_exn a =>
+    indent n (with_fg ae_style "ref.exn " ++ pp_addr a ++ newline)
   end.
 
 Definition pp_administrative_instructions (n : nat) (es : list administrative_instruction) : string :=
@@ -838,6 +876,8 @@ Definition pp_res_cfg_except_store {hs: host_state} {cfg: cfg_tuple_ctx} {d: N} 
       "Invalid context decomposition. This result should not be observed when invoking valid Wasm module functions. Please submit a bug report at GitHub/WasmCert-Coq." ++ newline
   | RSC_error _ =>
       "Ill-typed input configuration. This result should not be observed when invoking valid Wasm module functions. Please submit a bug report at GitHub/WasmCert-Coq." ++ newline
+  | RSC_exception _ _ a _ =>
+      "Exception " ++ pp_addr a ++ newline
   end.
 
 End Host.

@@ -36,7 +36,10 @@ let process_args_and_run verbosity text no_exec max_call_depth srcs func_name sr
         else src_module_name) in
       let* ret = Execute.invoke_func verbosity exts (s, Extract.empty_frame) args running_module_name func_name max_call_depth in 
         Execute.print_invoke_result verbosity ret;
-      pure ()
+      begin match ret with
+      | Execute.Cfg_exception _ -> error "uncaught WebAssembly exception"
+      | _ -> pure ()
+      end
   with Invalid_argument msg -> error msg
 
 (* Reference interpreter allows only 256 nested calls:

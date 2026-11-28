@@ -97,7 +97,17 @@ Inductive reduce_simple : seq administrative_instruction -> seq administrative_i
   | rs_ref_is_null_false:
     forall ref,
     (forall t, ref <> VAL_ref_null t) ->
-    reduce_simple [:: $V (VAL_ref ref); AI_basic BI_ref_is_null] [::$VN (VAL_int32 Wasm_int.Int32.zero)]
+     reduce_simple [:: $V (VAL_ref ref); AI_basic BI_ref_is_null] [::$VN (VAL_int32 Wasm_int.Int32.zero)]
+  | rs_ref_i31 : forall n,
+    reduce_simple [:: $VN (VAL_int32 n); AI_basic BI_ref_i31]
+      [:: $V (VAL_ref (VAL_ref_i31 (i31bits_of_i32 n)))]
+  | rs_i31_get : forall signed n,
+    reduce_simple [:: $V (VAL_ref (VAL_ref_i31 n)); AI_basic (BI_i31_get signed)]
+      [:: $VN (VAL_int32 (i32_of_i31bits
+        (match signed with SX_S => true | SX_U => false end) n))]
+  | rs_i31_get_null : forall signed h,
+    reduce_simple [:: $V (VAL_ref (VAL_ref_null h)); AI_basic (BI_i31_get signed)]
+      [:: AI_trap]
                   
   (** control-flow operations **)
   | rs_unreachable :
@@ -175,6 +185,45 @@ Inductive reduce_simple : seq administrative_instruction -> seq administrative_i
         es <> [::AI_trap] ->
         lfill lh [::AI_trap] = es ->
         reduce_simple es [::AI_trap]
+  | rs_raise :
+      forall a vs es,
+        v_to_e_list vs ++ [::AI_raise a] ++ es <> [::AI_raise a] ->
+        reduce_simple (v_to_e_list vs ++ [::AI_raise a] ++ es) [::AI_raise a]
+  | rs_label_raise : forall n cont a,
+      reduce_simple [::AI_label n cont [::AI_raise a]] [::AI_raise a]
+  | rs_frame_raise : forall n f a,
+      reduce_simple [::AI_frame n f [::AI_raise a]] [::AI_raise a]
+  | rs_handler_const : forall n cs vs,
+      reduce_simple [::AI_handler n cs (v_to_e_list vs)] (v_to_e_list vs)
+  | rs_handler_trap : forall n cs,
+      reduce_simple [::AI_handler n cs [::AI_trap]] [::AI_trap]
+  | rs_handler_br : forall n cs vs l es,
+      reduce_simple
+        [::AI_handler n cs (v_to_e_list vs ++ [::AI_basic (BI_br l)] ++ es)]
+        (v_to_e_list vs ++ [::AI_basic (BI_br l)])
+  | rs_handler_return : forall n cs vs es,
+      reduce_simple
+        [::AI_handler n cs (v_to_e_list vs ++ [::AI_basic BI_return] ++ es)]
+        (v_to_e_list vs ++ [::AI_basic BI_return])
+  | rs_handler_return_invoke : forall n cs vs a es,
+      reduce_simple
+        [::AI_handler n cs (v_to_e_list vs ++ [::AI_return_invoke a] ++ es)]
+        (v_to_e_list vs ++ [::AI_return_invoke a])
+  | rs_ref_as_non_null_null : forall t,
+    reduce_simple [:: $V (VAL_ref (VAL_ref_null t)); AI_basic BI_ref_as_non_null] [::AI_trap]
+  | rs_ref_as_non_null : forall ref,
+    (forall t, ref <> VAL_ref_null t) ->
+    reduce_simple [:: $V (VAL_ref ref); AI_basic BI_ref_as_non_null] [::$V (VAL_ref ref)]
+  | rs_br_on_non_null_null : forall x h,
+    reduce_simple [::$V (VAL_ref (VAL_ref_null h)); AI_basic (BI_br_on_non_null x)] [::]
+  | rs_br_on_non_null : forall x ref,
+    (forall h, ref <> VAL_ref_null h) ->
+    reduce_simple [::$V (VAL_ref ref); AI_basic (BI_br_on_non_null x)]
+      [::$V (VAL_ref ref); AI_basic (BI_br x)]
+  | rs_throw_ref_null : forall h,
+      reduce_simple [::$V (VAL_ref (VAL_ref_null h)); AI_basic BI_throw_ref] [::AI_trap]
+  | rs_throw_ref_exn : forall a,
+      reduce_simple [::AI_ref_exn a; AI_basic BI_throw_ref] [::AI_raise a]
 .
 
 Inductive reduce : host_state -> store_record -> frame -> list administrative_instruction ->
@@ -212,13 +261,13 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
       forall s f x (y: typeidx) a cl i hs,
         stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_func a) ->
         lookup_N s.(s_funcs) a = Some cl ->
-        lookup_N f.(f_inst).(inst_types) y = Some (cl_type cl) ->
+        lookup_function_type f.(f_inst).(inst_types) y = Some (cl_type cl) ->
         reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_call_indirect x y)] hs s f [::AI_invoke a]
   | r_call_indirect_failure_mismatch :
       forall s f x (y: typeidx) a cl i hs,
         stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_func a) ->
         lookup_N s.(s_funcs) a = Some cl ->
-        lookup_N f.(f_inst).(inst_types) y <> Some (cl_type cl) ->
+        lookup_function_type f.(f_inst).(inst_types) y <> Some (cl_type cl) ->
         reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_call_indirect x y)] hs s f [::AI_trap]
   | r_call_indirect_failure_bound :
       forall s f x (y: typeidx) i hs,
@@ -697,6 +746,67 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
       forall s f es s' f' es' n f0 hs hs',
         reduce hs s f es hs' s' f' es' ->
         reduce hs s f0 [::AI_frame n f es] hs' s' f0 [::AI_frame n f' es']
+  | r_throw : forall hs s f x tag ps vs,
+      lookup_N f.(f_inst).(inst_tags) x = Some tag ->
+      lookup_N s.(s_tags) tag = Some ps ->
+      length vs = length ps ->
+      let e := {| exninst_tag := tag; exninst_fields := vs |} in
+      reduce hs s f (v_to_e_list vs ++ [::AI_basic (BI_throw x)])
+        hs (fst (alloc_exn s e)) f [::AI_raise (snd (alloc_exn s e))]
+  | r_try_table : forall hs s f bt cs es tn tm vs,
+      expand f.(f_inst) bt = Some (Tf tn tm) ->
+      length vs = length tn ->
+      reduce hs s f (v_to_e_list vs ++ [::AI_basic (BI_try_table bt cs es)])
+        hs s f [::AI_handler (length tm) cs
+          [::AI_label (length tm) nil (v_to_e_list vs ++ to_e_list es)]]
+  | r_handler : forall hs s f es hs' s' f' es' n cs,
+      reduce hs s f es hs' s' f' es' ->
+      reduce hs s f [::AI_handler n cs es] hs' s' f' [::AI_handler n cs es']
+  | r_handler_empty : forall hs s f n a,
+      reduce hs s f [::AI_handler n nil [::AI_raise a]] hs s f [::AI_raise a]
+  | r_handler_tag : forall hs s f n x l cs a ex tag,
+      lookup_N s.(s_exns) a = Some ex ->
+      lookup_N f.(f_inst).(inst_tags) x = Some tag ->
+      ex.(exninst_tag) = tag ->
+      reduce hs s f [::AI_handler n (Catch_tag x l :: cs) [::AI_raise a]]
+        hs s f (v_to_e_list ex.(exninst_fields) ++ [::AI_basic (BI_br l)])
+  | r_handler_next : forall hs s f n x l cs a ex tag,
+      lookup_N s.(s_exns) a = Some ex ->
+      lookup_N f.(f_inst).(inst_tags) x = Some tag ->
+      ex.(exninst_tag) <> tag ->
+      reduce hs s f [::AI_handler n (Catch_tag x l :: cs) [::AI_raise a]]
+        hs s f [::AI_handler n cs [::AI_raise a]]
+  | r_handler_all : forall hs s f n l cs a,
+      reduce hs s f [::AI_handler n (Catch_all l :: cs) [::AI_raise a]]
+        hs s f [::AI_basic (BI_br l)]
+  | r_handler_tag_ref : forall hs s f n x l cs a ex tag,
+      lookup_N s.(s_exns) a = Some ex ->
+      lookup_N f.(f_inst).(inst_tags) x = Some tag ->
+      ex.(exninst_tag) = tag ->
+      reduce hs s f [::AI_handler n (Catch_tag_ref x l :: cs) [::AI_raise a]]
+        hs s f (v_to_e_list ex.(exninst_fields) ++
+          [::AI_ref_exn a; AI_basic (BI_br l)])
+  | r_handler_next_ref : forall hs s f n x l cs a ex tag,
+      lookup_N s.(s_exns) a = Some ex ->
+      lookup_N f.(f_inst).(inst_tags) x = Some tag ->
+      ex.(exninst_tag) <> tag ->
+      reduce hs s f [::AI_handler n (Catch_tag_ref x l :: cs) [::AI_raise a]]
+        hs s f [::AI_handler n cs [::AI_raise a]]
+  | r_handler_all_ref : forall hs s f n l cs a,
+      reduce hs s f [::AI_handler n (Catch_all_ref l :: cs) [::AI_raise a]]
+        hs s f [::AI_ref_exn a; AI_basic (BI_br l)]
+  | r_call_ref : forall hs s f x a,
+      reduce hs s f [::AI_ref a; AI_basic (BI_call_ref x)]
+        hs s f [::AI_invoke a]
+  | r_call_ref_null : forall hs s f x h,
+      reduce hs s f [::$V (VAL_ref (VAL_ref_null h)); AI_basic (BI_call_ref x)]
+        hs s f [::AI_trap]
+  | r_return_call_ref : forall hs s f x a,
+      reduce hs s f [::AI_ref a; AI_basic (BI_return_call_ref x)]
+        hs s f [::AI_return_invoke a]
+  | r_return_call_ref_null : forall hs s f x h,
+      reduce hs s f [::$V (VAL_ref (VAL_ref_null h)); AI_basic (BI_return_call_ref x)]
+        hs s f [::AI_trap]
   .
 
 Definition reduce_tuple hs_s_f_es hs'_s'_f'_es' : Prop :=

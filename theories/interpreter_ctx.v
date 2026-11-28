@@ -89,6 +89,9 @@ Inductive run_step_ctx_result (hs: host_state) (cfg: cfg_tuple_ctx) (depth: N): 
 | RSC_error:
   (forall ts, ctx_cfg_typing cfg ts -> False) ->
   run_step_ctx_result hs cfg depth
+| RSC_exception s f a:
+  ctx_to_cfg cfg = Some (s, (f, [::AI_raise a])) ->
+  run_step_ctx_result hs cfg depth
 .
 
 (** The usual start of a crash certification.
@@ -122,6 +125,33 @@ Ltac resolve_invalid_typing :=
   invert_e_typing.
 
 Notation "<< hs , cfg , d >>" := (@RSC_normal _ _ _ hs cfg d).
+
+(* Recover the innermost handler, without erasing its catch-validation
+   premises as ordinary hole typing does. *)
+Ltac resolve_invalid_handler outer :=
+  apply RSC_error;
+  let ts := fresh "ts" in
+  let Htype := fresh "Htype" in
+  let C := fresh "C" in
+  let ret := fresh "ret" in
+  let ts' := fresh "ts" in
+  let Hstore := fresh "Hstore" in
+  let Hframe := fresh "Hframe" in
+  let Hret := fresh "Hret" in
+  let Hnil := fresh "Hnil" in
+  let Hbody := fresh "Hbody" in
+  let labs := fresh "labs" in
+  let inner := fresh "inner" in
+  let Hagree := fresh "Hagree" in
+  move => ts Htype;
+  apply ctx_cfg_inv_lcs in Htype as
+    [C [ret [ts' [Hstore [Hframe [Hret [Hnil Hbody]]]]]]];
+  apply (lcs_typing_exists_nil (lcs := outer)) in Hbody as
+    [labs [inner [Hbody Hagree]]];
+  simpl in Hbody;
+  unfold label_ctx_fill in Hbody; simpl in Hbody;
+  invert_e_typing;
+  simpl in *; remove_bools_options.
 
 (* Tactic to get the outermost closure context from the validity condition *)
 Ltac get_cc ccs :=
@@ -157,7 +187,7 @@ Ltac discriminate_size :=
   | _ => unfold lookup_N in *; simplify_lists; simpl in *; subst; try by lias
     end.
 
-Definition empty_label_ctx := Build_label_ctx nil 0 nil nil.
+Definition empty_label_ctx := Build_label_ctx nil 0 nil nil None.
 
 Opaque instr_subtyping.
 
@@ -167,20 +197,18 @@ Definition run_ctx_br: forall hs s ccs sc j d,
 Proof.
   intros hs s ccs [vs es] j d.
   get_cc ccs.
-  destruct (lookup_N lcs j) as [lab | ] eqn:Htar.
-  - destruct lab as [lvs lk lces les].
-    specialize (nth_error_Some_length Htar) as Hlablen; move/ltP in Hlablen.
+  pose proof (split_label_spec lcs (N.to_nat j)) as Hsplit_spec.
+  destruct (split_label lcs (N.to_nat j)) as [[[before target] after]|] eqn:Hsplit.
+  - destruct Hsplit_spec as [Hshape [Hkind [Hcount Htar]]].
+    destruct target as [lvs lk lces les catches].
+    simpl in Hkind; subst catches.
     destruct (lk <= length vs) eqn:Hvslen.
-    + apply <<hs, (s, ((fc, drop (S (N.to_nat j)) lcs) :: ccs'), (take lk vs ++ lvs, lces ++ les), None), d>> => //.
+    + apply <<hs, (s, ((fc, after) :: ccs'), (take lk vs ++ lvs, lces ++ les), None), d>> => //.
       apply reduce_focus => //=.
-      rewrite - (cat_take_drop ((N.to_nat j).+1) lcs) drop_size_cat; last by rewrite size_takel; apply nth_error_Some_length in Htar; lias => //.
-      rewrite foldl_cat.
+      rewrite Hshape foldl_cat.
       apply list_label_ctx_eval.(ctx_reduce) => //=.
       rewrite /fmask0.
-      rewrite (take_nth empty_label_ctx) => //.
-      rewrite foldl_rcons.
-      apply nth_nth_error with (x0 := empty_label_ctx) in Htar.
-      rewrite Htar => /=.
+      simpl.
       rewrite - (cat_take_drop lk vs) take_size_cat; last by rewrite size_takel => //.
       rewrite /vs_to_es rev_cat -v_to_e_cat rev_cat -v_to_e_cat -cat1s -catA.
       resolve_reduce_ctx lvs les; last rewrite catA; eauto => //=.
@@ -188,10 +216,10 @@ Proof.
       apply r_simple; eapply rs_br.
       { by apply v_to_e_const. }
       { by rewrite v_to_e_length length_is_size size_rev size_takel. }
-      { apply lh_ctx_fill_aux with (acc := (LH_base (rev (drop lk vs)) es)) (lcs := take (N.to_nat j) lcs) => /=.
+      { apply lh_ctx_fill_aux with (acc := (LH_base (rev (drop lk vs)) es)) (lcs := before) => /=.
         rewrite ctx_to_lh_aux_len => /=.
         repeat rewrite - catA => /=.
-        rewrite add0n length_is_size size_takel; last by rewrite length_is_size in Hlablen; lias.
+        rewrite add0n Hcount.
         by rewrite Nnat.N2Nat.id. 
       }
       
@@ -206,6 +234,7 @@ Proof.
       
   (* Not enough labels *)
   - resolve_invalid_typing.
+    rename Hsplit_spec into Htar.
     by discriminate_size.
 Defined.
 
@@ -444,6 +473,8 @@ Ltac resolve_invalid_value_aux_expanded :=
 
 Ltac resolve_invalid_value :=
   repeat (resolve_invalid_value_aux_expanded; match goal with
+  | Href : is_true (is_ref_t ?t) |- _ =>
+      is_var t; destruct t; simpl in Href => //
   | Hvaltype : is_true (values_typing _ (rev (_ :: _)) _),
     Hsub: (Tf (_ ++ [::_]) _ <ti: _) |- _ =>
       specialize (operand_subtyping_suffix1 Hvaltype Hsub) as Hopsub; clear Hsub; simpl in * => //=
@@ -534,14 +565,16 @@ Proof.
       (* Exitting a label *)
       (* It is futile to try to push the next instruction e from lvs into the hole,
          as that might be a value anyway. Instead, the entire context reformation is done in a separate function *)
-      { destruct lc as [lvs lk lces les].
+      { destruct lc as [lvs lk lces les catches].
         apply <<hs, (s, (fc, lcs') :: ccs', (vs0 ++ lvs, les), None), d>> => //=.
         apply reduce_focus => //=.
         apply (list_label_ctx_eval.(ctx_reduce)) => //=.
         repeat rewrite cats0.
         unfold fmask0, label_ctx_fill => /=.
         resolve_reduce_ctx lvs les.
-        apply r_simple, rs_label_const; by apply v_to_e_const.
+        destruct catches; apply r_simple.
+        - apply rs_handler_const.
+        - apply rs_label_const; by apply v_to_e_const.
       }
     }
   }
@@ -604,15 +637,28 @@ Proof.
       (* BI_return *) |
       (* BI_call x *) x |
       (* BI_call_indirect x y *) x y  |
-      (* BI_return_call x *) x |
-      (* BI_return_call_indirect x y *) x y ] |
+       (* BI_return_call x *) x |
+       (* BI_return_call_indirect x y *) x y |
+        (* BI_throw x *) x |
+        (* BI_try_table bt cs es *) bt cs es |
+      (* BI_ref_as_non_null *) |
+      (* BI_call_ref x *) x |
+      (* BI_return_call_ref x *) x |
+      (* BI_br_on_non_null x *) x |
+      (* BI_throw_ref *) |
+      (* BI_ref_i31 *) |
+      (* BI_i31_get signed *) signed ] |
       (* AI_trap *) |
       (* AI_ref a *) a |
       (* AI_ref_extern a *) a |
       (* AI_invoke a *) a |
       (* AI_return_invoke a *) a |
       (* AI_label ln les es *) ln les es |
-      (* AI_frame ln lf es *) ln lf es ].
+       (* AI_frame ln lf es *) ln lf es |
+        (* AI_raise a *) a |
+        (* AI_handler n cs es *) n cs es |
+        (* AI_ref_exn a *) a |
+      (* AI_ref_i31 n *) n ].
 
     (* AI_basic (BI_const _) *)
     (* This along with other value instructions are invalid, as it doesn't respect
@@ -802,7 +848,7 @@ the condition that all values should live in the operand stack. *)
     (* AI_basic BI_ref_is_null *)
     - destruct vs0 as [|v vs0]; first by no_args.
       assert_value_ref v.
-      destruct v as [ v | v | v ].
+      destruct v as [ v | v | v | v | v ].
       (* ref_null *)
       + apply <<hs, (s, (fc, lcs) :: ccs', ((VAL_num (VAL_int32 Wasm_int.Int32.one)) :: vs0, es0), None), d>> => //.
         resolve_reduce_ctx vs0 es0.
@@ -815,7 +861,15 @@ the condition that all values should live in the operand stack. *)
       (* ref_extern *)
       + apply <<hs, (s, (fc, lcs) :: ccs', ((VAL_num (VAL_int32 Wasm_int.Int32.zero)) :: vs0, es0), None), d>> => //.
         resolve_reduce_ctx vs0 es0.
-        replace (AI_ref_extern v) with ($V (VAL_ref (VAL_ref_extern v))) => //.
+         replace (AI_ref_extern v) with ($V (VAL_ref (VAL_ref_extern v))) => //.
+         by apply r_simple, rs_ref_is_null_false.
+      + apply <<hs, (s, (fc, lcs) :: ccs', ((VAL_num (VAL_int32 Wasm_int.Int32.zero)) :: vs0, es0), None), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        replace (AI_ref_exn v) with ($V (VAL_ref (VAL_ref_exn v))) => //.
+        by apply r_simple, rs_ref_is_null_false.
+      + apply <<hs, (s, (fc, lcs) :: ccs', ((VAL_num (VAL_int32 Wasm_int.Int32.zero)) :: vs0, es0), None), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        replace (AI_ref_i31 v) with ($V (VAL_ref (VAL_ref_i31 v))) => //.
         by apply r_simple, rs_ref_is_null_false.
 
     (* AI_basic (BI_ref_func x) *)
@@ -1692,7 +1746,7 @@ the condition that all values should live in the operand stack. *)
       assert_i32 v.
       destruct (stab_elem s fc.(FC_frame).(f_inst) x ($nou32 v)) as [vref|] eqn:?.
       (* Some a *)
-      + destruct vref as [t | a | a].
+      + destruct vref as [t | a | a | a | n].
         (* ref_null *)
         * apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
           resolve_reduce_ctx vs0 es0.
@@ -1700,7 +1754,7 @@ the condition that all values should live in the operand stack. *)
         (* funcref *)
         * destruct (lookup_N s.(s_funcs) a) as [cl | ] eqn:Hnthcl.
           (* Some *)
-          -- destruct (lookup_N (inst_types (f_inst (fc.(FC_frame)))) y == Some (cl_type cl)) eqn:Hcl; move/eqP in Hcl.
+          -- destruct (lookup_function_type (inst_types (f_inst (fc.(FC_frame)))) y == Some (cl_type cl)) eqn:Hcl; move/eqP in Hcl.
             (* true *)
             ++ apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_invoke a)), d>> => //.
               resolve_reduce_ctx vs0 es0.
@@ -1728,7 +1782,27 @@ the condition that all values should live in the operand stack. *)
           eapply all_projection in Hif1; eauto.
           unfold value_typing in Hif1; simpl in *.
           simplify_multieq.
-          apply ref_subtyping in Hif1.
+          apply ref_subtyping in Hif1; last reflexivity.
+          by rewrite Hconjl1 in Hif1.
+        * resolve_invalid_typing.
+          unfold_frame_type Hftype.
+          unfold_store_operations.
+          resolve_store_inst_lookup.
+          destruct t1; remove_bools_options; simpl in *.
+          eapply all_projection in Hif1; eauto.
+          unfold value_typing in Hif1; simpl in *.
+          remove_bools_options.
+          simplify_multieq.
+          rewrite Hconjl1 in Hif1; discriminate Hif1.
+        * resolve_invalid_typing.
+          unfold_frame_type Hftype.
+          unfold_store_operations.
+          resolve_store_inst_lookup.
+          destruct t1; remove_bools_options; simpl in *.
+          eapply all_projection in Hif1; eauto.
+          unfold value_typing in Hif1; simpl in *.
+          simplify_multieq.
+          apply ref_subtyping in Hif1; last reflexivity.
           by rewrite Hconjl1 in Hif1.
       (* None *)
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_trap)), d>> => //.
@@ -1753,7 +1827,7 @@ the condition that all values should live in the operand stack. *)
       assert_i32 v.
       destruct (stab_elem s fc.(FC_frame).(f_inst) x ($nou32 v)) as [vref|] eqn:?.
       (* Some a *)
-      + destruct vref as [t | a | a].
+      + destruct vref as [t | a | a | a | n].
         (* ref_null *)
         * apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
           resolve_reduce_ctx vs0 es0.
@@ -1762,7 +1836,7 @@ the condition that all values should live in the operand stack. *)
         (* funcref *)
         * destruct (lookup_N s.(s_funcs) a) as [cl | ] eqn:Hnthcl.
           (* Some *)
-          -- destruct (lookup_N (inst_types (f_inst (fc.(FC_frame)))) y == Some (cl_type cl)) eqn:Hcl; move/eqP in Hcl.
+          -- destruct (lookup_function_type (inst_types (f_inst (fc.(FC_frame)))) y == Some (cl_type cl)) eqn:Hcl; move/eqP in Hcl.
             (* true *)
             ++ apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_return_invoke a)), d>> => //.
               resolve_reduce_ctx vs0 es0.
@@ -1792,7 +1866,27 @@ the condition that all values should live in the operand stack. *)
           eapply all_projection in Hif1; eauto.
           unfold value_typing in Hif1; simpl in *.
           simplify_multieq.
-          apply ref_subtyping in Hif1.
+          apply ref_subtyping in Hif1; last reflexivity.
+          by rewrite Hconjl1 in Hif1.
+        * resolve_invalid_typing.
+          unfold_frame_type Hftype.
+          unfold_store_operations.
+          resolve_store_inst_lookup.
+          destruct t1; remove_bools_options; simpl in *.
+          eapply all_projection in Hif1; eauto.
+          unfold value_typing in Hif1; simpl in *.
+          remove_bools_options.
+          simplify_multieq.
+          rewrite Hconjl1 in Hif1; discriminate Hif1.
+        * resolve_invalid_typing.
+          unfold_frame_type Hftype.
+          unfold_store_operations.
+          resolve_store_inst_lookup.
+          destruct t1; remove_bools_options; simpl in *.
+          eapply all_projection in Hif1; eauto.
+          unfold value_typing in Hif1; simpl in *.
+          simplify_multieq.
+          apply ref_subtyping in Hif1; last reflexivity.
           by rewrite Hconjl1 in Hif1.
       (* None *)
       + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_trap)), d>> => //.
@@ -1800,6 +1894,228 @@ the condition that all values should live in the operand stack. *)
         replace ($VN VAL_int32 v) with ($V (VAL_num (VAL_int32 v))); last done.
         by eapply r_return_call_indirect_failure, r_call_indirect_failure_bound; subst.
         
+    (* AI_basic (BI_throw x) *)
+    - destruct (lookup_N fc.(FC_frame).(f_inst).(inst_tags) x)
+        as [tag|] eqn:Htag.
+      + destruct (lookup_N s.(s_tags) tag) as [ps|] eqn:Hps.
+        * destruct (length vs0 >= length ps) eqn:Hlen.
+          { destruct (split_n vs0 (length ps)) as [fields rest] eqn:Hsplit.
+            set (ex := {| exninst_tag := tag; exninst_fields := rev fields |}).
+            apply <<hs, (fst (alloc_exn s ex), (fc, lcs) :: ccs',
+                         (rest, es0), Some (AI_raise (snd (alloc_exn s ex)))), d>> => //=.
+            apply reduce_focus_id => //.
+            rewrite split_n_is_take_drop in Hsplit; injection Hsplit as <- <-.
+            eapply r_label with
+              (lh := LH_base (rev (drop (length ps) vs0)) es0) => /=; infer_hole.
+            2: { instantiate (1 :=
+                    v_to_e_list (rev (take (length ps) vs0)) ++
+                    [::AI_basic (BI_throw x)]).
+                 by rewrite catA catA v_to_e_cat -rev_cat cat_take_drop -catA.
+            }
+            subst ex; eapply r_throw; eauto.
+            repeat rewrite length_is_size.
+            by rewrite size_rev size_takel.
+          }
+          { resolve_invalid_typing.
+            match goal with
+            | Hf: frame_typing _ _ ?C,
+              Hl: lookup_N (tc_tags ?C) _ = Some _ |- _ =>
+                destruct (frame_tag_lookup Hf Hl) as [a' [Hx Hparams]]
+            end.
+            simplify_multieq; by discriminate_size.
+          }
+        * resolve_invalid_typing.
+          match goal with
+          | Hf: frame_typing _ _ ?C,
+            Hl: lookup_N (tc_tags ?C) _ = Some _ |- _ =>
+              destruct (frame_tag_lookup Hf Hl) as [a' [Hx Hparams]]
+          end.
+          by simplify_multieq.
+      + resolve_invalid_typing.
+        match goal with
+        | Hf: frame_typing _ _ ?C,
+          Hl: lookup_N (tc_tags ?C) _ = Some _ |- _ =>
+            destruct (frame_tag_lookup Hf Hl) as [a' [Hx Hparams]]
+        end.
+        by simplify_multieq.
+
+    (* AI_basic (BI_try_table bt cs es) *)
+    - destruct (expand fc.(FC_frame).(f_inst) bt) as [[tn tm]|] eqn:Hexpand.
+      + destruct (length tn <= length vs0) eqn:Hlen.
+        * apply <<hs, (s, (fc, lcs) :: ccs',
+            (drop (length tn) vs0, es0),
+            Some (AI_handler (length tm) cs
+              [::AI_label (length tm) nil
+                (v_to_e_list (rev (take (length tn) vs0)) ++ to_e_list es)])), d>> => //.
+          apply reduce_focus_id => //.
+          eapply r_label with
+            (lh := LH_base (rev (drop (length tn) vs0)) es0) => /=; infer_hole.
+          2: { instantiate (1 :=
+              v_to_e_list (rev (take (length tn) vs0)) ++
+                [::AI_basic (BI_try_table bt cs es)]).
+            by rewrite catA catA v_to_e_cat -rev_cat cat_take_drop -catA. }
+          eapply r_try_table; eauto.
+          by rewrite !length_is_size size_rev size_takel.
+        * resolve_invalid_typing.
+          unfold_frame_type Hftype.
+          erewrite <- inst_typing_expand_eq in Hconjl0; eauto.
+          simplify_multieq; by discriminate_size.
+      + resolve_invalid_typing.
+        unfold_frame_type Hftype.
+        erewrite <- inst_typing_expand_eq in Hconjl0; eauto.
+        by simplify_multieq.
+    (* AI_basic BI_ref_as_non_null *)
+    - destruct vs0 as [|v vs0]; first by no_args.
+      assert_value_ref v.
+      destruct v as [t | a | a | a | n].
+      + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        by apply r_simple, rs_ref_as_non_null_null.
+      + apply <<hs, (s, (fc, lcs) :: ccs',
+                    (VAL_ref (VAL_ref_func a) :: vs0, es0), None), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        replace (AI_ref a) with ($V (VAL_ref (VAL_ref_func a))) => //.
+        by apply r_simple, rs_ref_as_non_null.
+      + apply <<hs, (s, (fc, lcs) :: ccs',
+                    (VAL_ref (VAL_ref_extern a) :: vs0, es0), None), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+         replace (AI_ref_extern a) with ($V (VAL_ref (VAL_ref_extern a))) => //.
+         by apply r_simple, rs_ref_as_non_null.
+      + apply <<hs, (s, (fc, lcs) :: ccs',
+                    (VAL_ref (VAL_ref_exn a) :: vs0, es0), None), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        replace (AI_ref_exn a) with ($V (VAL_ref (VAL_ref_exn a))) => //.
+        by apply r_simple, rs_ref_as_non_null.
+      + apply <<hs, (s, (fc, lcs) :: ccs',
+                    (VAL_ref (VAL_ref_i31 n) :: vs0, es0), None), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        replace (AI_ref_i31 n) with ($V (VAL_ref (VAL_ref_i31 n))) => //.
+        by apply r_simple, rs_ref_as_non_null.
+
+    (* AI_basic (BI_call_ref x) *)
+    - destruct vs0 as [|v vs0]; first by resolve_invalid_typing.
+      destruct v as [v|v|v]; [by resolve_invalid_typing | by resolve_invalid_typing |].
+      destruct v as [h|a|a|a|n].
+      + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        by apply r_call_ref_null.
+      + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_invoke a)), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        by apply r_call_ref.
+      + by resolve_invalid_typing.
+      + by resolve_invalid_typing.
+      + by resolve_invalid_typing.
+
+    (* AI_basic (BI_return_call_ref x) *)
+    - destruct vs0 as [|v vs0]; first by resolve_invalid_typing.
+      destruct v as [v|v|v]; [by resolve_invalid_typing | by resolve_invalid_typing |].
+      destruct v as [h|a|a|a|n].
+      + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        by apply r_return_call_ref_null.
+      + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_return_invoke a)), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        by apply r_return_call_ref.
+      + by resolve_invalid_typing.
+      + by resolve_invalid_typing.
+      + by resolve_invalid_typing.
+
+    (* AI_basic (BI_br_on_non_null x) *)
+    - destruct vs0 as [|v vs0]; first by no_args.
+      assert_value_ref v.
+      destruct v as [h|a|a|a|n].
+      + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), None), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        by apply r_simple, rs_br_on_non_null_null.
+      + apply <<hs, (s, (fc, lcs) :: ccs', (VAL_ref (VAL_ref_func a) :: vs0, es0),
+                    Some (AI_basic (BI_br x))), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        replace (AI_ref a) with ($V (VAL_ref (VAL_ref_func a))) => //.
+        by apply r_simple, rs_br_on_non_null.
+      + apply <<hs, (s, (fc, lcs) :: ccs', (VAL_ref (VAL_ref_extern a) :: vs0, es0),
+                    Some (AI_basic (BI_br x))), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+         replace (AI_ref_extern a) with ($V (VAL_ref (VAL_ref_extern a))) => //.
+         by apply r_simple, rs_br_on_non_null.
+      + apply <<hs, (s, (fc, lcs) :: ccs', (VAL_ref (VAL_ref_exn a) :: vs0, es0),
+                    Some (AI_basic (BI_br x))), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        replace (AI_ref_exn a) with ($V (VAL_ref (VAL_ref_exn a))) => //.
+        by apply r_simple, rs_br_on_non_null.
+      + apply <<hs, (s, (fc, lcs) :: ccs',
+                    (VAL_ref (VAL_ref_i31 n) :: vs0, es0),
+                    Some (AI_basic (BI_br x))), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        replace (AI_ref_i31 n) with ($V (VAL_ref (VAL_ref_i31 n))) => //.
+        by apply r_simple, rs_br_on_non_null.
+
+    (* AI_basic BI_throw_ref *)
+    - destruct vs0 as [|v vs0]; first by no_args.
+      assert_value_ref v.
+      destruct v as [h|a|a|a|n].
+      + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        by apply r_simple, rs_throw_ref_null.
+      + resolve_invalid_typing.
+        resolve_invalid_value.
+        unfold is_exception_reference in *; simplify_multieq.
+        unfold value_typing in H; simpl in H; remove_bools_options.
+        apply ref_subtyping in H; last reflexivity.
+        injection H as Hr; rewrite Hr in Hconjr; discriminate Hconjr.
+      + resolve_invalid_typing.
+        resolve_invalid_value.
+        unfold is_exception_reference in *; simplify_multieq.
+        unfold value_typing in H; simpl in H; remove_bools_options.
+        apply ref_subtyping in H; last reflexivity.
+        injection H as Hr; rewrite Hr in Hconjr; discriminate Hconjr.
+      + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some (AI_raise a)), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        by apply r_simple, rs_throw_ref_exn.
+      + resolve_invalid_typing.
+        resolve_invalid_value.
+        unfold is_exception_reference in *; simplify_multieq.
+        unfold value_typing in H; simpl in H; remove_bools_options.
+        apply ref_subtyping in H; last reflexivity.
+        injection H as Hr; rewrite Hr in Hconjr; discriminate Hconjr.
+
+    (* AI_basic BI_ref_i31 *)
+    - destruct vs0 as [|v vs0]; first by no_args.
+      assert_value_num v.
+      destruct v as [n|n|n|n];
+        try by resolve_invalid_typing; resolve_invalid_value.
+      apply <<hs, (s, (fc, lcs) :: ccs',
+        (VAL_ref (VAL_ref_i31 (i31bits_of_i32 n)) :: vs0, es0), None), d>> => //.
+      resolve_reduce_ctx vs0 es0.
+      by apply r_simple, rs_ref_i31.
+
+    (* AI_basic BI_i31_get *)
+    - destruct vs0 as [|v vs0]; first by no_args.
+      assert_value_ref v.
+      destruct v as [h|a|a|a|n].
+      + apply <<hs, (s, (fc, lcs) :: ccs', (vs0, es0), Some AI_trap), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        by apply r_simple, rs_i31_get_null.
+      + { resolve_invalid_typing.
+        repeat match goal with b : bool |- _ => destruct b end.
+        all: resolve_invalid_value.
+        all: unfold value_typing in H; simpl in H;
+          destruct (ext_func_typing s a); by simpl in H. }
+      + { resolve_invalid_typing.
+        repeat match goal with b : bool |- _ => destruct b end.
+        all: resolve_invalid_value.
+        all: by unfold value_typing in H; simpl in H. }
+      + { resolve_invalid_typing.
+        repeat match goal with b : bool |- _ => destruct b end.
+        all: resolve_invalid_value.
+        all: unfold value_typing in H; simpl in H; remove_bools_options.
+        all: by unfold value_subtyping in H; simpl in H. }
+      + apply <<hs, (s, (fc, lcs) :: ccs',
+          (VAL_num (VAL_int32 (i32_of_i31bits
+            (match signed with SX_S => true | SX_U => false end) n)) :: vs0, es0),
+          None), d>> => //.
+        resolve_reduce_ctx vs0 es0.
+        by apply r_simple, rs_i31_get.
+
     (* AI_trap *)
     - destruct ((vs0 == nil) && (es0 == nil)) eqn:Hscnil; move/andP in Hscnil.
       + destruct Hscnil as [Heq1 Heq2]; move/eqP in Heq1; move/eqP in Heq2; subst.
@@ -1818,13 +2134,15 @@ the condition that all values should live in the operand stack. *)
           apply (list_label_ctx_eval).(ctx_reduce) => //.
           resolve_reduce_ctx fvs fes.
           by apply r_simple, rs_local_trap.
-        * destruct lc as [lvs ? ? les].
+        * destruct lc as [lvs ? ? les catches].
           apply <<hs, (s, (fc, lcs') :: ccs', (lvs, les), Some AI_trap), d>> => //.
           apply reduce_focus => //=.
           apply list_label_ctx_eval.(ctx_reduce) => //=.
           unfold label_ctx_fill => /=.
           resolve_reduce_ctx lvs les.
-          by apply r_simple, rs_label_trap.
+          destruct catches; apply r_simple.
+          - apply rs_handler_trap.
+          - apply rs_label_trap.
       + apply <<hs, (s, (fc, lcs) :: ccs', (nil, nil), Some AI_trap), d>> => //.
         resolve_reduce_ctx lvs les.
         apply r_simple.
@@ -1852,6 +2170,131 @@ the condition that all values should live in the operand stack. *)
     - by apply RSC_invalid => /=; move => [??].
 
     (* AI_frame ln lf es *)
+    - by apply RSC_invalid => /=; move => [??].
+    (* AI_raise a: exceptions are not traps. *)
+    - destruct ((vs0 == nil) && (es0 == nil)) eqn:Hscnil; move/andP in Hscnil.
+      + destruct Hscnil as [Heq1 Heq2]; move/eqP in Heq1; move/eqP in Heq2; subst.
+        destruct lcs as [|lc lcs'].
+        * destruct fc as [fvs ? ? fes].
+          destruct ccs' as [|cc0 ccs']; first by eapply RSC_exception; eauto.
+          apply <<hs, (s, cc0 :: ccs', (fvs, fes), Some (AI_raise a)),
+                   N.sub d 1>> => //=.
+          replace (cc0 :: ccs') with (nil ++ cc0 :: ccs') at 2 => //.
+          rewrite -cat1s.
+          apply reduce_focus_pivot => //=.
+          apply (list_label_ctx_eval).(ctx_reduce) => //.
+          resolve_reduce_ctx fvs fes.
+          by apply r_simple, rs_frame_raise.
+        * destruct lc as [lvs n cont les catches].
+          destruct catches as [cs|].
+          { destruct cs as [|c cs].
+            - apply <<hs, (s, (fc, lcs') :: ccs', (lvs, les),
+                           Some (AI_raise a)), d>> => //.
+              apply reduce_focus => //=.
+              apply list_label_ctx_eval.(ctx_reduce) => //=.
+              unfold label_ctx_fill => /=.
+              resolve_reduce_ctx lvs les.
+              apply r_handler_empty.
+            - destruct c as [x l|l|x l|l].
+              + destruct (lookup_N s.(s_exns) a) as [ex|] eqn:Hexn.
+                * destruct (lookup_N fc.(FC_frame).(f_inst).(inst_tags) x)
+                    as [tag|] eqn:Htag.
+                  { destruct (ex.(exninst_tag) == tag) eqn:Hmatch; move/eqP in Hmatch.
+                    - apply <<hs, (s, (fc, lcs') :: ccs',
+                        (rev ex.(exninst_fields) ++ lvs, les),
+                        Some (AI_basic (BI_br l))), d>> => //.
+                      apply reduce_focus => //=.
+                      apply list_label_ctx_eval.(ctx_reduce) => //=.
+                      unfold label_ctx_fill => /=.
+                      rewrite /vs_to_es rev_cat revK -v_to_e_cat.
+                      resolve_reduce_ctx lvs les.
+                      by eapply r_handler_tag; eauto.
+                    - apply <<hs, (s, (fc, lcs') :: ccs', (lvs, les),
+                        Some (AI_handler n cs [::AI_raise a])), d>> => //.
+                      apply reduce_focus => //=.
+                      apply list_label_ctx_eval.(ctx_reduce) => //=.
+                      unfold label_ctx_fill => /=.
+                      resolve_reduce_ctx lvs les.
+                      by eapply r_handler_next; eauto.
+                  }
+                  { resolve_invalid_handler lcs'.
+                    destruct (frame_tag_lookup Hframe Hoption) as [tag [Hlookup Hparams]].
+                    by rewrite Htag in Hlookup.
+                  }
+                * resolve_invalid_handler lcs'.
+                  by simplify_multieq.
+              + apply <<hs, (s, (fc, lcs') :: ccs', (lvs, les),
+                             Some (AI_basic (BI_br l))), d>> => //.
+                apply reduce_focus => //=.
+                apply list_label_ctx_eval.(ctx_reduce) => //=.
+                unfold label_ctx_fill => /=.
+                resolve_reduce_ctx lvs les.
+                apply r_handler_all.
+              + destruct (lookup_N s.(s_exns) a) as [ex|] eqn:Hexn.
+                * destruct (lookup_N fc.(FC_frame).(f_inst).(inst_tags) x)
+                    as [tag|] eqn:Htag.
+                  { destruct (ex.(exninst_tag) == tag) eqn:Hmatch; move/eqP in Hmatch.
+                    - apply <<hs, (s, (fc, lcs') :: ccs',
+                        (VAL_ref (VAL_ref_exn a) :: rev ex.(exninst_fields) ++ lvs, les),
+                        Some (AI_basic (BI_br l))), d>> => //.
+                      apply reduce_focus => //=.
+                      apply list_label_ctx_eval.(ctx_reduce) => //=.
+                      unfold label_ctx_fill => /=.
+                      rewrite /vs_to_es rev_cons rev_cat revK.
+                      rewrite -cats1 -!v_to_e_cat /= -!catA.
+                      resolve_reduce_ctx lvs les.
+                      { by eapply r_handler_tag_ref; eauto. }
+                      by rewrite -catA.
+                    - apply <<hs, (s, (fc, lcs') :: ccs', (lvs, les),
+                        Some (AI_handler n cs [::AI_raise a])), d>> => //.
+                      apply reduce_focus => //=.
+                      apply list_label_ctx_eval.(ctx_reduce) => //=.
+                      unfold label_ctx_fill => /=.
+                      resolve_reduce_ctx lvs les.
+                      by eapply r_handler_next_ref; eauto.
+                  }
+                  { resolve_invalid_handler lcs'.
+                    destruct (frame_tag_lookup Hframe Hoption) as [tag [Hlookup Hparams]].
+                    by rewrite Htag in Hlookup.
+                  }
+                * resolve_invalid_handler lcs'.
+                  by simplify_multieq.
+              + apply <<hs, (s, (fc, lcs') :: ccs',
+                             (VAL_ref (VAL_ref_exn a) :: lvs, les),
+                             Some (AI_basic (BI_br l))), d>> => //.
+                apply reduce_focus => //=.
+                apply list_label_ctx_eval.(ctx_reduce) => //=.
+                unfold label_ctx_fill => /=.
+                rewrite /vs_to_es rev_cons -cats1 -v_to_e_cat /= -catA.
+                resolve_reduce_ctx lvs les.
+                apply r_handler_all_ref.
+          }
+          { apply <<hs, (s, (fc, lcs') :: ccs', (lvs, les),
+                         Some (AI_raise a)), d>> => //.
+            apply reduce_focus => //=.
+            apply list_label_ctx_eval.(ctx_reduce) => //=.
+            unfold label_ctx_fill => /=.
+            resolve_reduce_ctx lvs les.
+            by apply r_simple, rs_label_raise.
+          }
+      + apply <<hs, (s, (fc, lcs) :: ccs', (nil, nil),
+                     Some (AI_raise a)), d>> => //.
+        resolve_reduce_ctx lvs les.
+        apply r_simple.
+        apply rs_raise => //.
+        move => Hcontra; apply Hscnil.
+        specialize (f_equal size Hcontra) as Hsize;
+          rewrite size_cat v_to_e_size size_rev in Hsize.
+        simpl in Hsize; clear -Hsize.
+        assert (H: size vs0 = 0); first by lias.
+        destruct vs0 => //; clear H.
+        assert (H: size es0 = 0); first by lias.
+        by destruct es0.
+    (* Handlers are decomposed into zero-label control contexts. *)
+    - by apply RSC_invalid => /=; move => [??].
+    (* Exception references are operands, never canonical holes. *)
+      - by apply RSC_invalid => /=; move => [??].
+    (* AI_ref_i31 *)
     - by apply RSC_invalid => /=; move => [??].
   }
 Defined.
@@ -1926,7 +2369,7 @@ Defined.
 (* One-step interpreter with cfg reformation. *)
 Definition run_one_step (hs: host_state) (cfg: cfg_tuple_ctx) (d: N): run_step_ctx_result hs cfg d.
 Proof.
-  destruct (run_one_step_ctx hs cfg d) as [hs' cfg' d' Hreduce Hvalid | | | |].
+  destruct (run_one_step_ctx hs cfg d) as [hs' cfg' d' Hreduce Hvalid | | | | |].
   - destruct cfg' as [[[s ccs] sc] oe].
     assert (valid_ccs ccs) as Hvalid'; first by destruct ccs.
     apply (run_step_reform_valid s sc oe) in Hvalid' as [cfg' [Hreform [Heq Hvalid']]].

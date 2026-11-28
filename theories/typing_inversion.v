@@ -77,9 +77,22 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
   | BI_const_vec c =>
       tf = (Tf nil [::T_vec (typeof_vec c)])
   | BI_ref_null t =>
-      tf = (Tf nil [::T_ref t])
+      tf = (Tf nil [::T_ref (Ref_type true t)])
   | BI_ref_is_null =>
       exists t, tf = (Tf [::T_ref t] [::T_num T_i32])
+  | BI_ref_i31 =>
+      tf = (Tf [::T_num T_i32] [::T_ref (Ref_type false HT_i31)])
+  | BI_i31_get _ =>
+      exists nullable, tf =
+        (Tf [::T_ref (Ref_type nullable HT_i31)] [::T_num T_i32])
+  | BI_ref_as_non_null =>
+      exists t, tf = (Tf [::t] [::t]) /\ is_ref_t t
+  | BI_call_ref _ | BI_return_call_ref _ => False
+  | BI_br_on_non_null x =>
+      exists ts t,
+        tf = Tf (ts ++ [::t]) ts /\
+        lookup_N C.(tc_labels) x = Some (ts ++ [::t]) /\
+        is_ref_t t
   | BI_ref_func x =>
       exists t, tf = (Tf [::] [::T_ref T_funcref]) /\
              lookup_N (tc_funcs C) x = Some t /\
@@ -134,7 +147,13 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       exists tn tm,
       tf = (Tf tn tm) /\
         expand_t C tb = Some (Tf tn tm) /\
-        be_typing (upd_label C ([::tm] ++ (tc_labels C))) es (Tf tn tm)
+         be_typing (upd_label C ([::tm] ++ (tc_labels C))) es (Tf tn tm)
+  | BI_try_table tb cs es =>
+      exists tn tm,
+      tf = (Tf tn tm) /\
+        expand_t C tb = Some (Tf tn tm) /\
+        all (catch_clause_typing C) cs /\
+        be_typing (upd_label C (tm :: tc_labels C)) es (Tf tn tm)
   | BI_loop tb es =>
       exists tn tm,
       tf = (Tf tn tm) /\
@@ -161,7 +180,15 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
   | BI_return =>
       exists tx ty ts,
       tf = (Tf (tx ++ ts) ty) /\
-        tc_return C = Some ts
+         tc_return C = Some ts
+  | BI_throw x =>
+      exists tx ty ps,
+      tf = (Tf (tx ++ ps) ty) /\
+        lookup_N C.(tc_tags) x = Some ps
+  | BI_throw_ref =>
+      exists prefix out r,
+        tf = Tf (prefix ++ [::T_ref r]) out /\
+        is_exception_reference r
   | BI_call n =>
       exists tf0,
       tf = tf0 /\
@@ -171,7 +198,7 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       tf = (Tf (ts1 ++ [::T_num T_i32]) ts2)/\
         lookup_N (tc_tables C) x = Some tabt /\
         tabt.(tt_elem_type) = T_funcref /\
-        lookup_N (tc_types C) y = Some (Tf ts1 ts2)
+        lookup_function_type (tc_types C) y = Some (Tf ts1 ts2)
   | BI_return_call n =>
       exists ts1 ts2 ts3 ts4,
       tf = (Tf (ts3 ++ ts1) ts4) /\
@@ -182,7 +209,7 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       tf = (Tf (ts3 ++ ts1 ++ [::T_num T_i32]) ts4)/\
         lookup_N (tc_tables C) x = Some tabt /\
         tabt.(tt_elem_type) = T_funcref /\
-        lookup_N (tc_types C) y = Some (Tf ts1 ts2) /\
+        lookup_function_type (tc_types C) y = Some (Tf ts1 ts2) /\
         tc_return C = Some ts2
   | BI_local_get x =>
       exists t,
@@ -531,8 +558,21 @@ Definition e_principal_typing (s: store_record) (C: t_context) (e: administrativ
       be_principal_typing C b tf
   | AI_trap =>
       True (* Equivalently, add trivial equalities *)
+  | AI_raise a =>
+      exists ex, lookup_N s.(s_exns) a = Some ex
+  | AI_handler n cs es =>
+      exists ts,
+        tf = Tf nil ts /\
+        all (catch_clause_typing C) cs /\
+        e_typing s C es (Tf nil ts) /\
+        length ts = n
   | AI_ref_extern a =>
       tf = (Tf nil [::T_ref T_externref])
+  | AI_ref_exn a =>
+      tf = Tf nil [::T_ref (Ref_type false HT_exn)] /\
+      exists ex, lookup_N s.(s_exns) a = Some ex
+  | AI_ref_i31 _ =>
+      tf = (Tf nil [::T_ref (Ref_type false HT_i31)])
   | AI_ref a =>
       exists t, tf = (Tf nil [::T_ref T_funcref]) /\
         ext_func_typing s a = Some t
@@ -693,12 +733,12 @@ Proof.
   - exists (T_vec (typeof_vec v)); split => //.
     by destruct v.
   (* ref -- slightly annoying, since one is basic and the other ones are not *)
-  - destruct v; simpl in *.
+  - destruct v as [h|a|a|a|n]; simpl in *.
     (* ref_null *)
     + apply et_to_bet in HType; last done; simpl in *.
       invert_be_typing.
-      exists (T_ref r); split => //.
-      by destruct r.
+      exists (T_ref (Ref_type true h)); split => //.
+      by unfold value_typing; simpl; apply value_subtyping_eq.
     (* ref *)
     + apply e_typing_inversion in HType; simpl in *.
       extract_premise.
@@ -709,6 +749,18 @@ Proof.
     + apply e_typing_inversion in HType; simpl in *.
       extract_premise.
       exists (T_ref T_externref).
+       by split => //.
+    + apply e_typing_inversion in HType; simpl in *.
+      extract_premise.
+      exists (T_ref (Ref_type false HT_exn)); split => //.
+      unfold value_typing => /=.
+      match goal with
+      | Hlookup: lookup_N (s_exns s) a = Some _ |- _ =>
+          by rewrite Hlookup; apply value_subtyping_eq
+      end.
+    + apply e_typing_inversion in HType; simpl in *.
+      extract_premise.
+      exists (T_ref (Ref_type false HT_i31)).
       by split => //.
   Transparent instr_subtyping.
 Qed.
@@ -752,14 +804,24 @@ Proof.
   - apply ety_a' => //=.
     econstructor; first by econstructor.
     apply instr_subtyping_weaken2 with (ty2 := [::T_vec (typeof_vec v)]); by resolve_subtyping.
-  - destruct v as [| f | e] => /=; simpl in *; try injection Hoption as <-; remove_bools_options.
+  - destruct v as [h| f | e | a | n] => /=; simpl in *; try injection Hoption as <-; remove_bools_options.
     + apply ety_a' => //=.
       econstructor; first by econstructor.
-      apply instr_subtyping_weaken2 with (ty2 := [::T_ref r]); by resolve_subtyping.
+      apply instr_subtyping_weaken2 with (ty2 := [::T_ref (Ref_type true h)]).
+      * apply instr_subtyping_eq.
+      * by rewrite -value_values_subtyping.
     + eapply ety_subtyping; first by eapply ety_ref; eauto.
-      apply instr_subtyping_weaken2 with (ty2 := [::T_ref T_funcref]); by resolve_subtyping.
+      apply instr_subtyping_weaken2 with (ty2 := [::T_ref T_funcref]); first apply instr_subtyping_eq.
+      by rewrite -value_values_subtyping.
     + eapply ety_subtyping; first by eapply ety_ref_extern; eauto.
-      apply instr_subtyping_weaken2 with (ty2 := [::T_ref T_externref]); by resolve_subtyping.
+      apply instr_subtyping_weaken2 with (ty2 := [::T_ref T_externref]); first apply instr_subtyping_eq.
+      by rewrite -value_values_subtyping.
+    + eapply ety_subtyping; first by eapply ety_ref_exn; eauto.
+      apply instr_subtyping_weaken2 with (ty2 := [::T_ref (Ref_type false HT_exn)]); first apply instr_subtyping_eq.
+      by rewrite -value_values_subtyping.
+     + eapply ety_subtyping; first by eapply ety_ref_i31; eauto.
+       apply instr_subtyping_weaken2 with (ty2 := [::T_ref (Ref_type false HT_i31)]); first apply instr_subtyping_eq.
+       by rewrite -value_values_subtyping.
 Qed.
 
 Lemma et_values_typing: forall s C vs ts,
@@ -922,7 +984,7 @@ Proof.
   remove_bools_options; simpl in *.
   unfold store_typing in Hst.
   destruct s; remove_bools_options.
-  destruct Hst as [? [? [? [Hglobtype ?]]]].
+  destruct Hst as [_ [? [? [? [Hglobtype ?]]]]].
   eapply those_lookup_inv in Hoption5; eauto.
   eapply Forall_lookup with (n := (N.to_nat g1)) in Hglobtype as [gt Hglobtype]; eauto.
   {
@@ -932,11 +994,62 @@ Proof.
     unfold ext_global_typing in Hoption5.
     remove_bools_options; simpl in *.
     unfold lookup_N in *.
-    rewrite Hoption1 in Hoption8.
-    injection Hoption8 as <-.
-    rewrite Hoption0 in Hoption5.
-    by injection Hoption5 as <-.
+    repeat match goal with
+    | H1: ?e = ?x, H2: ?e = ?y |- _ => rewrite H1 in H2
+    | H: Some ?x = Some ?y |- _ => injection H; intros; subst; clear H
+    end; done.
   }
+Qed.
+
+Lemma tag_context_store: forall s i C x ps,
+    inst_typing s i = Some C ->
+    lookup_N C.(tc_tags) x = Some ps ->
+    exists a, lookup_N i.(inst_tags) x = Some a /\
+              lookup_N s.(s_tags) a = Some ps.
+Proof.
+  move => s i C x ps Hinst Htag.
+  unfold inst_typing in Hinst; destruct i.
+  remove_bools_options; simpl in *.
+  unfold lookup_N in *.
+  eapply those_lookup_inv in Hoption5; eauto.
+  apply nth_error_map in Hoption5 as [a [Hnth Heq]].
+  by exists a.
+Qed.
+
+Lemma context_agree_tags C C' :
+  context_agree C C' -> C.(tc_tags) = C'.(tc_tags).
+Proof.
+  unfold context_agree; move => H; remove_bools_options; done.
+Qed.
+
+Lemma frame_tag_lookup s f C x ps :
+  frame_typing s f C ->
+  lookup_N C.(tc_tags) x = Some ps ->
+  exists a, lookup_N f.(f_inst).(inst_tags) x = Some a /\
+            lookup_N s.(s_tags) a = Some ps.
+Proof.
+  move => Hframe Hlookup.
+  unfold frame_typing in Hframe.
+  destruct (inst_typing s (f_inst f)) as [C0|] eqn:Hinst; last contradiction.
+  destruct Hframe as [ts [HC Hvalues]]; subst C.
+  simpl in Hlookup.
+  by eapply tag_context_store; eauto.
+Qed.
+
+Lemma frame_tag_lookup_agree s f C C' x ps :
+  frame_typing s f C ->
+  context_agree C C' ->
+  lookup_N C'.(tc_tags) x = Some ps ->
+  exists a, lookup_N f.(f_inst).(inst_tags) x = Some a /\
+            lookup_N s.(s_tags) a = Some ps.
+Proof.
+  move => Hframe Hagree Hlookup.
+  rewrite -(context_agree_tags Hagree) in Hlookup.
+  unfold frame_typing in Hframe.
+  destruct (inst_typing s (f_inst f)) as [C0|] eqn:Hinst; last contradiction.
+  destruct Hframe as [ts [HC Hvalues]]; subst C.
+  simpl in Hlookup.
+  by eapply tag_context_store; eauto.
 Qed.
 
 Lemma func_context_store: forall s i C j x,
@@ -1037,6 +1150,10 @@ Proof.
     + subst tss'. uapply Hconjl1; repeat f_equal; by lias.
     + done.
     + by resolve_subtyping.
+  - move => k0 vs m cs lh' IH es' tss LI /= <- ts2 ts HType HTSSLength.
+    rewrite -(cat1s _ es') in HType.
+    invert_e_typing.
+    by eapply IH; eauto.
 Qed.
   
 Lemma Lfilled_return_typing {k}: forall (lh: lholed k) vs LI ts s C0 C t2s,
@@ -1063,6 +1180,7 @@ Proof.
     repeat rewrite length_is_size in HLength.
     eapply values_subtyping_cat_suffix; eauto.
     by lias.
+  - by eapply IHlh; eauto.
   - by eapply IHlh; eauto.
 Qed.
 
