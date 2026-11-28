@@ -43,6 +43,11 @@
  (modules simd_codec_extracted)
  (libraries wasmcert_extracted parray zarith))
 
+(test
+ (name block_type_codec_extracted)
+ (modules block_type_codec_extracted)
+ (libraries wasmcert_extracted parray zarith))
+
 (rule
  (target section_framing_binary.wast)
  (deps section_framing_binary.py)

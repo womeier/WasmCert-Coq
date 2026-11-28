@@ -3,6 +3,7 @@ From Stdlib Require Import Strings.Byte ZArith.
 From parseque Require Import Parseque.
 From Wasm Require Import binary_format_parser binary_format_printer
                          datatypes_properties check_toks.
+Open Scope list_scope.
 
 (** A vector's u32 length may have a non-minimal LEB128 representation.
     In particular, a padded zero length must not require an element parser
@@ -25,6 +26,24 @@ Proof. vm_compute. reflexivity. Qed.
 Lemma section_payload_cannot_include_next_section :
   run_parse_module
     (empty_module_header ++ (x01 :: x04 :: x00 :: x03 :: x01 :: x00 :: nil)) = None.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma block_index_64_uses_signed_encoding :
+  binary_of_block_type (BT_id 64%N) = xc0 :: x00 :: nil.
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma block_index_64_roundtrip :
+  run_parse_be (binary_of_be (BI_block (BT_id 64%N) nil)) =
+    Some (BI_block (BT_id 64%N) nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma block_index_signed_127_decodes :
+  run_parse_be (x02 :: xff :: x00 :: x0b :: nil) =
+    Some (BI_block (BT_id 127%N) nil).
+Proof. vm_compute. reflexivity. Qed.
+
+Lemma block_index_s33_overflow_rejected :
+  run_parse_be (x02 :: x80 :: x80 :: x80 :: x80 :: x10 :: x0b :: nil) = None.
 Proof. vm_compute. reflexivity. Qed.
 
 Lemma padded_empty_type_vector :

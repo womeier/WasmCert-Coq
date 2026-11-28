@@ -167,10 +167,18 @@ Definition parse_value_type {n} : byte_parser value_type n :=
   T_vec <$> parse_vector_type <|>
   T_ref <$> parse_reference_type.
 
+(* Unlike ordinary indices, block type indices use the nonnegative half of
+   signed s33.  Unsigned LEB128 collides with 0x40 and the value-type bytes. *)
+Definition parse_block_typeidx {n} : byte_parser typeidx n :=
+  guardM
+    (fun z => if andb (Z.leb 0 z) (Z.leb z 4294967295)
+      then Some (Z.to_N z) else None)
+    (assert_sized (extract parse_signed n) (fun size => N.leb size 5)).
+
 Definition parse_block_type {n} : byte_parser block_type n :=
   (exact_byte x40 $> BT_valtype None) <|>
   (fun t => BT_valtype (Some t)) <$> parse_value_type <|>
-  BT_id <$> parse_typeidx.
+  BT_id <$> parse_block_typeidx.
 
 
 Definition parse_unreachable {n} : byte_parser basic_instruction n :=
