@@ -6,6 +6,10 @@ From Wasm Require Import numerics memory_vec binary_format_parser text_format_pa
 From ExtLib Require Import Structures.Monad IdentityMonad.
 
 From Wasm Require Import memory_vec binary_format_parser text_format_parser.
+From Wasm Require Import gc_numerics gc_binary gc_types.
+From Wasm Require Import binary_format_printer.
+From Wasm Require Import gc_type_context.
+From Wasm Require Import gc_declaration_typing.
 
 (* see common.v *)
 Set SsrOldRewriteGoalsOrder.
@@ -59,6 +63,41 @@ Module Monadic_host (PH: Parametric_host).
 End Monadic_host.
   
 Module Utility.
+
+  (** Reusable GC primitives.  These exports do not enable GC instructions
+      in the existing module validator or interpreter. *)
+  Module GC.
+    Module Types.
+      Definition validate := canonical_registry_validb.
+      Definition close_validated := close_and_validate_type_groups.
+      Definition close_functions registry types :=
+        close_and_validate_type_groups registry (function_type_groups types).
+      Definition composite_matches := closed_composite_matchesb.
+      Definition close := close_type_groups.
+      Definition expand := expand_defined_type.
+      Definition function_type := expand_function_type.
+      Definition struct_type := expand_struct_type.
+      Definition array_type := expand_array_type.
+      Definition matches := defined_type_matches.
+      Definition equivalent := defined_type_equiv.
+    End Types.
+    Definition ref_i31 := ref_i31.
+    Definition i31_get := i31_get.
+    Definition i31_get_nullable := i31_get_nullable.
+    Definition pack_field := pack_field.
+    Definition unpack_field := unpack_field.
+    Definition heap_subtyping := abstract_heap_subtyping.
+    Definition reference_subtyping := abstract_reference_subtyping.
+    Definition encode_reference := encode_abstract_reference.
+    Definition decode_reference := run_parse_gc_abstract_reference_type.
+    Definition encode_packed := encode_packed_type.
+    Definition decode_packed := decode_packed_type.
+    Definition decode_typeidx := run_parse_heap_typeidx.
+    Definition encode_typeidx := binary_of_heap_typeidx.
+    Definition encode_immediate_typeidx := binary_of_typeidx.
+    Definition decode_immediate_typeidx (bs : list Byte.byte) : option typeidx :=
+      run bs (fun _ => parse_typeidx).
+  End GC.
   
   Definition vali32_of_Z (z: Z) : value :=
     VAL_num (VAL_int32 (Wasm_int.int_of_Z i32m z)).
@@ -171,8 +210,16 @@ End PP.
 
 Section Instantiation_func_extract.
 
+Definition resolve_type := resolve_inst_type.
+Definition expand_type := expand_inst_type.
+Definition expand_function := expand_inst_function_type.
+Definition native_function_type := native_func_defined_type.
+Definition lookup_function_type := lookup_func_defined_type.
+Definition instance_context := inst_typing.
+
 Definition empty_store_record : store_record := {|
     s_funcs := nil;
+    s_types := nil;
     s_tables := nil;
     s_mems := nil;
     s_globals := nil;

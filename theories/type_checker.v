@@ -103,6 +103,22 @@ Definition type_update_ref_is_null (ct : checker_type) : option checker_type :=
       else None
   end.
 
+Definition is_i31_t (t : value_type) : bool :=
+  match t with
+  | T_ref (Ref_type _ HT_i31) | T_bot => true
+  | _ => false
+  end.
+
+Definition type_update_i31_get (ct : checker_type) : option checker_type :=
+  match ct.(CT_type) with
+  | nil =>
+      if ct.(CT_unr) then Some <<[::T_num T_i32], true>> else None
+  | t :: ts' =>
+      if is_i31_t t then
+        Some <<(T_num T_i32 :: ts'), ct.(CT_unr)>>
+      else None
+  end.
+
 Definition type_update_drop (ct : checker_type) : option checker_type :=
   match ct.(CT_type) with
   | nil =>
@@ -177,6 +193,9 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
       | BI_const_vec v => type_update ts [::] [::T_vec (typeof_vec v)]
       | BI_ref_null t => type_update ts [::]  [::T_ref (Ref_type true t)]
       | BI_ref_is_null => type_update_ref_is_null ts
+      | BI_ref_i31 =>
+          type_update ts [::T_num T_i32] [::T_ref (Ref_type false HT_i31)]
+      | BI_i31_get _ => type_update_i31_get ts
       | BI_ref_as_non_null => type_update_ref_as_non_null ts
       (* Parsing and dispatch are available, but accepting these instructions
          requires closed indexed function reference typing. Never substitute
@@ -309,7 +328,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
           match lookup_N C.(tc_tables) x with
           | Some tabt =>
                 if ref_heap tabt.(tt_elem_type) == HT_func then
-                match lookup_N (tc_types C) y with
+                match lookup_function_type (tc_types C) y with
                 | Some (Tf tn tm) =>
                     type_update ts ((T_num T_i32 :: tn)) tm
                 | None => None 
@@ -335,7 +354,7 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
               match lookup_N C.(tc_tables) x with
               | Some tabt =>
                     if ref_heap tabt.(tt_elem_type) == HT_func then
-                    match lookup_N (tc_types C) y with
+                    match lookup_function_type (tc_types C) y with
                     | Some (Tf tn tm) =>
                         if (t2s == tm) then
                           type_update_top ts ((T_num T_i32 :: tn)) nil
@@ -544,9 +563,17 @@ Definition rev_tf (tf: function_type) :=
   | Tf tn tm => Tf (rev tn) (rev tm)
   end.
 
+Definition rev_source_subtype (t : source_subtype) : source_subtype :=
+  Sub_type t.(subtype_final) t.(subtype_supers)
+    (match t.(subtype_composite) with
+     | Comp_func f => Comp_func (rev_tf f)
+     | Comp_struct fields => Comp_struct fields
+     | Comp_array field => Comp_array field
+     end).
+
 Definition context_reverse (C: t_context): t_context :=
   {|
-    tc_types := map rev_tf C.(tc_types);
+    tc_types := map rev_source_subtype C.(tc_types);
     tc_funcs := map rev_tf C.(tc_funcs);
     tc_tables := C.(tc_tables);
     tc_mems := C.(tc_mems);

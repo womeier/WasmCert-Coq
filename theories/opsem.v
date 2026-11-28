@@ -97,7 +97,17 @@ Inductive reduce_simple : seq administrative_instruction -> seq administrative_i
   | rs_ref_is_null_false:
     forall ref,
     (forall t, ref <> VAL_ref_null t) ->
-    reduce_simple [:: $V (VAL_ref ref); AI_basic BI_ref_is_null] [::$VN (VAL_int32 Wasm_int.Int32.zero)]
+     reduce_simple [:: $V (VAL_ref ref); AI_basic BI_ref_is_null] [::$VN (VAL_int32 Wasm_int.Int32.zero)]
+  | rs_ref_i31 : forall n,
+    reduce_simple [:: $VN (VAL_int32 n); AI_basic BI_ref_i31]
+      [:: $V (VAL_ref (VAL_ref_i31 (i31bits_of_i32 n)))]
+  | rs_i31_get : forall signed n,
+    reduce_simple [:: $V (VAL_ref (VAL_ref_i31 n)); AI_basic (BI_i31_get signed)]
+      [:: $VN (VAL_int32 (i32_of_i31bits
+        (match signed with SX_S => true | SX_U => false end) n))]
+  | rs_i31_get_null : forall signed h,
+    reduce_simple [:: $V (VAL_ref (VAL_ref_null h)); AI_basic (BI_i31_get signed)]
+      [:: AI_trap]
                   
   (** control-flow operations **)
   | rs_unreachable :
@@ -230,13 +240,13 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
       forall s f x (y: typeidx) a cl i hs,
         stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_func a) ->
         lookup_N s.(s_funcs) a = Some cl ->
-        lookup_N f.(f_inst).(inst_types) y = Some (cl_type cl) ->
+        lookup_function_type f.(f_inst).(inst_types) y = Some (cl_type cl) ->
         reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_call_indirect x y)] hs s f [::AI_invoke a]
   | r_call_indirect_failure_mismatch :
       forall s f x (y: typeidx) a cl i hs,
         stab_elem s f.(f_inst) x (Wasm_int.N_of_uint i32m i) = Some (VAL_ref_func a) ->
         lookup_N s.(s_funcs) a = Some cl ->
-        lookup_N f.(f_inst).(inst_types) y <> Some (cl_type cl) ->
+        lookup_function_type f.(f_inst).(inst_types) y <> Some (cl_type cl) ->
         reduce hs s f [::$VN (VAL_int32 i); AI_basic (BI_call_indirect x y)] hs s f [::AI_trap]
   | r_call_indirect_failure_bound :
       forall s f x (y: typeidx) i hs,

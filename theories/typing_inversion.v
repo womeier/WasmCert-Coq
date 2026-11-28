@@ -80,6 +80,11 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       tf = (Tf nil [::T_ref (Ref_type true t)])
   | BI_ref_is_null =>
       exists t, tf = (Tf [::T_ref t] [::T_num T_i32])
+  | BI_ref_i31 =>
+      tf = (Tf [::T_num T_i32] [::T_ref (Ref_type false HT_i31)])
+  | BI_i31_get _ =>
+      exists nullable, tf =
+        (Tf [::T_ref (Ref_type nullable HT_i31)] [::T_num T_i32])
   | BI_ref_as_non_null =>
       exists t, tf = (Tf [::t] [::non_nullable_type t]) /\ is_ref_t t
   | BI_call_ref _ | BI_return_call_ref _ => False
@@ -183,7 +188,7 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       tf = (Tf (ts1 ++ [::T_num T_i32]) ts2)/\
         lookup_N (tc_tables C) x = Some tabt /\
         ref_heap tabt.(tt_elem_type) = HT_func /\
-        lookup_N (tc_types C) y = Some (Tf ts1 ts2)
+        lookup_function_type (tc_types C) y = Some (Tf ts1 ts2)
   | BI_return_call n =>
       exists ts1 ts2 ts3 ts4,
       tf = (Tf (ts3 ++ ts1) ts4) /\
@@ -194,7 +199,7 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       tf = (Tf (ts3 ++ ts1 ++ [::T_num T_i32]) ts4)/\
         lookup_N (tc_tables C) x = Some tabt /\
         ref_heap tabt.(tt_elem_type) = HT_func /\
-        lookup_N (tc_types C) y = Some (Tf ts1 ts2) /\
+        lookup_function_type (tc_types C) y = Some (Tf ts1 ts2) /\
         tc_return C = Some ts2
   | BI_local_get x =>
       exists t,
@@ -545,6 +550,8 @@ Definition e_principal_typing (s: store_record) (C: t_context) (e: administrativ
       True (* Equivalently, add trivial equalities *)
   | AI_ref_extern a =>
       tf = (Tf nil [::T_ref (Ref_type false HT_extern)])
+  | AI_ref_i31 _ =>
+      tf = (Tf nil [::T_ref (Ref_type false HT_i31)])
   | AI_ref a =>
       exists t, tf = (Tf nil [::T_ref (Ref_type false HT_func)]) /\
         ext_func_typing s a = Some t
@@ -705,7 +712,7 @@ Proof.
   - exists (T_vec (typeof_vec v)); split => //.
     by destruct v.
   (* ref -- slightly annoying, since one is basic and the other ones are not *)
-  - destruct v as [h|a|a]; simpl in *.
+  - destruct v as [h|a|a|n]; simpl in *.
     (* ref_null *)
     + apply et_to_bet in HType; last done; simpl in *.
       invert_be_typing.
@@ -721,6 +728,10 @@ Proof.
     + apply e_typing_inversion in HType; simpl in *.
       extract_premise.
       exists (T_ref (Ref_type false HT_extern)).
+      by split => //.
+    + apply e_typing_inversion in HType; simpl in *.
+      extract_premise.
+      exists (T_ref (Ref_type false HT_i31)).
       by split => //.
   Transparent instr_subtyping.
 Qed.
@@ -764,7 +775,7 @@ Proof.
   - apply ety_a' => //=.
     econstructor; first by econstructor.
     apply instr_subtyping_weaken2 with (ty2 := [::T_vec (typeof_vec v)]); by resolve_subtyping.
-  - destruct v as [h| f | e] => /=; simpl in *; try injection Hoption as <-; remove_bools_options.
+  - destruct v as [h| f | e | n] => /=; simpl in *; try injection Hoption as <-; remove_bools_options.
     + apply ety_a' => //=.
       econstructor; first by econstructor.
       apply instr_subtyping_weaken2 with (ty2 := [::T_ref (Ref_type true h)]); by resolve_subtyping.
@@ -772,6 +783,8 @@ Proof.
       apply instr_subtyping_weaken2 with (ty2 := [::T_ref (Ref_type false HT_func)]); by resolve_subtyping.
     + eapply ety_subtyping; first by eapply ety_ref_extern; eauto.
       apply instr_subtyping_weaken2 with (ty2 := [::T_ref (Ref_type false HT_extern)]); by resolve_subtyping.
+     + eapply ety_subtyping; first by eapply ety_ref_i31; eauto.
+       apply instr_subtyping_weaken2 with (ty2 := [::T_ref (Ref_type false HT_i31)]); by resolve_subtyping.
 Qed.
 
 Lemma et_values_typing: forall s C vs ts,
@@ -934,7 +947,7 @@ Proof.
   remove_bools_options; simpl in *.
   unfold store_typing in Hst.
   destruct s; remove_bools_options.
-  destruct Hst as [? [? [? [Hglobtype ?]]]].
+  destruct Hst as [_ [? [? [? [Hglobtype ?]]]]].
   eapply those_lookup_inv in Hoption5; eauto.
   eapply Forall_lookup with (n := (N.to_nat g1)) in Hglobtype as [gt Hglobtype]; eauto.
   {

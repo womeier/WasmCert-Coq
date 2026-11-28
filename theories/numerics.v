@@ -1042,6 +1042,16 @@ Module Int64.
 Include Make(Integers.Wordsize_64).
 End Int64.
 
+Module Wordsize_31 <: Integers.WORDSIZE.
+  Definition wordsize : nat := 31.
+  Lemma wordsize_not_zero : wordsize <> 0.
+  Proof. discriminate. Qed.
+End Wordsize_31.
+
+Module Int31.
+Include Make(Wordsize_31).
+End Int31.
+
 End Wasm_int.
 
 Definition i32 : Type := Wasm_int.Int32.T.
@@ -1051,6 +1061,19 @@ HB.instance Definition i32_eqMixin := hasDecEq.Build i32 Wasm_int.Int32.eq_eqP.
 Definition i64 : Type :=  Wasm_int.Int64.T.
 Definition i64m := Wasm_int.Int64.Tmixin.
 HB.instance Definition i64_eqMixin := hasDecEq.Build i64 Wasm_int.Int64.eq_eqP.
+
+(** GC i31 payloads carry their range invariant through the existing integer
+    representation; they are not arbitrary i32 values with an unchecked tag. *)
+Definition i31bits : Set := Wasm_int.Int31.int.
+HB.instance Definition i31bits_eqMixin :=
+  hasDecEq.Build i31bits Wasm_int.Int31.eq_eqP.
+
+Definition i31bits_of_i32 (n : i32) : i31bits :=
+  Wasm_int.Int31.repr (Wasm_int.Int32.unsigned n).
+
+Definition i32_of_i31bits (signed : bool) (n : i31bits) : i32 :=
+  Wasm_int.Int32.repr
+    (if signed then Wasm_int.Int31.signed n else Wasm_int.Int31.unsigned n).
 
 Definition wasm_wrap (i : i64) : i32 :=
   @Wasm_int.int_of_Z i32 i32m (Wasm_int.Z_of_uint i64m i).
