@@ -598,6 +598,10 @@ Fixpoint pp_basic_instruction (i : indentation) (be : basic_instruction) : strin
     indent i (with_fg be_style "block" ++ with_fg type_style (pp_block_type tf) ++ newline)
     ++ pp_basic_instructions bes (S i)
     ++ indent i (with_fg be_style "end" ++ newline)
+  | BI_try_table tf cs bes =>
+    indent i (with_fg be_style "try_table" ++ with_fg type_style (pp_block_type tf) ++ newline)
+    ++ pp_basic_instructions bes (S i)
+    ++ indent i (with_fg be_style "end" ++ newline)
   | BI_loop tf bes =>
     indent i (with_fg be_style "loop" ++ with_fg type_style (pp_block_type tf) ++ newline)
     ++ pp_basic_instructions bes (S i)
@@ -780,6 +784,9 @@ Fixpoint pp_administrative_instruction (n : indentation) (e : administrative_ins
     indent n (with_fg ae_style "end frame" ++ newline)
   | AI_raise a =>
     indent n (with_fg ae_style "exception " ++ pp_addr a ++ newline)
+  | AI_handler k cs es =>
+    indent n (with_fg ae_style "handler " ++ string_of_nat k ++ newline)
+    ++ pp_administrative_instructions (S n) es
   end.
 
 Definition pp_administrative_instructions (n : nat) (es : list administrative_instruction) : string :=

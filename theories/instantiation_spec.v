@@ -437,6 +437,7 @@ Fixpoint be_get_funcidx (be: basic_instruction) : list funcidx :=
   | BI_ref_func x => [:: x]
   | BI_call x => [:: x]
   | BI_block _ bes => nlist_nodup (List.concat (List.map be_get_funcidx bes))
+  | BI_try_table _ _ bes => nlist_nodup (List.concat (List.map be_get_funcidx bes))
   | BI_if _ bes1 bes2 => nlist_nodup (List.concat (List.map be_get_funcidx bes1) ++ List.concat (List.map be_get_funcidx bes2))
   | BI_loop _ bes => nlist_nodup (List.concat (List.map be_get_funcidx bes))
   | _ => nil

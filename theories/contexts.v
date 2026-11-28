@@ -69,6 +69,7 @@ Record label_ctx: Type :=
     LC_arity: nat;
     LC_cont: list administrative_instruction;
     LC_post: list administrative_instruction;
+    LC_catches: option (list catch_clause);
   }.
 
 Definition label_ctx_eq_dec (v1 v2 : label_ctx): {v1 = v2} + {v1 <> v2}.
@@ -82,15 +83,75 @@ Definition eqlabel_ctxP: Equality.axiom label_ctx_eqb :=
 
 HB.instance Definition label_ctx_eqMixin := hasDecEq.Build label_ctx eqlabel_ctxP.
 
-Definition label_ctx_fill := (fun es ctx => (vs_to_es (LC_val ctx) ++ [::AI_label (LC_arity ctx) (LC_cont ctx) es] ++ (LC_post ctx))).
+Definition label_ctx_fill := (fun es ctx =>
+  (vs_to_es (LC_val ctx) ++
+   [::match LC_catches ctx with
+      | None => AI_label (LC_arity ctx) (LC_cont ctx) es
+      | Some cs => AI_handler (LC_arity ctx) cs es
+      end] ++ LC_post ctx)).
+
+Definition is_label_ctx (lc: label_ctx) : bool :=
+  match LC_catches lc with None => true | Some _ => false end.
+
+Definition label_contexts (lcs: list label_ctx) := filter is_label_ctx lcs.
+
+Fixpoint split_label (lcs: list label_ctx) (j: nat) :
+    option (list label_ctx * label_ctx * list label_ctx) :=
+  match lcs with
+  | nil => None
+  | lc :: rest =>
+      let skip j :=
+        match split_label rest j with
+        | Some (before, target, after) => Some (lc :: before, target, after)
+        | None => None
+        end in
+      match LC_catches lc, j with
+      | None, O => Some (nil, lc, rest)
+      | None, S j' => skip j'
+      | Some _, _ => skip j
+      end
+  end.
+
+Lemma split_label_spec lcs j :
+  match split_label lcs j with
+  | Some (before, target, after) =>
+      lcs = before ++ target :: after /\
+      LC_catches target = None /\
+      length (label_contexts before) = j /\
+      List.nth_error (label_contexts lcs) j = Some target
+  | None => List.nth_error (label_contexts lcs) j = None
+  end.
+Proof.
+  move: j; induction lcs as [|lc rest IH]; move => j; first by destruct j.
+  simpl.
+  destruct (LC_catches lc) as [cs|] eqn:Hcs.
+  - specialize (IH j).
+    destruct (split_label rest j) as [[[before target] after]|] eqn:Hsplit;
+      simpl in IH; unfold label_contexts; simpl; rewrite /is_label_ctx Hcs /=.
+    + destruct IH as [-> [Htarget [Hlen Hnth]]].
+      repeat split => //.
+    + exact IH.
+  - destruct j as [|j].
+    + unfold label_contexts => /=; rewrite /is_label_ctx Hcs /=.
+      by repeat split.
+    + specialize (IH j).
+      destruct (split_label rest j) as [[[before target] after]|] eqn:Hsplit;
+        simpl in IH; unfold label_contexts; simpl; rewrite /is_label_ctx Hcs /=.
+      * destruct IH as [-> [Htarget [Hlen Hnth]]].
+        repeat split => //.
+        by rewrite -/(label_contexts before) Hlen.
+      * exact IH.
+Qed.
 
 #[refine, export]
 Instance label_ctx_eval: eval_ctx label_ctx :=
   {| ctx_fill := label_ctx_fill;
      ctx_frame_mask := fmask0; ctx_frame_cond := fcond0 |}.
 Proof.
-  move => [lvs lk lces les] hs s f es hs' s' f' es' _ Hred.
-  eapply r_label with (lh := LH_rec (rev lvs) lk lces (LH_base nil nil) les); eauto => //; by rewrite /label_ctx_fill /= cats0.
+  move => [lvs lk lces les cs] hs s f es hs' s' f' es' _ Hred.
+  destruct cs as [cs|].
+  - eapply r_label with (lh := LH_handler (rev lvs) lk cs (LH_base nil nil) les); eauto => //; by rewrite /label_ctx_fill /= cats0.
+  - eapply r_label with (lh := LH_rec (rev lvs) lk lces (LH_base nil nil) les); eauto => //; by rewrite /label_ctx_fill /= cats0.
 Defined.
 
 
@@ -185,12 +246,9 @@ Instance list_label_ctx_eval : eval_ctx (list label_ctx) :=
     |}.
 Proof.
   elim => //.
-  move => [lvs lk lces les] ctxs' IH hs s f es hs' s' f' es' _ Hred /=.
-  rewrite /fmask0 in Hred.
-  rewrite /label_ctx_fill /=.
+  move => lc ctxs' IH hs s f es hs' s' f' es' _ Hred /=.
   apply IH => //.
-  rewrite /fmask0.
-  eapply r_label with (lh := LH_rec (rev lvs) lk lces (LH_base nil nil) les); eauto => //; by rewrite /label_ctx_fill /= cats0.
+  by apply label_ctx_eval.(ctx_reduce).
 Defined.
 
 #[refine, export]
@@ -265,6 +323,7 @@ Definition valid_hole (e: administrative_instruction) : bool :=
     match e with
     | AI_label _ _ _ => false
     | AI_frame _ _ _ => false
+    | AI_handler _ _ _ => false
     | _ => true
     end.
 
@@ -303,6 +362,7 @@ Definition olist {T: Type} (ot: option T) : list T :=
 Fixpoint ai_measure (e: administrative_instruction) : nat :=
   match e with
   | AI_label _ _ es => 1 + List.list_sum (map ai_measure es)
+  | AI_handler _ _ es => 1 + List.list_sum (map ai_measure es)
   | AI_frame _ _ es => 1 + List.list_sum (map ai_measure es)
   | _ => 1
   end.
@@ -402,10 +462,16 @@ Function ctx_decompose_aux (ves_acc: (list administrative_instruction) * (list c
               match ccs with
               | nil => None
               | (fc, lcs) :: ccs' =>
-                  ctx_decompose_aux (es, (fc, (Build_label_ctx vs k ces es') :: lcs) :: ccs')
+                   ctx_decompose_aux (es, (fc, (Build_label_ctx vs k ces es' None) :: lcs) :: ccs')
               end
-          | AI_frame k f es =>
-              ctx_decompose_aux (es, (Build_frame_ctx vs k f es', nil) :: ccs)
+           | AI_frame k f es =>
+               ctx_decompose_aux (es, (Build_frame_ctx vs k f es', nil) :: ccs)
+           | AI_handler k cs es =>
+               match ccs with
+               | nil => None
+               | (fc, lcs) :: ccs' =>
+                   ctx_decompose_aux (es, (fc, Build_label_ctx vs k nil es' (Some cs) :: lcs) :: ccs')
+               end
           | _ => (* In this case, we know that e cannot be const due to how split_vals' works *)
               Some (ccs, (vs, es'), Some e)
           end
@@ -422,6 +488,11 @@ Proof.
     rewrite ais_measure_cat ais_measure_cons /ais_measure => /=.
     by lias.
   }
+  { move => [ves acc] ves' ccs' vs ? e es' k cs es ?? Hsplit cc ccs fc lcs ?? [? ?]; subst.
+    apply split_vals'_spec, split_vals_inv in Hsplit as ->.
+    rewrite ais_measure_cat ais_measure_cons /ais_measure => /=.
+    by lias.
+  }
 Defined.
 Set Warnings "+funind-cannot-define-graph".
 Set Warnings "+funind-cannot-build-inversion".
@@ -431,6 +502,7 @@ Definition ctx_decompose ves := ctx_decompose_aux (ves, nil).
 Definition e_is_label e :=
   match e with
   | AI_label _ _ _ => true
+  | AI_handler _ _ _ => true
   | _ => false
   end.
 
@@ -457,6 +529,11 @@ Proof.
     by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
   - eapply IH in Hdecomp as [Hcontra ?]; eauto; first by inversion Hcontra.
     by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
+  - destruct acc as [ | [fc lcs] ccs'] => //.
+    + split => //.
+      by repeat eexists.
+    + eapply IH in Hdecomp as [Hcontra ?]; eauto; first by inversion Hcontra.
+      by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
 Qed.
 
 Lemma ctx_decompose_acc_some: forall ves acc,
@@ -475,10 +552,16 @@ Definition ctx_update_nconst (acc: list closure_ctx) (sctx: seq_ctx) e :=
   | AI_label k ces es =>
       match acc with
       | nil => None 
-      | (fc, lcs) :: ccs' => ctx_decompose_aux (es, (fc, (Build_label_ctx vs k ces es0) :: lcs) :: ccs')
+      | (fc, lcs) :: ccs' => ctx_decompose_aux (es, (fc, (Build_label_ctx vs k ces es0 None) :: lcs) :: ccs')
       end
   | AI_frame k f es =>
       ctx_decompose_aux (es, (Build_frame_ctx vs k f es0, nil) :: acc)
+  | AI_handler k cs es =>
+      match acc with
+      | nil => None
+      | (fc, lcs) :: ccs' =>
+          ctx_decompose_aux (es, (fc, Build_label_ctx vs k nil es0 (Some cs) :: lcs) :: ccs')
+      end
   | _ => Some (acc, (vs, es0), Some e)
   end.
 
@@ -529,11 +612,15 @@ Proof.
     | n ces es
     | n f es
     | a
+    | n cs es
     ]; simpl in *; try by (injection Hdecomp as <- <- <-; unfold valid_ccs).
   - destruct acc as [ | [fc lcs] ccs'] => //.
     eapply IH in Hdecomp; eauto; apply split_vals_inv in Hsplit as ->.
     by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
   - eapply IH in Hdecomp; eauto; apply split_vals_inv in Hsplit as ->.
+    by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
+  - destruct acc as [ | [fc lcs] ccs'] => //.
+    eapply IH in Hdecomp; eauto; apply split_vals_inv in Hsplit as ->.
     by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
 Qed.
 
@@ -561,6 +648,7 @@ Proof.
     | n ces es
     | n f es
     | a
+    | n cs es
     ]; simpl in *; try by injection Hdecomp as <- <- <-.
   - injection Hdecomp as <- <- <- => /=.
     apply split_vals_nconst in Hsplit.
@@ -573,6 +661,9 @@ Proof.
     eapply IH in Hdecomp; eauto; apply split_vals_inv in Hsplit as ->.
     by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
   - eapply IH in Hdecomp; eauto; apply split_vals_inv in Hsplit as ->.
+    by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
+  - destruct acc as [ | [fc lcs] ccs'] => //.
+    eapply IH in Hdecomp; eauto; apply split_vals_inv in Hsplit as ->.
     by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
 Qed.
 
@@ -596,6 +687,8 @@ Proof.
   - destruct ccs as [ | [fc lcs] ccs0] => //.
     eapply ctx_decompose_valid_ccs_aux in Hupdate; eauto.
   - eapply ctx_decompose_valid_ccs_aux in Hupdate; eauto.
+  - destruct ccs as [ | [fc lcs] ccs0] => //.
+    eapply ctx_decompose_valid_ccs_aux in Hupdate; eauto.
 Qed.
   
 Lemma ctx_update_nconst_valid: forall sctx e ccs ccs' sctx' oe,
@@ -611,6 +704,8 @@ Proof.
     by apply ctx_decompose_valid_aux in Hupdate.
   (* Frame *)
   - by apply ctx_decompose_valid_aux in Hupdate.
+  - destruct ccs as [ | [fc lcs] ccs0] => //.
+    by apply ctx_decompose_valid_aux in Hupdate.
 Qed.
 
 Lemma ctx_update_nconst_none_impl: forall ccs sctx e,
@@ -710,6 +805,7 @@ Proof.
       | n ces es
       | n f es
       | a
+      | n cs es
       ]; simpl in *; try by injection Hdecomp as <- <- <- => /=; apply split_vals_inv in Hsplit as ->.
     (* Label *)
     + destruct acc as [ | [fc lcs] ccs']; first by inversion Hdecomp => /=.
@@ -717,6 +813,9 @@ Proof.
       by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
     (* Frame *)
     + eapply IH in Hdecomp; eauto; apply split_vals_inv in Hsplit as ->; first by rewrite Hdecomp.
+      by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
+    + destruct acc as [ | [fc lcs] ccs']; first by inversion Hdecomp => /=.
+      eapply IH in Hdecomp; eauto; apply split_vals_inv in Hsplit as ->; first by rewrite Hdecomp.
       by rewrite ais_measure_cat ais_measure_cons /ais_measure => /=; lias.
 Qed.
 
@@ -739,6 +838,8 @@ Proof.
   - destruct ccs as [ | [fc lcs] ccs0] => //.
     by apply ctx_decompose_fill_aux in Hupdate.
   - by apply ctx_decompose_fill_aux in Hupdate.
+  - destruct ccs as [ | [fc lcs] ccs0] => //.
+    by apply ctx_decompose_fill_aux in Hupdate.
 Qed.
   
 Lemma ctx_update_fill: forall sctx ccs ccs' sctx' oe oe',
@@ -784,7 +885,9 @@ Qed.
 Fixpoint lh_to_ctx_aux {k} (lh: lholed k) (acc: list label_ctx): seq_ctx * (list label_ctx) :=
   match lh with
   | LH_base vs es => ((rev vs, es), acc)
-  | @LH_rec _ vs k ces lh' es => lh_to_ctx_aux lh' ((Build_label_ctx (rev vs) k ces es) :: acc)
+  | @LH_rec _ vs k ces lh' es => lh_to_ctx_aux lh' ((Build_label_ctx (rev vs) k ces es None) :: acc)
+  | @LH_handler _ vs k cs lh' es =>
+      lh_to_ctx_aux lh' (Build_label_ctx (rev vs) k nil es (Some cs) :: acc)
   end.
 
 Definition lh_to_ctx {k} (lh: lholed k) :=
@@ -793,23 +896,25 @@ Definition lh_to_ctx {k} (lh: lholed k) :=
 (* It's better to express the result as a sigma type for better computation. *)
 Fixpoint ctx_to_lh_aux {k} (lcs: list label_ctx) (acc: lholed k): {j & lholed j}.
 Proof.
-  destruct lcs as [ | [lvs lk lces les]].
+  destruct lcs as [ | [lvs lk lces les cs]].
   - exists k; by exact acc.
-  - exact (ctx_to_lh_aux (S k) lcs (LH_rec (rev lvs) lk lces acc les)).
+  - destruct cs as [cs|].
+    + exact (ctx_to_lh_aux k lcs (LH_handler (rev lvs) lk cs acc les)).
+    + exact (ctx_to_lh_aux (S k) lcs (LH_rec (rev lvs) lk lces acc les)).
 Defined.
 
 Definition ctx_to_lh (sc: seq_ctx) (lcs: list label_ctx) : {j & lholed j} :=
   ctx_to_lh_aux lcs (LH_base (rev sc.1) sc.2).
 
 Lemma ctx_to_lh_aux_len: forall lcs k (acc: lholed k),
-    projT1 (ctx_to_lh_aux lcs acc) = k + length lcs.
+    projT1 (ctx_to_lh_aux lcs acc) = k + length (label_contexts lcs).
 Proof.
-  induction lcs as [ | [lvs lk lces les]]; move => k acc => //=; first by rewrite addn0.
-  by rewrite IHlcs; lias.
+  induction lcs as [ | [lvs lk lces les cs]]; move => k acc => //=; first by rewrite addn0.
+  destruct cs; simpl; rewrite IHlcs /label_contexts /= /is_label_ctx /=; by lias.
 Qed.
 
 Lemma ctx_to_lh_len: forall sc lcs,
-    projT1 (ctx_to_lh sc lcs) = length lcs.
+    projT1 (ctx_to_lh sc lcs) = length (label_contexts lcs).
 Proof.
   move => sc lcs.
   by apply ctx_to_lh_aux_len.
@@ -819,9 +924,8 @@ Lemma lh_ctx_fill_aux: forall lcs k (acc: lholed k) es lf,
     lcs ⦃ (lfill acc es) ⦄ = lf ->
     lfill (projT2 (ctx_to_lh_aux lcs acc)) es = lf.
 Proof.
-  induction lcs as [ | [lvs lk lces les]]; move => k acc es lf Hctxfill => /=; first done.
-  apply IHlcs; simpl in *.
-  by apply Hctxfill.
+  induction lcs as [ | [lvs lk lces les cs]]; move => k acc es lf Hctxfill => /=; first done.
+  destruct cs; apply IHlcs; simpl in *; by apply Hctxfill.
 Qed.
 
 Lemma lh_ctx_fill: forall lcs es lf,
@@ -851,16 +955,30 @@ Proof.
 Qed.
 
 Lemma lc_typing: forall (lc: label_ctx) es s C0 tf,
+    is_label_ctx lc ->
     e_typing s C0 (lc ⦃ es ⦄) tf ->
     exists ts1 ts2,
       e_typing s C0 (lc.(LC_cont)) (Tf ts1 ts2) /\
       length ts1 = lc.(LC_arity) /\
       e_typing s (upd_label C0 ([::ts1] ++ C0.(tc_labels))) es (Tf nil ts2).
 Proof.
-  move => lc es s C [ts1 ts2] /= Htype.
+  move => [lvs lk lces les cs] es s C [ts1 ts2] Hlabel /= Htype.
+  destruct cs; first discriminate Hlabel.
   unfold label_ctx_fill in Htype.
   invert_e_typing.
   by do 2 eexists; split; eauto.
+Qed.
+
+Lemma hc_typing: forall (lc: label_ctx) cs es s C0 tf,
+    LC_catches lc = Some cs ->
+    e_typing s C0 (lc ⦃ es ⦄) tf ->
+    exists ts, all (catch_clause_typing C0) cs /\
+      e_typing s C0 es (Tf nil ts).
+Proof.
+  move => [lvs lk lces les catches] cs es s C [ts1 ts2] /= Hcs Htype.
+  unfold label_ctx_fill in Htype; simpl in Htype; rewrite Hcs in Htype.
+  invert_e_typing.
+  by eexists; split; eauto.
 Qed.
 
 Definition lab_lc_agree (lab: list value_type) (lc: label_ctx) : bool :=
@@ -870,27 +988,34 @@ Lemma lcs_typing_exists: forall (lcs: list label_ctx) es s C0 tf,
     e_typing s C0 (lcs ⦃ es ⦄) tf ->
     exists labs ts1 ts2,
       e_typing s (upd_label C0 (labs ++ C0.(tc_labels))) es (Tf ts1 ts2) /\
-      all2 lab_lc_agree labs lcs /\
+      all2 lab_lc_agree labs (label_contexts lcs) /\
       (lcs <> nil -> ts1 = nil).
 Proof.
   induction lcs as [|lc' lcs']; move => es s C0 [ts1 ts2] Htype.
   - exists nil, ts1, ts2.
     by destruct C0.
   - apply IHlcs' in Htype as [labs [ts1' [ts2' [Htype [Hagree Hconsume]]]]].
-    apply lc_typing in Htype as [? [? [Hctype [Hartiy Htype]]]].
-    simpl in *.
-    rewrite upd_label_overwrite in Htype.
-    rewrite -cat1s catA in Htype.
-    do 3 eexists; repeat split; eauto => /=.
-    apply/andP; split => //.
-    by apply/eqP.
+    destruct (LC_catches lc') as [cs|] eqn:Hcs.
+    + eapply hc_typing in Htype as [ts [Hcs_type Htype]]; eauto.
+      exists labs, nil, ts; repeat split => //.
+      unfold label_contexts => /=; rewrite /is_label_ctx Hcs /=.
+      exact Hagree.
+    + apply lc_typing in Htype as [? [? [Hctype [Harity Htype]]]].
+      2: { by rewrite /is_label_ctx Hcs. }
+      simpl in *.
+      rewrite upd_label_overwrite in Htype.
+      rewrite -cat1s catA in Htype.
+      do 3 eexists; repeat split; eauto => /=.
+      rewrite /label_contexts /= /is_label_ctx Hcs /=.
+      apply/andP; split => //.
+      by apply/eqP.
 Qed.
 
 Lemma lcs_typing_exists_nil: forall (lcs: list label_ctx) es s C0 ts,
     e_typing s C0 (lcs ⦃ es ⦄) (Tf nil ts) ->
     exists labs ts2,
       e_typing s (upd_label C0 (labs ++ C0.(tc_labels))) es (Tf nil ts2) /\
-      all2 lab_lc_agree labs lcs.
+      all2 lab_lc_agree labs (label_contexts lcs).
 Proof.
   move => lcs es s C0 ts Hetype.
   destruct lcs.
@@ -908,7 +1033,7 @@ Lemma cc_typing_exists: forall (cc: closure_ctx) es s C0 tf,
     exists C ret labs ts2,
       frame_typing s (cc.1).(FC_frame) C /\
         (cc.1).(FC_arity) = (length ret) /\
-        (all2 lab_lc_agree labs cc.2) /\
+        (all2 lab_lc_agree labs (label_contexts cc.2)) /\
         e_typing s (upd_label (upd_return C (Some ret)) labs) es (Tf nil ts2).
 Proof.
   move => [fc lcs] es s C0 tf Htype.
@@ -926,7 +1051,7 @@ Lemma ccs_typing_exists: forall cc ccs es s C0 tf,
     exists C ret labs ts2,
       frame_typing s (cc.1).(FC_frame) C /\
         (cc.1).(FC_arity) = length ret /\
-        (all2 lab_lc_agree labs cc.2) /\
+        (all2 lab_lc_agree labs (label_contexts cc.2)) /\
         e_typing s (upd_label (upd_return C (Some ret)) labs) es (Tf nil ts2).
 Proof.
   move => cc ccs.
@@ -1076,7 +1201,7 @@ Lemma ctx_cfg_inv: forall s cc ccs sc oe ts,
     exists C (ret: option result_type) labs ts2,
       store_typing s /\
       frame_typing s cc.1.(FC_frame) C /\
-      all2 lab_lc_agree labs cc.2 /\ 
+      all2 lab_lc_agree labs (label_contexts cc.2) /\
       (ccs != nil -> (option_map (@length _) ret = Some cc.1.(FC_arity))) /\
       (ccs = nil -> ret = None) /\
       e_typing s (upd_label (upd_return C ret) labs) (sc ⦃ olist oe ⦄) (Tf nil ts2).

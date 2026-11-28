@@ -134,7 +134,13 @@ Definition be_principal_typing (C: t_context) (be: basic_instruction) (tf: instr
       exists tn tm,
       tf = (Tf tn tm) /\
         expand_t C tb = Some (Tf tn tm) /\
-        be_typing (upd_label C ([::tm] ++ (tc_labels C))) es (Tf tn tm)
+         be_typing (upd_label C ([::tm] ++ (tc_labels C))) es (Tf tn tm)
+  | BI_try_table tb cs es =>
+      exists tn tm,
+      tf = (Tf tn tm) /\
+        expand_t C tb = Some (Tf tn tm) /\
+        all (catch_clause_typing C) cs /\
+        be_typing (upd_label C (tm :: tc_labels C)) es (Tf tn tm)
   | BI_loop tb es =>
       exists tn tm,
       tf = (Tf tn tm) /\
@@ -537,6 +543,12 @@ Definition e_principal_typing (s: store_record) (C: t_context) (e: administrativ
       True (* Equivalently, add trivial equalities *)
   | AI_raise a =>
       exists ex, lookup_N s.(s_exns) a = Some ex
+  | AI_handler n cs es =>
+      exists ts,
+        tf = Tf nil ts /\
+        all (catch_clause_typing C) cs /\
+        e_typing s C es (Tf nil ts) /\
+        length ts = n
   | AI_ref_extern a =>
       tf = (Tf nil [::T_ref T_externref])
   | AI_ref a =>
@@ -1094,6 +1106,10 @@ Proof.
     + subst tss'. uapply Hconjl1; repeat f_equal; by lias.
     + done.
     + by resolve_subtyping.
+  - move => k0 vs m cs lh' IH es' tss LI /= <- ts2 ts HType HTSSLength.
+    rewrite -(cat1s _ es') in HType.
+    invert_e_typing.
+    by eapply IH; eauto.
 Qed.
   
 Lemma Lfilled_return_typing {k}: forall (lh: lholed k) vs LI ts s C0 C t2s,
@@ -1120,6 +1136,7 @@ Proof.
     repeat rewrite length_is_size in HLength.
     eapply values_subtyping_cat_suffix; eauto.
     by lias.
+  - by eapply IHlh; eauto.
   - by eapply IHlh; eauto.
 Qed.
 

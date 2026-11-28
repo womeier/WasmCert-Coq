@@ -183,6 +183,22 @@ Inductive reduce_simple : seq administrative_instruction -> seq administrative_i
       reduce_simple [::AI_label n cont [::AI_raise a]] [::AI_raise a]
   | rs_frame_raise : forall n f a,
       reduce_simple [::AI_frame n f [::AI_raise a]] [::AI_raise a]
+  | rs_handler_const : forall n cs vs,
+      reduce_simple [::AI_handler n cs (v_to_e_list vs)] (v_to_e_list vs)
+  | rs_handler_trap : forall n cs,
+      reduce_simple [::AI_handler n cs [::AI_trap]] [::AI_trap]
+  | rs_handler_br : forall n cs vs l es,
+      reduce_simple
+        [::AI_handler n cs (v_to_e_list vs ++ [::AI_basic (BI_br l)] ++ es)]
+        (v_to_e_list vs ++ [::AI_basic (BI_br l)])
+  | rs_handler_return : forall n cs vs es,
+      reduce_simple
+        [::AI_handler n cs (v_to_e_list vs ++ [::AI_basic BI_return] ++ es)]
+        (v_to_e_list vs ++ [::AI_basic BI_return])
+  | rs_handler_return_invoke : forall n cs vs a es,
+      reduce_simple
+        [::AI_handler n cs (v_to_e_list vs ++ [::AI_return_invoke a] ++ es)]
+        (v_to_e_list vs ++ [::AI_return_invoke a])
 .
 
 Inductive reduce : host_state -> store_record -> frame -> list administrative_instruction ->
@@ -712,6 +728,32 @@ Inductive reduce : host_state -> store_record -> frame -> list administrative_in
       let e := {| exninst_tag := tag; exninst_fields := vs |} in
       reduce hs s f (v_to_e_list vs ++ [::AI_basic (BI_throw x)])
         hs (fst (alloc_exn s e)) f [::AI_raise (snd (alloc_exn s e))]
+  | r_try_table : forall hs s f bt cs es tn tm vs,
+      expand f.(f_inst) bt = Some (Tf tn tm) ->
+      length vs = length tn ->
+      reduce hs s f (v_to_e_list vs ++ [::AI_basic (BI_try_table bt cs es)])
+        hs s f [::AI_handler (length tm) cs
+          [::AI_label (length tm) nil (v_to_e_list vs ++ to_e_list es)]]
+  | r_handler : forall hs s f es hs' s' f' es' n cs,
+      reduce hs s f es hs' s' f' es' ->
+      reduce hs s f [::AI_handler n cs es] hs' s' f' [::AI_handler n cs es']
+  | r_handler_empty : forall hs s f n a,
+      reduce hs s f [::AI_handler n nil [::AI_raise a]] hs s f [::AI_raise a]
+  | r_handler_tag : forall hs s f n x l cs a ex tag,
+      lookup_N s.(s_exns) a = Some ex ->
+      lookup_N f.(f_inst).(inst_tags) x = Some tag ->
+      ex.(exninst_tag) = tag ->
+      reduce hs s f [::AI_handler n (Catch_tag x l :: cs) [::AI_raise a]]
+        hs s f (v_to_e_list ex.(exninst_fields) ++ [::AI_basic (BI_br l)])
+  | r_handler_next : forall hs s f n x l cs a ex tag,
+      lookup_N s.(s_exns) a = Some ex ->
+      lookup_N f.(f_inst).(inst_tags) x = Some tag ->
+      ex.(exninst_tag) <> tag ->
+      reduce hs s f [::AI_handler n (Catch_tag x l :: cs) [::AI_raise a]]
+        hs s f [::AI_handler n cs [::AI_raise a]]
+  | r_handler_all : forall hs s f n l cs a,
+      reduce hs s f [::AI_handler n (Catch_all l :: cs) [::AI_raise a]]
+        hs s f [::AI_basic (BI_br l)]
   .
 
 Definition reduce_tuple hs_s_f_es hs'_s'_f'_es' : Prop :=

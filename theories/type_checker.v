@@ -225,6 +225,15 @@ Fixpoint check_single (C : t_context) (ct : option checker_type) (be : basic_ins
               if b_e_type_checker (upd_label C ([::tm] ++ tc_labels C)) es (Tf tn tm)
               then type_update ts (tn) tm
               else None
+           | None => None
+           end
+      | BI_try_table bt cs es =>
+          match expand_t C bt with
+          | Some (Tf tn tm) =>
+              if all (catch_clause_typing C) cs &&
+                 b_e_type_checker (upd_label C (tm :: tc_labels C)) es (Tf tn tm)
+              then type_update ts tn tm
+              else None
           | None => None
           end
       | BI_loop bt es =>

@@ -314,17 +314,25 @@ Definition parse_table_instruction {n}: byte_parser basic_instruction n :=
   parse_table_fill.
 
 Definition parse_alignment_exponent {n} : byte_parser N n :=
-  guardM (fun a => if N.ltb a 32 then Some a else None) parse_u32_as_N.
+  guardM (fun a => if N.ltb a 64 then Some a else None) parse_u32_as_N.
 
 Definition parse_static_offset {n} : byte_parser N n :=
   parse_u32_as_N.
 
 Definition parse_memarg {n} : byte_parser memarg n :=
-  (fun ao =>
-     match ao with
-     | (a, o) => {| memarg_offset := o; memarg_align := a |}
-     end) <$>
-    (parse_alignment_exponent <&> parse_static_offset).
+  (** Final Bmemarg flags: bit 6 introduces the explicit memory index;
+      bits 0..5 are the alignment exponent. Alignment validity belongs to
+      validation, not decoding. This runtime still only represents memory 0
+      and u32 offsets; nonzero indices/u64 offsets remain unsupported. *)
+  parse_u32_as_N >>= fun flags =>
+    if N.ltb flags 64 then
+      (fun o => {| memarg_offset := o; memarg_align := flags |})
+        <$> parse_static_offset
+    else if N.ltb flags 128 then
+      assert_u32 0 &>
+        ((fun o => {| memarg_offset := o; memarg_align := N.sub flags 64 |})
+           <$> parse_static_offset)
+    else fail.
 
 Definition parse_i32_load {n} : byte_parser basic_instruction n :=
   exact_byte x28 &> ((BI_load T_i32 None) <$> parse_memarg).
@@ -823,6 +831,10 @@ Definition parse_numeric_instruction {n} : be_parser n :=
   (* SIMD instructions, all starting with 0xfd *)
   exact_byte xfd &> parse_simd_instruction.
 
+Definition parse_catch_clause {n} : byte_parser catch_clause n :=
+  (exact_byte x00 &> ((Catch_tag <$> parse_u32_as_N) <*> parse_u32_as_N)) <|>
+  (exact_byte x02 &> (Catch_all <$> parse_u32_as_N)).
+
 Record Language (n : nat) : Type := MkLanguage {
   _be : byte_parser basic_instruction n;
   _bes_end_with_x0b : byte_parser (list basic_instruction) n;
@@ -844,6 +856,10 @@ Definition language : [ Language ] := Fix Language (fun k rec =>
     exact_byte x02 &> ((BI_block <$> parse_block_type) <*> bes_end_with_x0b_aux) in
   let parse_loop :=
     exact_byte x03 &> ((BI_loop <$> parse_block_type) <*> bes_end_with_x0b_aux) in
+  let parse_try_table :=
+    exact_byte x1f &>
+      (((BI_try_table <$> parse_block_type) <*> parse_vec parse_catch_clause)
+         <*> bes_end_with_x0b_aux) in
   let parse_if_body :=
     (((fun x y => (x, y)) <$> parse_block_type) <*> bes_end_with_x0b_or_x05_ctd_aux) in
   let parse_if :=
@@ -859,6 +875,7 @@ Definition language : [ Language ] := Fix Language (fun k rec =>
     parse_br_table <|>
     parse_return <|>
     parse_throw <|>
+    parse_try_table <|>
     parse_call <|>
     parse_call_indirect <|>
     parse_return_call <|>
@@ -1217,6 +1234,7 @@ Fixpoint be_datacount_required (be: basic_instruction) :=
   | BI_memory_init _
   | BI_data_drop _ => true
   | BI_block _ bes => bes_datacount_required bes
+  | BI_try_table _ _ bes => bes_datacount_required bes
   | BI_loop _ bes => bes_datacount_required bes
   | BI_if _ bes1 bes2 =>
       if bes_datacount_required bes1 then true

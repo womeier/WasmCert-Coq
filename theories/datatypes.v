@@ -483,6 +483,12 @@ Record memarg : Set :=
     memarg_align: u32
   }.
   
+(** The non-reference catch clauses of final exception handling. Reference
+    clauses will use the shared reference representation, not a local value. *)
+Inductive catch_clause : Type :=
+| Catch_tag : tagidx -> labelidx -> catch_clause
+| Catch_all : labelidx -> catch_clause.
+
 Inductive basic_instruction : Type := (* be *)
 (** std-doc:
 Numeric instructions provide basic operations over numeric values of specific type. These operations closely match respective operations available in hardware.
@@ -580,6 +586,7 @@ Instructions in this group affect the flow of control.
   | BI_return_call : funcidx -> basic_instruction                                          
   | BI_return_call_indirect : tableidx -> typeidx -> basic_instruction                                          
   | BI_throw : tagidx -> basic_instruction
+  | BI_try_table : block_type -> list catch_clause -> list basic_instruction -> basic_instruction
   .
 
 
@@ -1065,6 +1072,7 @@ Inductive administrative_instruction : Type := (* e *)
 (** Administrative abbreviation for [ref.exn a; throw_ref]. It is not a
     reference value and does not add a competing shared reference type. *)
 | AI_raise : exnaddr -> administrative_instruction
+| AI_handler : nat -> list catch_clause -> list administrative_instruction -> administrative_instruction
 .
 
 (** std-doc:
@@ -1080,6 +1088,7 @@ This definition allows to index active labels surrounding a branch or return ins
 Inductive lholed : nat -> Type :=
 | LH_base : list value -> list administrative_instruction -> lholed 0
 | LH_rec {k: nat}: list value -> nat -> list administrative_instruction -> lholed k -> list administrative_instruction -> lholed (S k)
+| LH_handler {k: nat}: list value -> nat -> list catch_clause -> lholed k -> list administrative_instruction -> lholed k
 .
 
 (** std-doc:

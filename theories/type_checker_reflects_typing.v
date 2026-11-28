@@ -15,6 +15,37 @@ Section Host.
 
 Context {hfc: host_function_class}.
 
+Lemma catch_clause_context_reverse C c :
+  catch_clause_typing (context_reverse C) c = catch_clause_typing C c.
+Proof.
+  destruct c as [x l|l]; unfold catch_clause_typing.
+  - change (match lookup_N (map rev (tc_tags C)) x,
+                  lookup_N (map rev (tc_labels C)) l with
+            | Some ps, Some ts => values_subtyping ps ts
+            | _, _ => false end =
+            match lookup_N (tc_tags C) x, lookup_N (tc_labels C) l with
+            | Some ps, Some ts => values_subtyping ps ts
+            | _, _ => false end).
+    rewrite !lookup_N_map.
+    case Htags: (lookup_N (tc_tags C) x) => [ps|];
+      case Hlabels: (lookup_N (tc_labels C) l) => [ts|] //=.
+    apply/idP/idP => Hsub.
+    + apply values_subtyping_rev in Hsub; by rewrite !revK in Hsub.
+    + by apply values_subtyping_rev.
+  - change (match lookup_N (map rev (tc_labels C)) l with
+            | Some ts => values_subtyping nil ts
+            | None => false end =
+            match lookup_N (tc_labels C) l with
+            | Some ts => values_subtyping nil ts
+            | None => false end).
+    rewrite lookup_N_map.
+    case Hlabels: (lookup_N (tc_labels C) l) => [ts|] //=.
+    change (values_subtyping nil (rev ts) = values_subtyping nil ts).
+    apply/idP/idP => Hsub.
+    + apply values_subtyping_rev in Hsub; by rewrite !revK in Hsub.
+    + exact (values_subtyping_rev Hsub).
+Qed.
+
 Definition ct_subtyping (ct1 ct2: checker_type) :=
   c_types_agree ct1 ct2.(CT_type) &&
     ((ct1.(CT_unr) == true) || (ct2.(CT_unr) == false)).
@@ -268,6 +299,7 @@ Ltac fold_remember_check :=
 Fixpoint be_size_single (be: basic_instruction): nat :=
   match be with
   | BI_block _ l => 1 + (List.fold_left addn (map be_size_single l)) 1 + size l
+  | BI_try_table _ _ l => 1 + (List.fold_left addn (map be_size_single l)) 1 + size l
   | BI_loop _ l => 1 + (List.fold_left addn (map be_size_single l)) 1 + size l
   | BI_if _ l1 l2 => 1 + ((List.fold_left addn (map be_size_single l1) 1) + size l1) + ((List.fold_left addn (map be_size_single l2) 1) + size l2)
   | _ => 1
@@ -1519,6 +1551,27 @@ Proof.
       exists tn; split => //.
       eapply bet_subtyping; first by eapply bet_throw with (ps := ps); eauto.
       by apply Hsub.
+    (* try_table *)
+    + destruct i.
+      rewrite upd_label_context_reverse in Hupdate.
+      simpl in Hupdate.
+      rewrite mapK in Hupdate; last by apply revK.
+      apply expand_t_context_reverse in Hoption; simpl in Hoption.
+      rewrite context_reverseK in Hoption.
+      fold_remember_check.
+      assert (be_size_list l0 < d)%coq_nat as Hmeasure; first by unfold be_size_list; lias.
+      apply H in Hmeasure; destruct Hmeasure as [IH _]; clear H.
+      simplify_tc_goal.
+      eapply IH in Hoption0 => //; last by apply H0.
+      destruct Hoption0 as [tn [Hct Hbet]].
+      unfold c_types_agree in Hct; simplify_tc_goal.
+      apply values_subtyping_rev in Hct.
+      eapply bet_subtyping with (t1s' := rev r) (t2s' := rev r0) in Hbet; last by resolve_subtyping.
+      rewrite (eq_all (catch_clause_context_reverse C)) in H.
+      eapply bet_try_table in Hbet; eauto.
+      specialize (type_update_agree_subtyping Hupdate Hagree) as [tx [Hagree0 Hsub]].
+      eapply bet_subtyping in Hbet; last by apply Hsub.
+      by exists tx.
 Qed.
       
 Lemma tc_to_bet_list: forall C cts bes tm cts',
@@ -1575,6 +1628,10 @@ Proof.
         by unfold c_types_agree; simplify_tc_goal.
       }
     (* Call *)
+    +
+      rewrite (eq_all (catch_clause_context_reverse C)).
+      simplify_tc_goal.
+      by unfold c_types_agree; simplify_tc_goal.
     + destruct tf as [t1 t2] => /=.
       by unfold c_types_agree, type_update; simplify_tc_goal.
     (* Composition *)

@@ -10,10 +10,22 @@
  (action (run bash %{dep:run_wast_runner.sh} %{dep:../run_wast.sh})))
 
 (rule
- (alias runtest)
- (deps exception_tags.py)
+  (alias runtest)
+  (deps exception_tags.py)
  (action
-  (run python3 %{dep:exception_tags.py} %{exe:../src/wasm_coq_interpreter.exe})))
+   (run python3 %{dep:exception_tags.py} %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+  (alias runtest)
+  (deps exception_handlers.py)
+  (action
+   (run python3 %{dep:exception_handlers.py} %{exe:../src/wasm_coq_interpreter.exe})))
+
+(rule
+  (alias runtest)
+  (deps memarg_stages.py)
+  (action
+   (run python3 %{dep:memarg_stages.py} %{exe:../src/wasm_coq_interpreter.exe})))
 
 (rule
  (alias runtest)

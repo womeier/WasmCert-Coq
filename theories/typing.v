@@ -191,6 +191,20 @@ types in a point-wise manner.
 
 https://www.w3.org/TR/wasm-core-2/valid/instructions.html
  **)
+Definition catch_clause_typing (C: t_context) (c: catch_clause) : bool :=
+  match c with
+  | Catch_tag x l =>
+      match lookup_N C.(tc_tags) x, lookup_N C.(tc_labels) l with
+      | Some ps, Some ts => values_subtyping ps ts
+      | _, _ => false
+      end
+  | Catch_all l =>
+      match lookup_N C.(tc_labels) l with
+      | Some ts => values_subtyping nil ts
+      | None => false
+      end
+  end.
+
 Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :=
 | bet_const_num : forall C v, be_typing C [::BI_const_num v] (Tf [::] [::T_num (typeof_num v)])
 | bet_const_vec : forall C v, be_typing C [::BI_const_vec v] (Tf [::] [::T_vec (typeof_vec v)])
@@ -263,6 +277,11 @@ Inductive be_typing : t_context -> seq basic_instruction -> instr_type -> Prop :
 | bet_throw : forall C x ps t1s t2s,
   lookup_N C.(tc_tags) x = Some ps ->
   be_typing C [::BI_throw x] (Tf (t1s ++ ps) t2s)
+| bet_try_table : forall C bt cs es tn tm,
+  expand_t C bt = Some (Tf tn tm) ->
+  all (catch_clause_typing C) cs ->
+  be_typing (upd_label C (tm :: C.(tc_labels))) es (Tf tn tm) ->
+  be_typing C [::BI_try_table bt cs es] (Tf tn tm)
 | bet_call : forall C i tf,
   lookup_N (tc_funcs C) i = Some tf ->
   be_typing C [::BI_call i] tf
@@ -540,6 +559,11 @@ Inductive e_typing : store_record -> t_context -> seq administrative_instruction
 | ety_raise : forall s C a e tf,
   lookup_N s.(s_exns) a = Some e ->
   e_typing s C [::AI_raise a] tf
+| ety_handler : forall s C n cs es ts,
+  all (catch_clause_typing C) cs ->
+  e_typing s C es (Tf nil ts) ->
+  length ts = n ->
+  e_typing s C [::AI_handler n cs es] (Tf nil ts)
 | ety_ref_extern : forall s C a,
   e_typing s C [::AI_ref_extern a] (Tf [::] [::T_ref T_externref])
 | ety_ref : forall s C a tf,

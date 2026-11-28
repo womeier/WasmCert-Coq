@@ -650,7 +650,7 @@ Proof.
   dependent induction Hred; subst; (try by repeat destruct vcs => //; destruct v as [v | v | v]; destruct v => //).
   (* simple *)
   { inversion H; subst; clear H; try by destruct v as [v | v | v]; destruct v => //.
-    all: try (by destruct lh as [vs ? | ? vs]; simpl in H1; destruct v as [v | v | v]; destruct v; do 2 destruct vs => //).
+    all: try (by destruct lh as [vs ? | ? vs | ? vs]; simpl in H1; destruct v as [v | v | v]; destruct v; do 2 destruct vs => //).
     destruct vs as [|v0 vs]; simpl in H0.
     - by destruct v as [v | v | v]; destruct v.
     - destruct vs, es; discriminate H0.
@@ -664,7 +664,7 @@ Proof.
     by destruct vs => //.
   }
   (* label *)
-  { destruct lh as [vs ? | ? vs] => //=; simpl in H; last by destruct v as [v | v | v]; destruct v => //; do 2 destruct vs => //=.
+  { destruct lh as [vs ? | ? vs | ? vs] => //=; simpl in H; try by destruct v as [v | v | v]; destruct v => //; do 2 destruct vs => //=.
     destruct vs => //=; last first.
     { destruct vs, es, l => //=.
       by apply reduce_not_nil in Hred.
@@ -672,6 +672,9 @@ Proof.
     destruct es => //=; first by apply reduce_not_nil in Hred.
     by destruct es, l => //=.
   }
+  destruct vs as [|v0 vs]; simpl in x.
+  - by destruct v as [v | v | v]; destruct v.
+  - destruct vs; discriminate x.
   destruct vs as [|v0 vs]; simpl in x.
   - by destruct v as [v | v | v]; destruct v.
   - destruct vs; discriminate x.
@@ -697,10 +700,10 @@ Proof.
   move => Hred.
   dependent induction Hred; subst; (try by repeat destruct vcs => //); (try by repeat destruct vs => //).
   { inversion H; subst; clear H; try by repeat destruct vs => //.
-    destruct lh as [vs ? | ? vs]; simpl in H1; by do 2 destruct vs => //=.
+    destruct lh as [vs ? | ? vs | ? vs]; simpl in H1; by do 2 destruct vs => //=.
   }
   { by exists addr. }
-  { destruct lh as [vs ? | ? vs] => //=; simpl in H; last by do 2 destruct vs => //.
+  { destruct lh as [vs ? | ? vs | ? vs] => //=; simpl in H; try by do 2 destruct vs => //.
     destruct vs as [ | v ?]; last by destruct v as [v | v | v]; destruct v => //=.
     destruct es => //=; first by apply reduce_not_nil in Hred.
     destruct es, l => //=.
@@ -739,10 +742,10 @@ Proof.
   move => Hred.
   dependent induction Hred; subst; (try by repeat destruct vcs => //); (try by repeat destruct vs => //).
   { inversion H; subst; clear H; try by repeat destruct vs => //.
-    destruct lh as [vs ? | ? vs]; simpl in H1; by do 2 destruct vs => //=.
+    destruct lh as [vs ? | ? vs | ? vs]; simpl in H1; by do 2 destruct vs => //=.
   }
   { by exists v. }
-  { destruct lh as [vs ? | ? vs] => //=; simpl in H; last by do 2 destruct vs => //.
+  { destruct lh as [vs ? | ? vs | ? vs] => //=; simpl in H; try by do 2 destruct vs => //.
     destruct vs as [ | v ?]; last by destruct v as [v | v | v]; destruct v => //=.
     destruct es => //=; first by apply reduce_not_nil in Hred.
     destruct es, l => //=.

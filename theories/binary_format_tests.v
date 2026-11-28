@@ -22,8 +22,30 @@ Lemma alignment_exponent_31_parses :
   check_toks (x1f :: nil) (fun n => parse_alignment_exponent (n := n)) = Running.Singleton 31%N.
 Proof. vm_compute; reflexivity. Qed.
 
-Lemma alignment_exponent_32_rejected :
-  check_toks (x20 :: nil) (fun n => parse_alignment_exponent (n := n)) = False.
+Lemma alignment_exponent_32_parses :
+  check_toks (x20 :: nil) (fun n => parse_alignment_exponent (n := n)) = Running.Singleton 32%N.
+Proof. vm_compute; reflexivity. Qed.
+
+Lemma alignment_exponent_63_parses :
+  check_toks (x3f :: nil) (fun n => parse_alignment_exponent (n := n)) = Running.Singleton 63%N.
+Proof. vm_compute; reflexivity. Qed.
+
+Lemma memarg_explicit_memory_zero :
+  check_toks (x40 :: x00 :: x1a :: nil) (fun n => parse_memarg (n := n)) =
+  Running.Singleton {| memarg_align := 0%N; memarg_offset := 26%N |}.
+Proof. vm_compute; reflexivity. Qed.
+
+Lemma memarg_flags_128_rejected :
+  check_toks (x80 :: x01 :: x00 :: nil) (fun n => parse_memarg (n := n)) = False.
+Proof. vm_compute; reflexivity. Qed.
+
+Definition try_table_test :=
+  BI_try_table (BT_valtype None)
+    (Catch_tag 0%N 1%N :: Catch_all 0%N :: nil) (BI_throw 0%N :: nil).
+
+Lemma try_table_binary_roundtrip :
+  run_parse_expr (binary_of_expr (try_table_test :: nil)) =
+    Some (try_table_test :: nil).
 Proof. vm_compute; reflexivity. Qed.
 
 (** An example program. **)

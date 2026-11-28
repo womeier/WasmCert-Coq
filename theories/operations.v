@@ -1379,6 +1379,8 @@ Fixpoint lfill {k} (lh : lholed k) (es : seq administrative_instruction) : seq a
   match lh with
   | LH_base vs es' => v_to_e_list vs ++ es ++ es'
   | LH_rec _ vs n es' lh' es'' => v_to_e_list vs ++ [:: AI_label n es' (lfill lh' es)] ++ es''
+  | LH_handler _ vs n cs lh' es' =>
+      v_to_e_list vs ++ [:: AI_handler n cs (lfill lh' es)] ++ es'
   end.
 
 (* interpreter related *)
